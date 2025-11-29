@@ -1,5 +1,5 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
-import { IOrderItem } from "../types";
+import { IOrderItem } from "../types/index";
 import { v4 as uuidv4 } from "uuid";
 
 export interface IOrder extends Document {

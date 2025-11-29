@@ -1,6 +1,6 @@
 // adminController.ts
 import { Request, Response } from "express";
-import { IDoctor } from "../types";
+import { IDoctor } from "../types/index";
 import { Doctor } from "../models/doctor";
 import asyncHandler from "../middleware/asyncHandler";
 

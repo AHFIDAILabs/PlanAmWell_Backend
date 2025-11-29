@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import axios from "axios";
 import asyncHandler from "../middleware/asyncHandler";
 import { Order } from "../models/order";
-import { IOrderItem } from "../types";
+import { IOrderItem } from "../types/index";
 import { v4 as uuidv4 } from "uuid";
 
 const API_BASE = process.env.PARTNER_API_URL;

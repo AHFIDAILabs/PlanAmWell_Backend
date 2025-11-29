@@ -1,6 +1,6 @@
 // controllers/userController.ts
 import { Request, Response } from "express";
-import { IUser } from "../types";
+import { IUser } from "../types/index";
 import { User } from "../models/user";
 import { uploadToCloudinary, deleteFromCloudinary } from "../middleware/claudinary";
 import { IImage, Image } from "../models/image";

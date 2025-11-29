@@ -1,5 +1,4 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
-import { IUser, IDoctor } from "../types"; // your existing types
 
 export interface IAppointment extends Document {
     userId: Types.ObjectId; // ✅ fixed
