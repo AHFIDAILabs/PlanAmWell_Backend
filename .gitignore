@@ -1,0 +1,69 @@
+# Node modules
+node_modules/
+# Optional npm log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TypeScript build
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+
+
+# Logs
+logs/
+*.log
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# npm cache
+.npm
+
+# Optional: MacOS folder attributes
+.AppleDouble
+.LSOverride
+
+# Optional: coverage
+coverage/
+*.lcov
+
+# Optional: temp
+tmp/
+temp/
+*.tmp
+
+# Cloudinary uploads or media folder (if any local caching)
+uploads/
+media/
+
+# Ignore compiled JavaScript if using ts-node for dev
+*.js
+*.js.map
+
+
+# Compiled files
+src/**/*.js
+src/**/*.d.ts
+src/**/*.js.map
+src/**/*.d.ts.map
+dist/
