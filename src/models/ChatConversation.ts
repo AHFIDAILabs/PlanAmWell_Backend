@@ -77,7 +77,6 @@ chatConversationSchema.pre('save', function(next) {
 });
 
 // Index for efficient queries
-chatConversationSchema.index({ sessionId: 1 });
 chatConversationSchema.index({ userId: 1, isActive: 1 });
 
 export const ChatConversation = mongoose.model<IChatConversation>('ChatConversation', chatConversationSchema);

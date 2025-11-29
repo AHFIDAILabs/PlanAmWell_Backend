@@ -37,6 +37,19 @@ app.use(helmet());
 app.use(express.json());
 app.use(morgan("dev"));
 
+// --- 👇 ADDED HEALTH CHECK ROUTE HERE 👇 ---
+app.get('/', (req, res) => {
+    // This is the essential health check route. 
+    // It should return 200 OK so monitoring services (like Render) know the app is alive.
+    console.log('GET / Health Check received.');
+    res.status(200).json({
+        status: 'Server is healthy',
+        message: 'AmWell Backend is operational.',
+        version: '1.0.0' 
+    });
+});
+// ------------------------------------------
+
 // Routes
 app.use("/api/v1/notifications", notificationRouter);
 app.use("/api/v1/categories", categoryRouter);
@@ -56,23 +69,24 @@ app.use("/api/v1/whatsapp", whatsappRouter)
 app.use(errorHandler);
 
 // Connect to MongoDB and start server
+// Render will automatically set process.env.PORT to 10000 (which your logs show)
 const PORT: number = Number(process.env.PORT) || 4000;
 
 mongoose
-  .connect(process.env.MONGODB_URI as string)
-  .then(() => {
-    console.log("✅ MongoDB Connected");
-    server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error("❌ MongoDB Connection Error:", err);
-    process.exit(1);
-  });
+  .connect(process.env.MONGODB_URI as string)
+  .then(() => {
+    console.log("✅ MongoDB Connected");
+    server.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ MongoDB Connection Error:", err);
+    process.exit(1);
+  });
 
 // === Handle Unhandled Promise Rejections ===
 process.on("unhandledRejection", (err: any) => {
-  console.error("❌ Unhandled Rejection:", err.message);
-  server.close(() => process.exit(1));
+  console.error("❌ Unhandled Rejection:", err.message);
+  server.close(() => process.exit(1));
 });
