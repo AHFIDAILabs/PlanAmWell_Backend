@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
-import { IDoctor } from "../types";
-import { Doctor } from "../models/doctor";
+import { Doctor, IDoctor } from "../models/doctor";
 import asyncHandler from "../middleware/asyncHandler";
 import { deleteFromCloudinary, uploadToCloudinary } from "../middleware/claudinary";
 import mongoose from "mongoose";

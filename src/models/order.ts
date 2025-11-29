@@ -1,6 +1,15 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
-import { IOrderItem } from "../types/index";
 import { v4 as uuidv4 } from "uuid";
+
+export interface IOrderItem {
+  productId: Types.ObjectId; // local reference to Product
+  name?: string;
+  sku?: string;
+  qty: number;
+  price: number;
+  dosage?: string; // optional, for API
+  specialInstructions?: string; // optional, for API
+}
 
 export interface IOrder extends Document {
   orderNumber: string;
