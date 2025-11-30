@@ -130,13 +130,30 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Email and password are required" });
   }
 
-  // Find user and populate userImage
+  // ✅ Make sure to select +password since it's excluded by default
   const user = await User.findOne({ email }).select("+password").populate("userImage");
 
-  if (!user) return res.status(401).json({ message: "Invalid credentials" });
+  if (!user) {
+    return res.status(401).json({ message: "Invalid credentials" });
+  }
 
-  const isMatch = await (user as any).comparePassword(password);
-  if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
+  // ✅ Add explicit check for password existence
+  if (!user.password) {
+    console.log('⚠️ User attempting login without password:', { 
+      email: user.email, 
+      isAnonymous: user.isAnonymous 
+    });
+    return res.status(401).json({ 
+      message: "Invalid credentials. Please register or reset your password." 
+    });
+  }
+
+  // Now safe to compare
+  const isMatch = await user.comparePassword(password);
+  
+  if (!isMatch) {
+    return res.status(401).json({ message: "Invalid credentials" });
+  }
 
   // Generate JWT
   const token = signJwt(user);
@@ -148,7 +165,7 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     token,
-    user: userResponse, // includes populated userImage
+    user: userResponse,
   });
 });
 
