@@ -23,7 +23,9 @@ import cartRouter from "./routes/cartRoutes";
 import paymentRouter from "./routes/paymentRoutes";
 import notificationRouter from "./routes/notificationRoutes";
 import chatBotRouter from "./routes/chatbotRoutes";
-import whatsappRouter from "./routes/metaWhatsapp"
+import whatsappRouter from "./routes/metaWhatsapp";
+import advocacyRouter from "./routes/advocacyRoutes";
+import commentRouter from "./routes/commentRoutes";
 
 // Initialize Express app
 const app = express();
@@ -62,7 +64,9 @@ app.use("/api/v1/chatbot", chatBotRouter);
 app.use("/api/v1/checkout", checkoutRouter);
 app.use("/api/v1/cart", cartRouter);
 app.use("/api/v1/payment", paymentRouter);
-app.use("/api/v1/whatsapp", whatsappRouter)
+app.use("/api/v1/whatsapp", whatsappRouter);
+app.use("/api/v1/advocacy", advocacyRouter);
+app.use("/api/v1/comment", commentRouter);
 
 
 // Error Handling Middleware
