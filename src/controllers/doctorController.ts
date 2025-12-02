@@ -112,7 +112,17 @@ export const createDoctor = asyncHandler(async (req: Request, res: Response) => 
   }
 });
 
-// Login doctor 
+// GET /api/v1/doctors/categories
+export const getDoctorCategories = asyncHandler(async (req, res) => {
+  const categories = await Doctor.aggregate([
+    { $match: { status: "approved" } },
+    { $group: { _id: "$specialization", count: { $sum: 1 } } },
+    { $project: { specialization: "$_id", count: 1, _id: 0 } },
+    { $sort: { count: -1 } },
+  ]);
+  res.status(200).json({ success: true, data: categories });
+});
+
 
 
 // UPDATE doctor — only admin can update status, doctor can update own profile

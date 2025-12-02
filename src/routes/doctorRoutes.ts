@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   getDoctors,
   getDoctor,
+  getDoctorCategories,
   createDoctor,
   updateDoctor,
   deleteDoctor,
@@ -39,6 +40,8 @@ doctorRouter.post("/", upload.single("doctorImage"), createDoctor);
  * PUBLIC — get all approved doctors
  */
 doctorRouter.get("/", getDoctors);
+
+doctorRouter.get("/doctorCategories", getDoctorCategories )
 
 /**
  * ANY AUTH USER — get specific doctor profile

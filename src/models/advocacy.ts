@@ -6,7 +6,7 @@ export interface IAdvocacyArticle extends Document {
   slug: string;
   excerpt: string;
   content: string;
-  category: "educational" | "success-story" | "policy-brief" | "community-resource";
+  category: "all" | "educational" | "success-story" | "policy-brief" | "community-resource";
   tags: string[];
   author: {
     name: string;
@@ -62,7 +62,7 @@ const AdvocacyArticleSchema = new Schema<IAdvocacyArticle>(
     },
     category: {
       type: String,
-      enum: ["educational", "success-story", "policy-brief", "community-resource"],
+      enum: ["all","educational", "success-story", "policy-brief", "community-resource"],
       required: [true, "Category is required"],
       index: true,
     },
