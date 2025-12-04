@@ -26,6 +26,7 @@ import chatBotRouter from "./routes/chatbotRoutes";
 import whatsappRouter from "./routes/metaWhatsapp";
 import advocacyRouter from "./routes/advocacyRoutes";
 import commentRouter from "./routes/commentRoutes";
+import adminRouter from "./routes/adminRoutes";
 
 // Initialize Express app
 const app = express();
@@ -52,7 +53,8 @@ app.get('/', (req, res) => {
 });
 // ------------------------------------------
 
-// Routes
+// 
+app.use("/api/v1/admin", adminRouter)
 app.use("/api/v1/notifications", notificationRouter);
 app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/products", productRouter);

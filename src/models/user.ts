@@ -22,6 +22,7 @@ export interface IUser extends Document {
   preferences?: Record<string, any>;
   partnerId?: string; 
   comparePassword: (enteredPassword: string) => Promise<boolean>; 
+  createdAt: Date;
 }
 
 const UserSchema = new Schema<IUser>(
@@ -43,6 +44,7 @@ const UserSchema = new Schema<IUser>(
     verified: { type: Boolean, default: false },
     preferences: { type: Object, default: {} },
     partnerId: { type: String },
+    createdAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

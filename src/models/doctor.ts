@@ -17,6 +17,7 @@ export interface IDoctor extends Document {
   ratings?: number;
   reviews?: Array<{ userId: string; rating: number; comment: string }>;
   status: "submitted" | "reviewing" | "approved" | "rejected"; // New field
+  createdAt: Date;
 }
 
 const DoctorSchema = new Schema<IDoctor>(
@@ -47,6 +48,7 @@ const DoctorSchema = new Schema<IDoctor>(
       default: "submitted", // default when doctor self-registers
       required: true,
     },
+    createdAt: { type: Date}
   },
   { timestamps: true }
 );

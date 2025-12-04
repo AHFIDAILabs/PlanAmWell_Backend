@@ -79,6 +79,7 @@ export const convertGuestToUser = asyncHandler(async (req: Request, res: Respons
 });
 
 // ------------------ CREATE User (Local Only) ------------------
+
 export const createUser = asyncHandler(async (req: Request, res: Response) => {
   // Prevent creating user if already logged in
   if (req.auth?.id) {
@@ -112,17 +113,24 @@ export const createUser = asyncHandler(async (req: Request, res: Response) => {
     verified: true,
   });
 
-  // Populate userImage if exists
-  const userWithImage = await User.findById(newUser._id).populate("userImage");
+  // Populate relations (userImage, others if needed)
+  const fullUser = await User.findById(newUser._id).populate("userImage");
 
-  // Prepare response object
-  const userResponse = userWithImage?.toObject({ virtuals: true }) || newUser.toObject({ virtuals: true });
-  res.status(201).json({ success: true, data: userResponse });
+  const userResponse = fullUser?.toObject({ virtuals: true });
+
+  // Remove password from response
+  if (userResponse?.password) delete userResponse.password;
+
+  res.status(201).json({
+    success: true,
+    data: userResponse,
+  });
 });
 
 
+
 // ------------------- Login User -------------------
-// POST /auth/login
+
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
@@ -130,27 +138,27 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Email and password are required" });
   }
 
-  // ✅ Make sure to select +password since it's excluded by default
-  const user = await User.findOne({ email }).select("+password").populate("userImage");
+  // Select password and populate relations
+  const user = await User.findOne({ email })
+    .select("+password")
+    .populate("userImage");
 
   if (!user) {
     return res.status(401).json({ message: "Invalid credentials" });
   }
 
-  // ✅ Add explicit check for password existence
   if (!user.password) {
-    console.log('⚠️ User attempting login without password:', { 
-      email: user.email, 
-      isAnonymous: user.isAnonymous 
+    console.log("⚠️ User attempting login without password:", {
+      email: user.email,
+      isAnonymous: user.isAnonymous,
     });
-    return res.status(401).json({ 
-      message: "Invalid credentials. Please register or reset your password." 
+
+    return res.status(401).json({
+      message: "Invalid credentials. Please register or reset your password.",
     });
   }
 
-  // Now safe to compare
   const isMatch = await user.comparePassword(password);
-  
   if (!isMatch) {
     return res.status(401).json({ message: "Invalid credentials" });
   }
@@ -158,7 +166,7 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
   // Generate JWT
   const token = signJwt(user);
 
-  // Convert user to object and remove password
+  // Full user object
   const userResponse = user.toObject({ virtuals: true });
   delete userResponse.password;
 
@@ -168,6 +176,7 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     user: userResponse,
   });
 });
+
 
 //..........................Login Doctor...................................
 /**

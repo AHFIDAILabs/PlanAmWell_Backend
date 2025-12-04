@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 import { Doctor } from "../models/doctor";
 import { Review } from "../models/reviews"; // create a Review model if you don't have one
-import faker from "faker";
+import { faker } from '@faker-js/faker';
 
 dotenv.config();
 
@@ -27,10 +27,10 @@ const seedReviews = async () => {
       for (let i = 0; i < count; i++) {
         reviewsToInsert.push({
           doctorId: d._id,
-          userName: faker.name.findName(),
+          userName: faker.person.fullName,
           rating: Math.floor(Math.random() * 2) + 4, // 4 or 5
           comment: faker.lorem.sentences(2),
-          createdAt: faker.date.recent(90),
+          createdAt: faker.date.recent({days: 90, refDate: "2020-01-01T00:00.000Z"}),
         });
       }
     });
