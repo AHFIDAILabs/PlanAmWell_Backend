@@ -255,6 +255,7 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
     content,
     category,
     tags,
+    author,
     slug,
     status,
     featured,
@@ -265,18 +266,6 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
   // featuredImage if uploaded via multer -> file.path or file?.secure_url
   let featuredImage = req.file?.path || req.body.featuredImage || undefined;
   // If Cloudinary storage used: req.file.path will be the Cloudinary url
-
-const author = partner
-  ? {
-      name: partner.name,
-      role: partner.role || "Partner",
-      userId: partner._id,
-    }
-  : {
-      name: (req as any).user?.name || "Admin",
-      role: (req as any).user?.roles?.[0] || "Admin",
-      userId: (req as any).user?._id,
-    };
 
 
   const articleSlug = slugify(title, { lower: true, strict: true });
@@ -289,7 +278,7 @@ const author = partner
     category,
     tags,
     author,
-    featuredImage: featuredImage ? { url: featuredImage } : undefined, 
+    featuredImage: featuredImage ? { url: featuredImage } : undefined, // <-- wrap as object
     status: status || "draft",
     featured: featured || false,
     metadata,
