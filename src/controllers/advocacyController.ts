@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import { AdvocacyArticle } from "../models/advocacy";
 import { Comment } from "../models/comment";
 import asyncHandler from "../middleware/asyncHandler";
+import slugify from "slugify"; 
 
 // =====================================================
 // PUBLIC ROUTES (No Authentication Required)
@@ -254,6 +255,7 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
     content,
     category,
     tags,
+    slug,
     status,
     featured,
     metadata,
@@ -270,9 +272,12 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
     userId: (req as any).user?._id,
   };
 
+  const articleSlug = slugify(title, { lower: true, strict: true });
+
   const article = await AdvocacyArticle.create({
     title,
     excerpt,
+    slug: articleSlug || `article-${Date.now()}`,
     content,
     category,
     tags,
