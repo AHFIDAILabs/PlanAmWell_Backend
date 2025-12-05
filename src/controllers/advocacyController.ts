@@ -266,11 +266,18 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
   let featuredImage = req.file?.path || req.body.featuredImage || undefined;
   // If Cloudinary storage used: req.file.path will be the Cloudinary url
 
-  const author = {
-    name: (req as any).user?.name || "Admin",
-    role: (req as any).user?.roles?.[0] || "Admin",
-    userId: (req as any).user?._id,
-  };
+const author = partner
+  ? {
+      name: partner.name,
+      role: partner.role || "Partner",
+      userId: partner._id,
+    }
+  : {
+      name: (req as any).user?.name || "Admin",
+      role: (req as any).user?.roles?.[0] || "Admin",
+      userId: (req as any).user?._id,
+    };
+
 
   const articleSlug = slugify(title, { lower: true, strict: true });
 
@@ -282,7 +289,7 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
     category,
     tags,
     author,
-    featuredImage,
+    featuredImage: featuredImage ? { url: featuredImage } : undefined, 
     status: status || "draft",
     featured: featured || false,
     metadata,
