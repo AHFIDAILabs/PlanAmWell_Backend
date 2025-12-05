@@ -3,6 +3,8 @@ import { Request, Response } from "express";
 import { AdvocacyArticle } from "../models/advocacy";
 import { Comment } from "../models/comment";
 import asyncHandler from "../middleware/asyncHandler";
+import { uploadToCloudinary } from "../middleware/claudinary";
+
 import slugify from "slugify"; 
 
 // =====================================================
@@ -248,6 +250,10 @@ export const likeArticle = asyncHandler(async (req: Request, res: Response) => {
 // =====================================================
 
 // POST /api/v1/advocacy/admin - Create new article (with partner)
+
+// =========================
+// CREATE ARTICLE
+// =========================
 export const createArticle = asyncHandler(async (req: Request, res: Response) => {
   const {
     title,
@@ -263,12 +269,29 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
     partner,
   } = req.body;
 
-  // featuredImage if uploaded via multer -> file.path or file?.secure_url
-  let featuredImage = req.file?.path || req.body.featuredImage || undefined;
-  // If Cloudinary storage used: req.file.path will be the Cloudinary url
+  let featuredImageUrl: string | undefined;
 
+  // Upload image to Cloudinary if a file is present
+  if (req.file?.buffer) {
+    try {
+      const uploadResult = await uploadToCloudinary(req.file.buffer, "articles");
+      featuredImageUrl = uploadResult.secure_url;
+    } catch (error) {
+      console.error("Cloudinary upload error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to upload featured image",
+      });
+    }
+  }
 
-  const articleSlug = slugify(title, { lower: true, strict: true });
+  const articleSlug = slug || slugify(title, { lower: true, strict: true });
+
+  // Parse author if it's a JSON string
+  const parsedAuthor = typeof author === "string" ? JSON.parse(author) : author;
+
+  // Ensure tags is an array
+  const parsedTags = typeof tags === "string" ? tags.split(",").map((t) => t.trim()) : tags;
 
   const article = await AdvocacyArticle.create({
     title,
@@ -276,9 +299,9 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
     slug: articleSlug || `article-${Date.now()}`,
     content,
     category,
-    tags,
-    author,
-    featuredImage: featuredImage ? { url: featuredImage } : undefined, // <-- wrap as object
+    tags: parsedTags,
+    author: parsedAuthor,
+    featuredImage: featuredImageUrl ? { url: featuredImageUrl } : undefined,
     status: status || "draft",
     featured: featured || false,
     metadata,
@@ -292,12 +315,36 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
   });
 });
 
-// PUT /api/v1/advocacy/admin/:id - update w/ partner and image support
+// =========================
+// UPDATE ARTICLE
+// =========================
 export const updateArticle = asyncHandler(async (req: Request, res: Response) => {
   const id = req.params.id;
-  const updatePayload = { ...req.body };
+  const updatePayload: any = { ...req.body };
 
-  if (req.file?.path) updatePayload.featuredImage = req.file.path;
+  // Upload new image to Cloudinary if present
+  if (req.file?.buffer) {
+    try {
+      const uploadResult = await uploadToCloudinary(req.file.buffer, "articles");
+      updatePayload.featuredImage = { url: uploadResult.secure_url };
+    } catch (error) {
+      console.error("Cloudinary upload error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to upload featured image",
+      });
+    }
+  }
+
+  // Parse author if sent as JSON string
+  if (updatePayload.author && typeof updatePayload.author === "string") {
+    updatePayload.author = JSON.parse(updatePayload.author);
+  }
+
+  // Ensure tags is an array
+  if (updatePayload.tags && typeof updatePayload.tags === "string") {
+    updatePayload.tags = updatePayload.tags.split(",").map((t: string) => t.trim());
+  }
 
   const article = await AdvocacyArticle.findByIdAndUpdate(id, updatePayload, {
     new: true,
@@ -309,7 +356,11 @@ export const updateArticle = asyncHandler(async (req: Request, res: Response) =>
     throw new Error("Article not found");
   }
 
-  res.status(200).json({ success: true, data: article, message: "Updated" });
+  res.status(200).json({
+    success: true,
+    message: "Article updated successfully",
+    data: article,
+  });
 });
 
 
