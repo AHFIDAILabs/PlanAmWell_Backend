@@ -38,13 +38,13 @@ export const getAllAdmins = asyncHandler(async (_req: Request, res: Response) =>
 
 // ------------------- Get All Doctors (Admin) -------------------
 export const getAllDoctorsAdmin = asyncHandler(async (_req: Request, res: Response) => {
-  const doctors: IDoctor[] = await Doctor.find({}).select("-passwordHash");
+  const doctors: IDoctor[] = await Doctor.find({}).select("-passwordHash").populate("doctorImage");
   res.status(200).json({ success: true, data: doctors });
 });
 
 // ------------------- Get Pending Doctors Only -------------------
 export const getPendingDoctorsAdmin = asyncHandler(async (_req: Request, res: Response) => {
-  const doctors: IDoctor[] = await Doctor.find({ status: "submitted" }).select("-passwordHash");
+  const doctors: IDoctor[] = await Doctor.find({ status: "submitted" }).select("-passwordHash").populate("doctorImage");
   res.status(200).json({ success: true, data: doctors });
 });
 

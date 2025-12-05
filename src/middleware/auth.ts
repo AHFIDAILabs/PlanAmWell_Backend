@@ -99,68 +99,78 @@ export const signRefreshToken = async (entity: any) => {
 
 export const guestAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    console.log("\n[guestAuth] ---- START ----");
     const authHeader = req.headers.authorization;
+    console.log("[guestAuth] Authorization header:", authHeader);
+
+    if (!authHeader?.startsWith("Bearer ")) {
+      console.warn("[guestAuth] No Bearer token found in header");
+      return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+    console.log("[guestAuth] Token extracted:", token);
+
     let decoded: JwtPayload | null = null;
-
-    if (authHeader?.startsWith("Bearer ")) {
-      const token = authHeader.split(" ")[1];
-      try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
-      } catch (err) {}
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+      console.log("[guestAuth] JWT decoded:", decoded);
+    } catch (err) {
+      console.error("[guestAuth] JWT verification failed:", err);
+      return next(); // let verifyToken handle the 401
     }
 
-    // ---- HANDLE FULL USERS: ADMIN + USER + DOCTOR ----
-    if (decoded?.id) {
-      const entity =
-        (await User.findById(decoded.id).select("-password")) ||
-        (await Doctor.findById(decoded.id).select("-password")) ||
-        (await Admin.findById(decoded.id).select("-password")); // ✅ NOW SUPPORTS ADMIN
-
-      if (entity) {
-        req.user = entity;
-        req.auth = {
-          ...decoded,
-          id: decoded.id,
-          role: entity.role || decoded.role,
-          isAnonymous: false,
-        };
-      }
+    if (!decoded?.id) {
+      console.warn("[guestAuth] Decoded JWT has no id");
+      return next();
     }
 
-    // ---- HANDLE GUEST ----
-    else if (decoded?.sessionId) {
-      const session = await Session.findById(decoded.sessionId);
-      if (session) req.session = session;
-      req.auth = { sessionId: decoded.sessionId, isAnonymous: true };
+    // Find the entity in DB
+    const entity =
+      (await User.findById(decoded.id).select("-password")) ||
+      (await Doctor.findById(decoded.id).select("-password")) ||
+      (await Admin.findById(decoded.id).select("-password"));
+    console.log("[guestAuth] Entity found in DB:", entity);
+
+    if (!entity) {
+      console.warn("[guestAuth] No user/doctor/admin found for this ID");
+      return next();
     }
 
-    // ---- SESSION FALLBACK ----
-    if (!req.auth?.id && !req.auth?.sessionId) {
-      const sessionId = req.query.sessionId || req.body.sessionId;
-      if (sessionId && typeof sessionId === "string") {
-        const session = await Session.findById(sessionId);
-        if (session) {
-          req.session = session;
-          req.auth = { sessionId, isAnonymous: true };
-        }
-      }
-    }
+    // Ensure role is set properly
+    const role = entity.role || decoded.role || "User";
+
+    req.user = entity;
+    req.auth = {
+      ...decoded,
+      id: decoded.id,
+      role,
+      name: entity.name || `${entity.firstName} ${entity.lastName}`.trim(),
+      isAnonymous: false,
+    };
+
+    console.log("[guestAuth] req.auth set:", req.auth);
+    console.log("[guestAuth] ---- END ----\n");
 
     next();
   } catch (err) {
-    console.error("Guest Auth Error:", err);
-    next();
+    console.error("[guestAuth] Unexpected error:", err);
+    next(err);
   }
 };
+
 
 // =======================================================
 //                🔐 FULL AUTH REQUIRED
 // =======================================================
 
 export const verifyToken = (req: Request, res: Response, next: NextFunction) => {
+  console.log("[verifyToken] req.auth:", req.auth);
   if (!req.auth || req.auth.isAnonymous) {
+    console.warn("[verifyToken] Unauthorized - Login required");
     return res.status(401).json({ message: "Unauthorized - Login required" });
   }
+  console.log("[verifyToken] Token valid, proceeding...");
   next();
 };
 
@@ -170,9 +180,13 @@ export const verifyToken = (req: Request, res: Response, next: NextFunction) => 
 
 export const authorize = (...allowedRoles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
+    console.log("[authorize] req.auth:", req.auth);
+    console.log("[authorize] allowedRoles:", allowedRoles);
     if (!req.auth || !allowedRoles.includes(req.auth.role!)) {
+      console.warn("[authorize] Forbidden - insufficient role");
       return res.status(403).json({ message: "Forbidden - Insufficient role" });
     }
+    console.log("[authorize] Role authorized, proceeding...");
     next();
   };
 };

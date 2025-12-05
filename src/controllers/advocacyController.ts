@@ -246,7 +246,7 @@ export const likeArticle = asyncHandler(async (req: Request, res: Response) => {
 // ADMIN ROUTES (Authentication & Authorization Required)
 // =====================================================
 
-// POST /api/v1/advocacy/admin - Create new article
+// POST /api/v1/advocacy/admin - Create new article (with partner)
 export const createArticle = asyncHandler(async (req: Request, res: Response) => {
   const {
     title,
@@ -254,13 +254,16 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
     content,
     category,
     tags,
-    featuredImage,
     status,
     featured,
     metadata,
+    partner,
   } = req.body;
 
-  // Extract author info from authenticated user
+  // featuredImage if uploaded via multer -> file.path or file?.secure_url
+  let featuredImage = req.file?.path || req.body.featuredImage || undefined;
+  // If Cloudinary storage used: req.file.path will be the Cloudinary url
+
   const author = {
     name: (req as any).user?.name || "Admin",
     role: (req as any).user?.roles?.[0] || "Admin",
@@ -278,6 +281,7 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
     status: status || "draft",
     featured: featured || false,
     metadata,
+    partner,
   });
 
   res.status(201).json({
@@ -287,28 +291,26 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
   });
 });
 
-// PUT /api/v1/advocacy/admin/:id - Update article
+// PUT /api/v1/advocacy/admin/:id - update w/ partner and image support
 export const updateArticle = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id;
+  const updatePayload = { ...req.body };
 
-  const article = await AdvocacyArticle.findByIdAndUpdate(id, req.body, {
+  if (req.file?.path) updatePayload.featuredImage = req.file.path;
+
+  const article = await AdvocacyArticle.findByIdAndUpdate(id, updatePayload, {
     new: true,
     runValidators: true,
   });
 
   if (!article) {
-    return res.status(404).json({
-      success: false,
-      message: "Article not found",
-    });
+    res.status(404);
+    throw new Error("Article not found");
   }
 
-  res.status(200).json({
-    success: true,
-    message: "Article updated successfully",
-    data: article,
-  });
+  res.status(200).json({ success: true, data: article, message: "Updated" });
 });
+
 
 // DELETE /api/v1/advocacy/admin/:id - Delete article
 export const deleteArticle = asyncHandler(async (req: Request, res: Response) => {
