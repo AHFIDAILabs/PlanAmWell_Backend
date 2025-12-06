@@ -7,7 +7,7 @@ import {
   updateDoctor,
   deleteDoctor,
 } from "../controllers/doctorController";
-import { verifyToken, authorize } from "../middleware/auth";
+import { verifyToken, authorize, guestAuth } from "../middleware/auth";
 import multer from "multer";
 const storage = multer.memoryStorage();
 
@@ -47,7 +47,7 @@ doctorRouter.get("/doctorCategories", getDoctorCategories )
  * ANY AUTH USER — get specific doctor profile
  * Admin can access any status; others only 'approved'
  */
-doctorRouter.get("/:id", verifyToken, authorize("User", "Doctor", "Admin"), getDoctor);
+doctorRouter.get("/:id", guestAuth, verifyToken, authorize("User", "Doctor", "Admin"), getDoctor);
 
 /**
  * DOCTOR — update own profile (except status)
@@ -55,6 +55,7 @@ doctorRouter.get("/:id", verifyToken, authorize("User", "Doctor", "Admin"), getD
  */
 doctorRouter.put(
   "/:id",
+  guestAuth,
   verifyToken,
   authorize("Doctor", "Admin"),
   upload.single("doctorImage"), 
@@ -64,6 +65,6 @@ doctorRouter.put(
 /**
  * ADMIN ONLY — delete doctor
  */
-doctorRouter.delete("/:id", verifyToken, authorize("Admin"), deleteDoctor);
+doctorRouter.delete("/:id", guestAuth, verifyToken, authorize("Admin"), deleteDoctor);
 
 export default doctorRouter;
