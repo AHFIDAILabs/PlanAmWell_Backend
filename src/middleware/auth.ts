@@ -99,65 +99,43 @@ export const signRefreshToken = async (entity: any) => {
 
 export const guestAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    console.log("\n[guestAuth] ---- START ----");
     const authHeader = req.headers.authorization;
-    console.log("[guestAuth] Authorization header:", authHeader);
-
-    if (!authHeader?.startsWith("Bearer ")) {
-      console.warn("[guestAuth] No Bearer token found in header");
-      return next();
-    }
+    if (!authHeader?.startsWith("Bearer ")) return next();
 
     const token = authHeader.split(" ")[1];
-    console.log("[guestAuth] Token extracted:", token);
-
     let decoded: JwtPayload | null = null;
+
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
-      console.log("[guestAuth] JWT decoded:", decoded);
     } catch (err) {
-      console.error("[guestAuth] JWT verification failed:", err);
-      return next(); // let verifyToken handle the 401
+      return next(); // invalid token -> let verifyToken handle
     }
 
-    if (!decoded?.id) {
-      console.warn("[guestAuth] Decoded JWT has no id");
-      return next();
+    if (decoded.isAnonymous && decoded.sessionId) {
+      req.auth = { sessionId: decoded.sessionId, isAnonymous: true };
+    } else if (decoded.id) {
+      const user =
+        (await User.findById(decoded.id).select("-password")) ||
+        (await Doctor.findById(decoded.id).select("-password")) ||
+        (await Admin.findById(decoded.id).select("-password"));
+
+      if (!user) return next();
+
+      req.user = user;
+      req.auth = {
+        id: decoded.id,
+        role: decoded.role || user.role || "User",
+        name: user.name || `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+        isAnonymous: false,
+      };
     }
-
-    // Find the entity in DB
-    const entity =
-      (await User.findById(decoded.id).select("-password")) ||
-      (await Doctor.findById(decoded.id).select("-password")) ||
-      (await Admin.findById(decoded.id).select("-password"));
-    console.log("[guestAuth] Entity found in DB:", entity);
-
-    if (!entity) {
-      console.warn("[guestAuth] No user/doctor/admin found for this ID");
-      return next();
-    }
-
-    // Ensure role is set properly
-    const role = entity.role || decoded.role || "User";
-
-    req.user = entity;
-    req.auth = {
-      ...decoded,
-      id: decoded.id,
-      role,
-      name: entity.name || `${entity.firstName} ${entity.lastName}`.trim(),
-      isAnonymous: false,
-    };
-
-    console.log("[guestAuth] req.auth set:", req.auth);
-    console.log("[guestAuth] ---- END ----\n");
 
     next();
   } catch (err) {
-    console.error("[guestAuth] Unexpected error:", err);
     next(err);
   }
 };
+
 
 
 // =======================================================
@@ -165,14 +143,12 @@ export const guestAuth = async (req: Request, res: Response, next: NextFunction)
 // =======================================================
 
 export const verifyToken = (req: Request, res: Response, next: NextFunction) => {
-  console.log("[verifyToken] req.auth:", req.auth);
-  if (!req.auth || req.auth.isAnonymous) {
-    console.warn("[verifyToken] Unauthorized - Login required");
+  if (!req.auth?.id) {
     return res.status(401).json({ message: "Unauthorized - Login required" });
   }
-  console.log("[verifyToken] Token valid, proceeding...");
   next();
 };
+
 
 // =======================================================
 //               🎭 ROLE-BASED ACCESS
