@@ -30,7 +30,7 @@ export interface ChatbotResponse {
     success: boolean;
     response: string;
     intent: Intent;
-    products: ProductResponse[]; // Changed from IProduct[] to ProductResponse[]
+    products: ProductResponse[]; 
     sessionId: string;
 }
 
