@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import axios from "axios";
 import { Cart, ICartItem } from "../models/cart";
+import { Types } from "mongoose";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 
@@ -101,7 +102,7 @@ export const clearCart = asyncHandler(async (req: Request, res: Response) => {
 
   const cartQuery: any = { $or: [] };
 
-  if (userId) cartQuery.$or.push({ userId });
+  if (userId) cartQuery.$or.push({ userId: new Types.ObjectId(userId) }); // ✅ convert to ObjectId
   if (sessionId) cartQuery.$or.push({ sessionId });
 
   if (cartQuery.$or.length === 0) {
