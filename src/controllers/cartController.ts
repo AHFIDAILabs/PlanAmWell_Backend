@@ -65,7 +65,7 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
         items: cart.items.map(mapCartItemForPartner),
       };
       console.log("[CartController] partner addToCart payload:", JSON.stringify(payload));
-      const partnerResponse = await axios.post(`${PARTNER_API_URL}/cart`, payload);
+      const partnerResponse = await axios.post(`${PARTNER_API_URL}/v1/PlanAmWell/cart`, payload);
       partnerCart = partnerResponse.data.updatedCart;
 
       cart.partnerCartId = partnerCart.id;
