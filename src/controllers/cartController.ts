@@ -93,28 +93,34 @@ export const clearCart = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.auth?.id;
   const sessionId = req.auth?.sessionId;
 
-  // Ensure at least one identifier exists
   if (!userId && !sessionId) {
-    return res
-      .status(401)
-      .json({ message: "Unauthorized: login or active session required to clear cart." });
+    return res.status(401).json({
+      message: "Unauthorized: login or active session required to clear cart."
+    });
   }
 
-  // Build query to find cart
-  const cartQuery: any = {};
-  if (userId) cartQuery.userId = userId;
-  if (!userId && sessionId) cartQuery.sessionId = sessionId;
+  const cartQuery: any = { $or: [] };
 
-  // Attempt to find the cart first
+  if (userId) cartQuery.$or.push({ userId });
+  if (sessionId) cartQuery.$or.push({ sessionId });
+
+  if (cartQuery.$or.length === 0) {
+    return res.status(400).json({ success: false, message: "No cart identifier found" });
+  }
+
   const cart = await Cart.findOne(cartQuery);
+
   if (!cart) {
     return res.status(404).json({ success: false, message: "No cart found to clear" });
   }
 
-  await Cart.deleteOne({ _id: cart._id });
-  res.status(200).json({ success: true, message: "Cart cleared" });
-});
+  await Cart.deleteMany(cartQuery);
 
+  return res.status(200).json({
+    success: true,
+    message: "Cart cleared successfully"
+  });
+});
 
 // ------------------ UPDATE CART ITEM ------------------
 export const updateCartItem = asyncHandler(async (req: Request, res: Response) => {
