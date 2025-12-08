@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import { Appointment, IAppointment } from "../models/appointment";
 import { Doctor } from "../models/doctor";
-import mongoose from "mongoose";
+import { User } from "../models/user";
 
 /**
  * @desc Create Appointment (Users)
@@ -10,7 +10,14 @@ import mongoose from "mongoose";
  * @access User
  */
 export const createAppointment = asyncHandler(async (req: Request, res: Response) => {
-  const { doctorId, scheduledAt, duration, notes } = req.body;
+  const {
+    doctorId,
+    scheduledAt,
+    duration,
+    notes,
+    reason,
+    shareUserInfo,
+  } = req.body;
 
   if (!doctorId || !scheduledAt) {
     res.status(400);
@@ -24,20 +31,44 @@ export const createAppointment = asyncHandler(async (req: Request, res: Response
     throw new Error("Doctor not found or not approved.");
   }
 
+  // Get user info if share toggle is ON
+  let patientSnapshot = null;
+
+  if (shareUserInfo) {
+    const user = await User.findById(req.auth?.id).select(
+      "firstName lastName email phone gender dateOfBirth"
+    );
+
+    if (user) {
+      patientSnapshot = {
+        fullName: user.name,
+        email: user.email,
+        phone: user.phone,
+        gender: user.gender,
+        dateOfBirth: user.dateOfBirth,
+        homeAddress: user.homeAddress,
+      };
+    }
+  }
+
   const appointment = await Appointment.create({
-    userId: req.auth?.id, // authenticated user
+    userId: req.auth?.id,
     doctorId,
     scheduledAt,
     duration,
     notes,
+    reason,
+    shareUserInfo: !!shareUserInfo,
+    patientSnapshot,
   });
 
   res.status(201).json({
     success: true,
     data: appointment,
-    message: "Appointment request sent successfully.",
+    message: "Appointment request sent successfully. Awaiting doctor review.",
   });
 });
+
 
 /**
  * @desc Get appointments for logged-in user
@@ -82,24 +113,52 @@ export const updateAppointment = asyncHandler(async (req: Request, res: Response
   const userId = req.auth?.id;
   const role = req.auth?.role;
 
-  // Users can only update their own appointments
+  // Check permissions
   if (role === "User" && appointment.userId.toString() !== userId) {
     return res.status(403).json({ message: "You can only update your own appointments." });
   }
 
-  // Doctors can only update appointments assigned to them
   if (role === "Doctor" && appointment.doctorId.toString() !== userId) {
-    return res.status(403).json({ message: "You can only update your own appointments." });
+    return res.status(403).json({ message: "You can only update appointments assigned to you." });
+  }
+
+  const updates: any = {};
+
+  // Fields users can update
+  if (role === "User") {
+    if (req.body.status === "cancelled" && appointment.status === "pending") {
+      updates.status = "cancelled";
+    }
+    if (req.body.scheduledAt) updates.scheduledAt = req.body.scheduledAt;
+    if (req.body.notes) updates.notes = req.body.notes;
+    if (typeof req.body.shareUserInfo === "boolean") updates.shareUserInfo = req.body.shareUserInfo;
+    if (req.body.patientSnapshot) updates.patientSnapshot = req.body.patientSnapshot;
+  }
+
+  // Fields doctors can update
+  if (role === "Doctor") {
+    if (req.body.status) {
+      const allowedDoctorStatuses = ["confirmed", "rejected", "rescheduled", "completed"];
+      if (!allowedDoctorStatuses.includes(req.body.status)) {
+        return res.status(400).json({ message: "Invalid status update for doctor." });
+      }
+
+      updates.status = req.body.status;
+
+      // If rescheduling, doctor should provide proposedAt
+      if (req.body.status === "rescheduled") {
+        if (!req.body.proposedAt) {
+          return res.status(400).json({ message: "proposedAt date is required when rescheduling." });
+        }
+        updates.proposedAt = req.body.proposedAt;
+      }
+    }
+
+    if (req.body.notes) updates.notes = req.body.notes;
+    if (req.body.duration) updates.duration = req.body.duration;
   }
 
   // Apply updates
-  const allowedUpdates = ["scheduledAt", "status", "notes", "paymentStatus"];
-  const updates: any = {};
-
-  for (let key of allowedUpdates) {
-    if (req.body[key] !== undefined) updates[key] = req.body[key];
-  }
-
   const updatedAppointment = await Appointment.findByIdAndUpdate(
     req.params.id,
     updates,
@@ -108,6 +167,8 @@ export const updateAppointment = asyncHandler(async (req: Request, res: Response
 
   res.status(200).json({ success: true, data: updatedAppointment });
 });
+
+
 
 /**
  * @desc Admin — get ALL appointments

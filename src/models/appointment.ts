@@ -1,13 +1,38 @@
-import mongoose, { Document, Schema, Types } from "mongoose";
+// models/Appointment.ts
+import mongoose, { Schema, Types, Document } from "mongoose";
 
 export interface IAppointment extends Document {
-    userId: Types.ObjectId; // ✅ fixed
-  doctorId: Types.ObjectId;        // reference to the doctor
-  scheduledAt: Date;       // date & time of the appointment
-  duration?: number;       // in minutes
-  status: "pending" | "confirmed" | "cancelled" | "completed";
+  userId: Types.ObjectId;
+  doctorId: Types.ObjectId;
+
+  scheduledAt: Date;
+  proposedAt?: Date;
+
+  duration?: number;
+
+  status:
+    | "pending"
+    | "confirmed"
+    | "cancelled"
+    | "completed"
+    | "rejected"
+    | "rescheduled";
+
   paymentStatus?: "pending" | "paid" | "failed";
+
+  reason?: string;
   notes?: string;
+
+  shareUserInfo?: boolean;
+
+  patientSnapshot?: {
+    fullName?: string;
+    email?: string;
+    phone?: string;
+    gender?: string;
+    dateOfBirth?: Date;
+  };
+
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -16,19 +41,43 @@ const AppointmentSchema = new Schema<IAppointment>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     doctorId: { type: Schema.Types.ObjectId, ref: "Doctor", required: true },
+
     scheduledAt: { type: Date, required: true },
+    proposedAt: { type: Date },
+
     duration: { type: Number, default: 30 },
+
     status: {
       type: String,
-      enum: ["pending", "confirmed", "cancelled", "completed"],
+      enum: [
+        "pending",
+        "confirmed",
+        "cancelled",
+        "completed",
+        "rejected",
+        "rescheduled",
+      ],
       default: "pending",
     },
+
     paymentStatus: {
       type: String,
       enum: ["pending", "paid", "failed"],
       default: "pending",
     },
+
+    reason: { type: String },
     notes: { type: String },
+
+    shareUserInfo: { type: Boolean, default: false },
+
+    patientSnapshot: {
+      fullName: String,
+      email: String,
+      phone: String,
+      gender: String,
+      dateOfBirth: Date,
+    },
   },
   { timestamps: true }
 );

@@ -4,6 +4,7 @@ import asyncHandler from "../middleware/asyncHandler";
 import axios from "axios";
 import { Cart, ICartItem } from "../models/cart";
 import { Types } from "mongoose";
+import { User } from "../models/user";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 
@@ -58,25 +59,38 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
 
   // Sync with partner API if userId exists
   let partnerCart;
-  if (ownerQuery.userId) {
-    try {
-      const payload = {
-        userId: ownerQuery.userId,
-        items: cart.items.map(mapCartItemForPartner),
-      };
-      console.log("[CartController] partner addToCart payload:", JSON.stringify(payload));
-      const partnerResponse = await axios.post(`${PARTNER_API_URL}/v1/PlanAmWell/cart`, payload);
-      partnerCart = partnerResponse.data.updatedCart;
+if (ownerQuery.userId) {
+    try {
+      // 🛑 FIX START: Get the partnerId
+      const user = await User.findById(ownerQuery.userId);
+      const partnerUserId = user?.partnerId;
 
-      cart.partnerCartId = partnerCart.id;
-      cart.isAbandoned = partnerCart.isAbandoned;
-      cart.totalItems = partnerCart.totalItems;
-      cart.totalPrice = parseFloat(partnerCart.totalPrice);
-      await cart.save();
-    } catch (err: any) {
-      console.error("[CartController] partner API addToCart failed:", err.response?.data || err.message);
-    }
-  }
+      if (!partnerUserId) {
+        console.warn("[CartController] User has no partnerId, skipping partner cart sync.");
+        // Skip sync, continue with local cart
+      } else {
+        const payload = {
+          // 🛑 FIX: Use the retrieved partnerUserId (UUID)
+          userId: partnerUserId, 
+          items: cart.items.map(mapCartItemForPartner),
+        };
+        console.log("[CartController] partner addToCart payload:", JSON.stringify(payload));
+        
+        // Assuming you applied the PARTNER_PREFIX fix from previous answer:
+        const partnerResponse = await axios.post(`${PARTNER_API_URL}/v1/PlanAmWell/cart`, payload);
+        
+        partnerCart = partnerResponse.data.updatedCart;
+
+        cart.partnerCartId = partnerCart.id;
+        cart.isAbandoned = partnerCart.isAbandoned;
+        cart.totalItems = partnerCart.totalItems;
+        cart.totalPrice = parseFloat(partnerCart.totalPrice);
+        await cart.save();
+      }
+    } catch (err: any) {
+      console.error("[CartController] partner API addToCart failed:", err.response?.data || err.message);
+    }
+  }
 
   res.status(201).json({ success: true, localCart: cart, partnerCart });
 });
