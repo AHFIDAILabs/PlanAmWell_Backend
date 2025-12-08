@@ -36,7 +36,7 @@ export const createAppointment = asyncHandler(async (req: Request, res: Response
 
   if (shareUserInfo) {
     const user = await User.findById(req.auth?.id).select(
-      "firstName lastName email phone gender dateOfBirth"
+      "name firstName lastName email phone gender dateOfBirth"
     );
 
     if (user) {
