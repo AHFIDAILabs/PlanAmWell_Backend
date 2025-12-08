@@ -19,7 +19,7 @@ appointmentRouter.post("/", guestAuth, createAppointment);
 appointmentRouter.get("/my", guestAuth, verifyToken, getMyAppointments);
 
 // Doctor: get their appointment calendar
-appointmentRouter.get("/doctor", verifyToken, getDoctorAppointments);
+appointmentRouter.get("/doctor", guestAuth, verifyToken, getDoctorAppointments);
 
 // Admin: all appointments
 appointmentRouter.get("/", authorize("Admin"), getAllAppointments);
