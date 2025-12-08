@@ -72,7 +72,7 @@ const AppointmentSchema = new Schema<IAppointment>(
     shareUserInfo: { type: Boolean, default: false },
 
     patientSnapshot: {
-      fullName: String,
+      name: String,
       email: String,
       phone: String,
       gender: String,

@@ -41,7 +41,7 @@ export const createAppointment = asyncHandler(async (req: Request, res: Response
 
     if (user) {
       patientSnapshot = {
-        fullName: user.name,
+        name: user.name,
         email: user.email,
         phone: user.phone,
         gender: user.gender,
@@ -89,11 +89,45 @@ export const getMyAppointments = asyncHandler(async (req: Request, res: Response
  * @access Doctor
  */
 export const getDoctorAppointments = asyncHandler(async (req: Request, res: Response) => {
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('[Backend] 🔍 getDoctorAppointments called');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
   const doctorId = req.auth?.id;
-
+  
+  console.log('[Backend] Auth object:', req.auth);
+  console.log('[Backend] Doctor ID from auth:', doctorId);
+  console.log('[Backend] Doctor ID type:', typeof doctorId);
+  
+  // Check total appointments in DB
+  const totalCount = await Appointment.countDocuments({});
+  console.log('[Backend] 📊 Total appointments in DB:', totalCount);
+  
+  // Check appointments for this specific doctor
   const appointments = await Appointment.find({ doctorId })
     .populate("userId")
     .sort({ scheduledAt: 1 });
+  
+  console.log('[Backend] 📋 Appointments found for this doctor:', appointments.length);
+  
+  // If no appointments found, debug further
+  if (appointments.length === 0 && totalCount > 0) {
+    console.log('[Backend] ⚠️ No appointments for this doctor, but DB has appointments');
+    
+    // Get all unique doctorIds in the database
+    const allAppointments = await Appointment.find({}).select('doctorId').lean();
+    const uniqueDoctorIds = [...new Set(allAppointments.map(a => a.doctorId.toString()))];
+    
+    console.log('[Backend] 🔑 Unique doctor IDs in appointments:', uniqueDoctorIds);
+    console.log('[Backend] 🔑 Looking for doctor ID:', doctorId);
+    console.log('[Backend] 🔑 Doctor ID as string:', doctorId?.toString());
+console.log('[Backend] ❓ ID exists in DB?:', doctorId ? uniqueDoctorIds.includes(doctorId.toString()) : false);  }
+  
+  if (appointments.length > 0) {
+    console.log('[Backend] ✅ Sample appointment:', JSON.stringify(appointments[0], null, 2));
+  }
+  
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   res.status(200).json({ success: true, data: appointments });
 });
