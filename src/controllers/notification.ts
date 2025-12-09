@@ -21,22 +21,27 @@ export const createAppointmentNotification = async (
     reminder: `Your appointment with Dr. ${doctorName} starts in 15 minutes!`,
   };
 
-  const notification = await Notification.create({
-    userId,
-    type: "appointment_update",
-    title: type === "reminder" ? "Appointment Starting Soon" : "Appointment Update",
-    message: messages[type],
-    metadata: {
-      appointmentId,
-      status: type,
-      doctorName,
-      scheduledAt,
-    },
-    isRead: false,
-  });
+const notification = await Notification.create({
+  userId,
+  type: "appointment", // ✅ matches schema
+  title: type === "reminder" ? "Appointment Starting Soon" : "Appointment Update",
+  message: messages[type],
+  metadata: {
+    appointmentId,
+    status: type,
+    doctorName,
+    scheduledAt,
+  },
+  isRead: false,
+});
+
 
   // ✅ Send push notification via Expo
+try {
   await sendPushNotification(userId, notification as Document<unknown, {}, INotification> & INotification);
+} catch (err) {
+  console.error("Failed to send push notification:", err);
+}
 
   return notification;
 };
