@@ -1,21 +1,31 @@
-import { Router } from "express";
+// routes/notificationRoutes.ts
+import express from "express";
 import {
   getNotifications,
-  createNotification,
+  getUnreadCount,
   markAsRead,
   markAllAsRead,
   deleteNotification,
+  getUpcomingAppointmentsSummary,
 } from "../controllers/notification";
-import { guestAuth, verifyToken, hydrateUser } from "../middleware/auth";
+import { guestAuth, verifyToken } from "../middleware/auth"; 
 
-const notificationRouter = Router();
+const notificationRouter = express.Router();
 
-notificationRouter.use(guestAuth, verifyToken, hydrateUser);
+// 🔒 All routes protected
+notificationRouter.use(guestAuth, verifyToken);
 
+// Read
 notificationRouter.get("/", getNotifications);
-notificationRouter.post("/", createNotification);
-notificationRouter.patch("/:notificationId/read", markAsRead);
-notificationRouter.patch("/read-all", markAllAsRead);
+notificationRouter.get("/unread-count", getUnreadCount);
+notificationRouter.get("/appointments-summary", getUpcomingAppointmentsSummary);
+
+// Update
+notificationRouter.put("/:notificationId/read", markAsRead);
+notificationRouter.put("/read-all", markAllAsRead);
+
+// Delete
 notificationRouter.delete("/:notificationId", deleteNotification);
 
+// ❌ REMOVE public create endpoint
 export default notificationRouter;

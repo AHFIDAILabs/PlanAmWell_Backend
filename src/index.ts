@@ -12,6 +12,7 @@ import morgan from "morgan";
 import http from "http";
 import mongoose from "mongoose";
 import { errorHandler } from "./middleware/errorHandler";
+import "./cron/reminderJob";
 import categoryRouter from "./routes/categoryRoutes";
 import productRouter from "./routes/productRoutes";
 import doctorRouter from "./routes/doctorRoutes";

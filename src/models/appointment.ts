@@ -26,12 +26,15 @@ export interface IAppointment extends Document {
   shareUserInfo?: boolean;
 
   patientSnapshot?: {
-    fullName?: string;
+    name?: string;
     email?: string;
     phone?: string;
     gender?: string;
     dateOfBirth?: Date;
+    homeAddress?: string;
   };
+
+  reminderSent?: boolean; // ✨ NEW: Track if 15-min reminder was sent
 
   createdAt?: Date;
   updatedAt?: Date;
@@ -77,7 +80,11 @@ const AppointmentSchema = new Schema<IAppointment>(
       phone: String,
       gender: String,
       dateOfBirth: Date,
+      homeAddress: String,
     },
+
+    reminderSent: { type: Boolean, default: false }, // ✨ NEW
+
   },
   { timestamps: true }
 );

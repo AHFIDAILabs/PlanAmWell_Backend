@@ -16,7 +16,8 @@ export interface IDoctor extends Document {
   availability?: Record<string, any>;
   ratings?: number;
   reviews?: Array<{ userId: string; rating: number; comment: string }>;
-  status: "submitted" | "reviewing" | "approved" | "rejected"; // New field
+  status: "submitted" | "reviewing" | "approved" | "rejected";
+  expoPushTokens?: string[];
   createdAt: Date;
 }
 
@@ -45,10 +46,11 @@ const DoctorSchema = new Schema<IDoctor>(
     status: {
       type: String,
       enum: ["submitted", "reviewing", "approved", "rejected"],
-      default: "submitted", // default when doctor self-registers
+      default: "submitted",
       required: true,
     },
-    createdAt: { type: Date}
+    expoPushTokens: { type: [String], default: [] },
+    createdAt: { type: Date },
   },
   { timestamps: true }
 );

@@ -1,5 +1,5 @@
 import mongoose, { Document, Schema } from "mongoose";
-import bcrypt from 'bcryptjs';
+import bcrypt from "bcryptjs";
 import { IImage } from "./image";
 
 // --- Extended User Interface ---
@@ -20,8 +20,11 @@ export interface IUser extends Document {
   isAnonymous?: boolean;
   verified?: boolean;
   preferences?: Record<string, any>;
-  partnerId?: string; 
-  comparePassword: (enteredPassword: string) => Promise<boolean>; 
+  partnerId?: string;
+  expoPushTokens?: string[];
+  comparePassword: (enteredPassword: string) => Promise<boolean>;
+  addExpoPushToken: (token: string) => Promise<void>;
+  removeExpoPushToken: (token: string) => Promise<void>;
   createdAt: Date;
 }
 
@@ -31,7 +34,7 @@ const UserSchema = new Schema<IUser>(
     email: { type: String, unique: true, sparse: true },
     name: String,
     gender: String,
-    password: { type: String, select: false }, 
+    password: { type: String, select: false },
     confirmPassword: String,
     dateOfBirth: String,
     homeAddress: String,
@@ -44,45 +47,57 @@ const UserSchema = new Schema<IUser>(
     verified: { type: Boolean, default: false },
     preferences: { type: Object, default: {} },
     partnerId: { type: String },
+    expoPushTokens: { type: [String], default: [] },
     createdAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
 
 // ----------------------------------------------------------------
-// 1. Password Hashing Pre-Save Hook
+// Password Hashing Pre-Save Hook
 // ----------------------------------------------------------------
-UserSchema.pre('save', async function (next) {
-    if (!this.isModified('password') || !this.password) {
-        return next();
-    }
-    
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-        this.confirmPassword = undefined;
-        next();
-    } catch (error: any) {
-        next(error);
-    }
+UserSchema.pre("save", async function (next) {
+  if (!this.isModified("password") || !this.password) return next();
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    this.confirmPassword = undefined;
+    next();
+  } catch (error: any) {
+    next(error);
+  }
 });
 
 // ----------------------------------------------------------------
-// 2. Schema Method for Password Comparison - ✅ FIXED
+// Schema Method: Compare Password
 // ----------------------------------------------------------------
-UserSchema.methods.comparePassword = async function (enteredPassword: string): Promise<boolean> {
-    // ✅ Safety check: return false if password doesn't exist
-    if (!this.password) {
-        console.log('⚠️ comparePassword called but user has no password');
-        return false;
-    }
-    
-    try {
-        return await bcrypt.compare(enteredPassword, this.password);
-    } catch (error) {
-        console.error('❌ Password comparison error:', error);
-        return false;
-    }
+UserSchema.methods.comparePassword = async function (
+  enteredPassword: string
+): Promise<boolean> {
+  if (!this.password) return false;
+  try {
+    return await bcrypt.compare(enteredPassword, this.password);
+  } catch (error) {
+    console.error("❌ Password comparison error:", error);
+    return false;
+  }
+};
+
+// Add Expo Push Token
+UserSchema.methods.addExpoPushToken = async function (token: string) {
+  if (!token) return;
+  if (!this.expoPushTokens) this.expoPushTokens = [];
+  if (!this.expoPushTokens.includes(token)) {
+    this.expoPushTokens.push(token);
+    await this.save();
+  }
+};
+
+// Remove Expo Push Token
+UserSchema.methods.removeExpoPushToken = async function (token: string) {
+  if (!this.expoPushTokens || !token) return;
+  this.expoPushTokens = this.expoPushTokens.filter((t: string) => t !== token);
+  await this.save();
 };
 
 export const User = mongoose.model<IUser>("User", UserSchema);
