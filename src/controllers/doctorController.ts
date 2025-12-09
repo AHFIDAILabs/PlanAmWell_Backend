@@ -123,7 +123,42 @@ export const getDoctorCategories = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: categories });
 });
 
+// GET logged-in doctor profile
+export const getMyDoctorProfile = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.auth || req.auth.role !== "Doctor") {
+    return res.status(403).json({ message: "Unauthorized" });
+  }
 
+  const doctor = await Doctor.findById(req.auth.id)
+    .populate("doctorImage")
+    .select("-passwordHash");
+
+  if (!doctor) {
+    res.status(404);
+    throw new Error("Doctor not found");
+  }
+
+  res.status(200).json({ success: true, data: doctor });
+});
+
+// UPDATE Doctor Availability — doctor only
+export const updateDoctorAvailability = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.auth || req.auth.role !== "Doctor") {
+    return res.status(403).json({ message: "Unauthorized" });
+  }
+
+  const doctor = await Doctor.findById(req.auth.id);
+  if (!doctor) {
+    res.status(404);
+    throw new Error("Doctor not found");
+  }
+
+  // Expected payload: { availability: { Monday: { from: "09:00", to: "17:00" }, ... } }
+  doctor.availability = req.body.availability;
+  await doctor.save();
+
+  res.status(200).json({ success: true, data: doctor });
+});
 
 // UPDATE doctor — only admin can update status, doctor can update own profile
 export const updateDoctor = asyncHandler(async (req: Request, res: Response) => {
@@ -134,21 +169,58 @@ export const updateDoctor = asyncHandler(async (req: Request, res: Response) => 
     throw new Error("Doctor not found");
   }
 
-  // If user is a doctor, can only update own profile (except status)
+  // Doctor can only update their own profile
   if (req.auth?.role === "Doctor") {
     if (req.auth.id !== doctor._id?.toString()) {
       return res.status(403).json({ message: "You can only update your own profile" });
     }
-    // Prevent doctors from updating status themselves
+
+    // Prevent doctors from changing status
     if (req.body.status) delete req.body.status;
   }
 
-  // Only admin can update status
-  const updatedData = { ...req.body };
-  const updatedDoctor: IDoctor | null = await Doctor.findByIdAndUpdate(req.params.id, updatedData, {
-    new: true,
-    runValidators: true,
-  }).select("-passwordHash");
+  const updates: any = { ...req.body };
+
+  // ✅ Handle password change
+  if (req.body.password) {
+    const salt = await bcrypt.genSalt(10);
+    updates.passwordHash = await bcrypt.hash(req.body.password, salt);
+    delete updates.password;
+  }
+
+  // ✅ Handle profile image update
+  if (req.file) {
+    // Remove old image
+    if (doctor.doctorImage) {
+      const oldImage = await Image.findById(doctor.doctorImage);
+      if (oldImage?.imageCldId) {
+        await deleteFromCloudinary(oldImage.imageCldId);
+        await Image.findByIdAndDelete(oldImage._id);
+      }
+    }
+
+    // Upload new image
+    const { secure_url, public_id } = await uploadToCloudinary(
+      req.file.buffer,
+      "doctor-profiles"
+    );
+
+    const newImage = await Image.create({
+      imageUrl: secure_url,
+      imageCldId: public_id,
+      uploadedBy: doctor._id,
+    });
+
+    updates.doctorImage = newImage._id;
+  }
+
+  const updatedDoctor: IDoctor | null = await Doctor.findByIdAndUpdate(
+    req.params.id,
+    updates,
+    { new: true, runValidators: true }
+  )
+    .populate("doctorImage")
+    .select("-passwordHash");
 
   res.status(200).json({ success: true, data: updatedDoctor });
 });

@@ -41,7 +41,7 @@ export const createAppointment = asyncHandler(async (req: Request, res: Response
 
     if (user) {
       patientSnapshot = {
-        name: user.name,
+        name: user.name || "Anonymous",
         email: user.email,
         phone: user.phone,
         gender: user.gender,

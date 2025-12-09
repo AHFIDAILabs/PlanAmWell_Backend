@@ -5,6 +5,8 @@ import {
   getDoctorCategories,
   createDoctor,
   updateDoctor,
+  getMyDoctorProfile,
+  updateDoctorAvailability,
   deleteDoctor,
 } from "../controllers/doctorController";
 import { verifyToken, authorize, guestAuth } from "../middleware/auth";
@@ -43,6 +45,8 @@ doctorRouter.get("/", getDoctors);
 
 doctorRouter.get("/doctorCategories", getDoctorCategories )
 
+doctorRouter.get("/profile", guestAuth, verifyToken, getMyDoctorProfile);
+
 /**
  * ANY AUTH USER — get specific doctor profile
  * Admin can access any status; others only 'approved'
@@ -61,6 +65,10 @@ doctorRouter.put(
   upload.single("doctorImage"), 
   updateDoctor
 );
+
+doctorRouter.put("/availability", guestAuth, verifyToken, authorize("Doctor"), updateDoctorAvailability);
+
+
 
 /**
  * ADMIN ONLY — delete doctor
