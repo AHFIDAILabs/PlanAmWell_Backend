@@ -74,11 +74,16 @@ export const getUnreadCount = async (req: Request, res: Response) => {
   try {
     const userId = req.auth!.id;
     const count = await Notification.countDocuments({ userId, isRead: false });
-    res.json({ success: true, count });
+
+    res.json({ 
+      success: true, 
+      data: { count }  // ✅ wrap inside "data"
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 /**
  * ✅ Mark notification as read
