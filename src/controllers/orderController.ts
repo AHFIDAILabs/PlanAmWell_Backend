@@ -3,6 +3,7 @@ import axios from "axios";
 import asyncHandler from "../middleware/asyncHandler";
 import { Order, IOrderItem } from "../models/order";
 import { v4 as uuidv4 } from "uuid";
+import { createOrderNotification } from "../util/sendPushNotification";
 
 const API_BASE = process.env.PARTNER_API_URL;
 
@@ -70,6 +71,21 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     paymentStatus: "pending",
     deliveryStatus: "pending",
   });
+
+  // ✅ Send order placed notification (only for registered users)
+  if (userId) {
+    try {
+      await createOrderNotification(
+        userId.toString(),
+        (order._id as any).toString(),
+        "placed",
+        `Your order #${order.orderNumber.slice(0, 8)} has been placed successfully!`
+      );
+    } catch (notifError) {
+      console.error("[OrderController] Failed to send notification:", notifError);
+      // Don't fail the order creation if notification fails
+    }
+  }
 
   // --- Prepare Partner API Payload ---
   const apiItems = items.map((item: IOrderItem) => ({
@@ -147,6 +163,64 @@ export const updateOrder = asyncHandler(async (req: Request, res: Response) => {
   });
 
   await order.save();
+
+  res.status(200).json({ success: true, data: order });
+});
+
+/**
+ * Admin: Update order status (payment or delivery)
+ * ✅ Sends notifications on status changes
+ */
+export const updateOrderStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { paymentStatus, deliveryStatus } = req.body;
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    res.status(404);
+    throw new Error("Order not found");
+  }
+
+  // Update statuses if provided
+  if (paymentStatus) order.paymentStatus = paymentStatus;
+  if (deliveryStatus) order.deliveryStatus = deliveryStatus;
+
+  await order.save();
+
+  // ✅ Send notification based on delivery status change (only for registered users)
+  if (deliveryStatus && order.userId) {
+    try {
+      const statusMessages: Record<string, { type: "placed" | "confirmed" | "shipped" | "delivered" | "cancelled", message: string }> = {
+        confirmed: { 
+          type: "confirmed", 
+          message: `Order #${order.orderNumber.slice(0, 8)} confirmed and being processed` 
+        },
+        shipped: { 
+          type: "shipped", 
+          message: `Order #${order.orderNumber.slice(0, 8)} has been shipped!` 
+        },
+        delivered: { 
+          type: "delivered", 
+          message: `Order #${order.orderNumber.slice(0, 8)} has been delivered. Enjoy!` 
+        },
+        cancelled: { 
+          type: "cancelled", 
+          message: `Order #${order.orderNumber.slice(0, 8)} has been cancelled` 
+        },
+      };
+
+      const statusInfo = statusMessages[deliveryStatus];
+      if (statusInfo) {
+        await createOrderNotification(
+          order.userId.toString(),
+          (order._id as any).toString(),
+          statusInfo.type,
+          statusInfo.message
+        );
+      }
+    } catch (notifError) {
+      console.error("[OrderController] Failed to send status notification:", notifError);
+    }
+  }
 
   res.status(200).json({ success: true, data: order });
 });

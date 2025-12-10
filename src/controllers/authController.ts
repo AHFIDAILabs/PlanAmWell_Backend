@@ -27,6 +27,79 @@ export const createGuestSession = asyncHandler(async (req: Request, res: Respons
   });
 });
 
+
+// -------------------- Push Token Management --------------------
+
+/**
+ * 📲 Register Expo push token
+ * POST /auth/register-push-token
+ */
+export const registerPushToken = asyncHandler(async (req: Request, res: Response) => {
+  const { token } = req.body;
+  const userId = req.auth?.id;
+
+  if (!token) {
+    res.status(400);
+    throw new Error("Push token is required");
+  }
+
+  if (!userId) {
+    res.status(401);
+    throw new Error("Unauthorized - User not found");
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  // Use the helper method from your User model
+  await user.addExpoPushToken(token);
+
+  console.log(`[PushToken] Registered token for user ${userId}`);
+  
+  res.status(200).json({ 
+    success: true, 
+    message: "Push token registered successfully" 
+  });
+});
+
+/**
+ * 🗑️ Remove Expo push token (on logout)
+ * POST /auth/remove-push-token
+ */
+export const removePushToken = asyncHandler(async (req: Request, res: Response) => {
+  const { token } = req.body;
+  const userId = req.auth?.id;
+
+  if (!token) {
+    res.status(400);
+    throw new Error("Push token is required");
+  }
+
+  if (!userId) {
+    res.status(401);
+    throw new Error("Unauthorized - User not found");
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  // Use the helper method from your User model
+  await user.removeExpoPushToken(token);
+
+  console.log(`[PushToken] Removed token for user ${userId}`);
+  
+  res.status(200).json({ 
+    success: true, 
+    message: "Push token removed successfully" 
+  });
+});
+
 // -------------------- Convert Guest -> Full User --------------------
 
 // POST /auth/convert

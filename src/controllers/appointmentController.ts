@@ -4,7 +4,7 @@ import { Appointment, IAppointment } from "../models/appointment";
 import { sendPushNotification } from "../util/sendPushNotification";
 import { Doctor } from "../models/doctor";
 import { User } from "../models/user";
-import { createAppointmentNotification } from "./notification"; 
+import { createAppointmentNotification } from "../util/sendPushNotification";
 
 /**
  * @desc Create Appointment (Users)
@@ -48,23 +48,40 @@ export const createAppointment = asyncHandler(
       }
     }
 
-    const appointment = await Appointment.create({
-      userId: req.auth?.id,
-      doctorId,
-      scheduledAt,
-      duration,
-      notes,
-      reason,
-      shareUserInfo: !!shareUserInfo,
-      patientSnapshot,
-    });
+  const appointment = await Appointment.create({
+  userId: req.auth?.id,
+  doctorId,
+  scheduledAt,
+  duration,
+  notes,
+  reason,
+  shareUserInfo: !!shareUserInfo,
+  patientSnapshot,
+});
 
-    res.status(201).json({
-      success: true,
-      data: appointment,
-      message:
-        "Appointment request sent successfully. Awaiting doctor review.",
-    });
+// ✅ ADD THIS NOTIFICATION
+if (req.auth?.id) {
+  try {
+    const doctorName = `${doctor.firstName} ${doctor.lastName}`;
+    await createAppointmentNotification(
+      req.auth.id,
+      String(appointment._id),
+      "confirmed", // You can change this to "placed" or create a new type
+      doctorName,
+      new Date(scheduledAt)
+    );
+  } catch (notifError) {
+    console.error("[AppointmentController] Failed to send notification:", notifError);
+    // Don't fail the appointment creation if notification fails
+  }
+}
+
+res.status(201).json({
+  success: true,
+  data: appointment,
+  message:
+    "Appointment request sent successfully. Awaiting doctor review.",
+});
   }
 );
 
@@ -246,7 +263,7 @@ export const updateAppointment = asyncHandler(
 
               await createAppointmentNotification(
                 updatedAppointment.userId.toString(),
-                updatedAppointment._id,
+                String(updatedAppointment._id),
                 "reminder",
                 doctorName,
                 updatedAppointment.scheduledAt
