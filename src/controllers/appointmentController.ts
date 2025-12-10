@@ -173,34 +173,18 @@ console.log("APPOINTMENT DOCTOR:", appointment.doctorId.toString());
     }
 
     // Doctor updates
-    if (role === "Doctor") {
-      if (req.body.status) {
-        const allowedDoctorStatuses = [
-          "confirmed",
-          "rejected",
-          "rescheduled",
-          "completed",
-        ];
-        if (!allowedDoctorStatuses.includes(req.body.status)) {
-          return res
-            .status(400)
-            .json({ message: "Invalid status update for doctor." });
-        }
-        updates.status = req.body.status;
-
-        if (req.body.status === "rescheduled") {
-          if (!req.body.proposedAt) {
-            return res.status(400).json({
-              message: "proposedAt date is required when rescheduling.",
-            });
-          }
-          updates.proposedAt = req.body.proposedAt;
-        }
-      }
-
-      if (req.body.notes) updates.notes = req.body.notes;
-      if (req.body.duration) updates.duration = req.body.duration;
-    }
+if (role === "Doctor") {
+  // Handle both populated object and ObjectId
+  const doctorIdString = typeof appointment.doctorId === 'object' 
+    ? (appointment.doctorId as any)._id?.toString() 
+    : appointment.doctorId.toString();
+    
+  if (doctorIdString !== userId) {
+    return res.status(403).json({
+      message: "You can only update appointments assigned to you.",
+    });
+  }
+}
 
     // Apply updates
     const updatedAppointment = (await Appointment.findByIdAndUpdate(
