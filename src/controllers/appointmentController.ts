@@ -5,6 +5,7 @@ import { sendPushNotification } from "../util/sendPushNotification";
 import { Doctor } from "../models/doctor";
 import { User } from "../models/user";
 import { createAppointmentNotification } from "../util/sendPushNotification";
+import Notification from "../models/notifications";
 
 /**
  * @desc Create Appointment (Users)
@@ -123,6 +124,7 @@ export const getDoctorAppointments = asyncHandler(
  * @access User | Doctor
  */
 
+
 export const updateAppointment = asyncHandler(
   async (req: Request, res: Response) => {
     const appointment = await Appointment.findById(req.params.id).populate(
@@ -136,6 +138,9 @@ export const updateAppointment = asyncHandler(
 
     const userId = req.auth?.id;
     const role = req.auth?.role;
+console.log("AUTH USER:", userId);
+console.log("AUTH ROLE:", role);
+console.log("APPOINTMENT DOCTOR:", appointment.doctorId.toString());
 
     // Permission checks
     if (role === "User" && appointment.userId.toString() !== userId) {
