@@ -174,17 +174,20 @@ console.log("APPOINTMENT DOCTOR:", appointment.doctorId.toString());
 
     // Doctor updates
 if (role === "Doctor") {
-  // Handle both populated object and ObjectId
-  const doctorIdString = typeof appointment.doctorId === 'object' 
-    ? (appointment.doctorId as any)._id?.toString() 
-    : appointment.doctorId.toString();
-    
-  if (doctorIdString !== userId) {
+  const doctorId = appointment.doctorId;
+
+  const doctorIdString =
+    doctorId && typeof doctorId === "object" && "_id" in doctorId
+      ? (doctorId as { _id: any })._id.toString()
+      : doctorId;
+
+  if (!doctorIdString || doctorIdString !== userId) {
     return res.status(403).json({
       message: "You can only update appointments assigned to you.",
     });
   }
 }
+
 
     // Apply updates
     const updatedAppointment = (await Appointment.findByIdAndUpdate(
