@@ -1,9 +1,11 @@
 // models/Appointment.ts
 import mongoose, { Schema, Types, Document } from "mongoose";
+import { IDoctor } from "./doctor";
 
 export interface IAppointment extends Document {
   userId: Types.ObjectId;
-  doctorId: Types.ObjectId;
+  doctorId: Types.ObjectId | IDoctor;
+
 
   scheduledAt: Date;
   proposedAt?: Date;

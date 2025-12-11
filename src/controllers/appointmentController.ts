@@ -49,40 +49,38 @@ export const createAppointment = asyncHandler(
       }
     }
 
-  const appointment = await Appointment.create({
-  userId: req.auth?.id,
-  doctorId,
-  scheduledAt,
-  duration,
-  notes,
-  reason,
-  shareUserInfo: !!shareUserInfo,
-  patientSnapshot,
-});
+    const appointment = await Appointment.create({
+      userId: req.auth?.id,
+      doctorId,
+      scheduledAt,
+      duration,
+      notes,
+      reason,
+      shareUserInfo: !!shareUserInfo,
+      patientSnapshot,
+    });
 
-// ✅ ADD THIS NOTIFICATION
-if (req.auth?.id) {
-  try {
-    const doctorName = `${doctor.firstName} ${doctor.lastName}`;
-    await createAppointmentNotification(
-      req.auth.id,
-      String(appointment._id),
-      "confirmed", // You can change this to "placed" or create a new type
-      doctorName,
-      new Date(scheduledAt)
-    );
-  } catch (notifError) {
-    console.error("[AppointmentController] Failed to send notification:", notifError);
-    // Don't fail the appointment creation if notification fails
-  }
-}
+    // ✅ ADD THIS NOTIFICATION
+    if (req.auth?.id) {
+      try {
+        const doctorName = `${doctor.firstName} ${doctor.lastName}`;
+        await createAppointmentNotification(
+          req.auth.id,
+          String(appointment._id),
+          "confirmed",
+          doctorName,
+          new Date(scheduledAt)
+        );
+      } catch (notifError) {
+        console.error("[AppointmentController] Failed to send notification:", notifError);
+      }
+    }
 
-res.status(201).json({
-  success: true,
-  data: appointment,
-  message:
-    "Appointment request sent successfully. Awaiting doctor review.",
-});
+    res.status(201).json({
+      success: true,
+      data: appointment,
+      message: "Appointment request sent successfully. Awaiting doctor review.",
+    });
   }
 );
 
@@ -123,14 +121,10 @@ export const getDoctorAppointments = asyncHandler(
  * @route PATCH /api/v1/appointments/:id
  * @access User | Doctor
  */
-
-
 export const updateAppointment = asyncHandler(
   async (req: Request, res: Response) => {
-    const appointment = await Appointment.findById(req.params.id).populate(
-      "doctorId",
-      "firstName lastName"
-    );
+    // ✅ FIXED: Fetch appointment WITHOUT populating doctorId first for validation
+    const appointment = await Appointment.findById(req.params.id);
     if (!appointment) {
       res.status(404);
       throw new Error("Appointment not found.");
@@ -138,30 +132,40 @@ export const updateAppointment = asyncHandler(
 
     const userId = req.auth?.id;
     const role = req.auth?.role;
-console.log("AUTH USER:", userId);
-console.log("AUTH ROLE:", role);
-console.log("APPOINTMENT DOCTOR:", appointment.doctorId.toString());
 
-    // Permission checks
-    if (role === "User" && appointment.userId.toString() !== userId) {
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("🔍 BACKEND APPOINTMENT UPDATE DEBUG");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("AUTH USER ID:", userId);
+    console.log("AUTH ROLE:", role);
+    console.log("APPOINTMENT USER ID:", appointment.userId?.toString());
+    console.log("APPOINTMENT DOCTOR ID:", appointment.doctorId?.toString());
+    console.log("doctorId type:", typeof appointment.doctorId);
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // ✅ Permission checks - SINGLE CHECK, PROPERLY CONVERTED TO STRING
+    if (role === "User" && appointment.userId?.toString() !== userId) {
       return res
         .status(403)
         .json({ message: "You can only update your own appointments." });
     }
-    if (role === "Doctor" && appointment.doctorId.toString() !== userId) {
+
+    if (role === "Doctor" && appointment.doctorId?.toString() !== userId) {
+      console.log("❌ Doctor ID mismatch!");
+      console.log("Expected:", userId);
+      console.log("Got:", appointment.doctorId?.toString());
       return res.status(403).json({
         message: "You can only update appointments assigned to you.",
       });
     }
 
+    console.log("✅ Permission check passed!");
+
     const updates: Partial<IAppointment> = {};
 
     // User updates
     if (role === "User") {
-      if (
-        req.body.status === "cancelled" &&
-        appointment.status === "pending"
-      ) {
+      if (req.body.status === "cancelled" && appointment.status === "pending") {
         updates.status = "cancelled";
       }
       if (req.body.scheduledAt) updates.scheduledAt = req.body.scheduledAt;
@@ -173,23 +177,15 @@ console.log("APPOINTMENT DOCTOR:", appointment.doctorId.toString());
     }
 
     // Doctor updates
-if (role === "Doctor") {
-  const doctorId = appointment.doctorId;
+    if (role === "Doctor") {
+      if (req.body.status) updates.status = req.body.status;
+      if (req.body.notes) updates.notes = req.body.notes;
+      if (req.body.scheduledAt) updates.scheduledAt = req.body.scheduledAt;
+    }
 
-  const doctorIdString =
-    doctorId && typeof doctorId === "object" && "_id" in doctorId
-      ? (doctorId as { _id: any })._id.toString()
-      : doctorId;
+    console.log("📝 Updates to apply:", updates);
 
-  if (!doctorIdString || doctorIdString !== userId) {
-    return res.status(403).json({
-      message: "You can only update appointments assigned to you.",
-    });
-  }
-}
-
-
-    // Apply updates
+    // Apply updates and NOW populate for response
     const updatedAppointment = (await Appointment.findByIdAndUpdate(
       req.params.id,
       updates,
@@ -197,6 +193,14 @@ if (role === "Doctor") {
     ).populate("doctorId", "firstName lastName")) as (IAppointment & {
       _id: string;
     }) | null;
+
+    if (!updatedAppointment) {
+      res.status(404);
+      throw new Error("Failed to update appointment.");
+    }
+
+    console.log("✅ Appointment updated successfully!");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
     // ✨ Create notification in database + send push notification
     if (
@@ -324,19 +328,18 @@ export const deleteAppointment = asyncHandler(
 export const sendAppointmentReminders = async () => {
   try {
     const now = new Date();
-    const reminderTime = new Date(now.getTime() + 15 * 60 * 1000); // 15 minutes from now
+    const reminderTime = new Date(now.getTime() + 15 * 60 * 1000);
 
-   const upcomingAppointments = (await Appointment.find({
-  status: "confirmed",
-  scheduledAt: {
-    $gte: now,
-    $lte: reminderTime,
-  },
-  reminderSent: { $ne: true },
-}).populate("doctorId", "firstName lastName")) as (IAppointment & {
-  _id: string;
-})[];
-
+    const upcomingAppointments = (await Appointment.find({
+      status: "confirmed",
+      scheduledAt: {
+        $gte: now,
+        $lte: reminderTime,
+      },
+      reminderSent: { $ne: true },
+    }).populate("doctorId", "firstName lastName")) as (IAppointment & {
+      _id: string;
+    })[];
 
     for (const appt of upcomingAppointments) {
       const doctor = appt.doctorId as any;
