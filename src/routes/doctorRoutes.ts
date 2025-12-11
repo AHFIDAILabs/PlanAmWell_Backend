@@ -47,32 +47,14 @@ doctorRouter.get("/doctorCategories", getDoctorCategories )
 
 doctorRouter.get("/profile", guestAuth, verifyToken, getMyDoctorProfile);
 
-/**
- * ANY AUTH USER — get specific doctor profile
- * Admin can access any status; others only 'approved'
- */
-doctorRouter.get("/:id", guestAuth, verifyToken, authorize("User", "Doctor", "Admin"), getDoctor);
-
-/**
- * DOCTOR — update own profile (except status)
- * ADMIN — can update any field including status
- */
-doctorRouter.put(
-  "/:id",
-  guestAuth,
-  verifyToken,
-  authorize("Doctor", "Admin"),
-  upload.single("doctorImage"), 
-  updateDoctor
-);
-
 doctorRouter.put("/availability", guestAuth, verifyToken, authorize("Doctor"), updateDoctorAvailability);
 
 
-
-/**
- * ADMIN ONLY — delete doctor
- */
+// NOW the /:id routes
+doctorRouter.get("/:id", guestAuth, verifyToken, authorize("User", "Doctor", "Admin"), getDoctor);
+doctorRouter.put("/:id", guestAuth, verifyToken, authorize("Doctor", "Admin"), upload.single("doctorImage"), updateDoctor);
 doctorRouter.delete("/:id", guestAuth, verifyToken, authorize("Admin"), deleteDoctor);
+
+
 
 export default doctorRouter;
