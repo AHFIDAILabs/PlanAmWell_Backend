@@ -29,6 +29,7 @@ import advocacyRouter from "./routes/advocacyRoutes";
 import commentRouter from "./routes/commentRoutes";
 import adminRouter from "./routes/adminRoutes";
 import appointmentRouter from "./routes/appointmentRoutes";
+import videoRouter from "./routes/videoRoutes";
 
 // Initialize Express app
 const app = express();
@@ -72,6 +73,7 @@ app.use("/api/v1/whatsapp", whatsappRouter);
 app.use("/api/v1/advocacy", advocacyRouter);
 app.use("/api/v1/comment", commentRouter);
 app.use("/api/v1/appointments", appointmentRouter);
+app.use("/api/v1/video", videoRouter);
 
 
 
