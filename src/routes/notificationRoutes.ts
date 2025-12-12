@@ -7,12 +7,13 @@ import {
   markAllAsRead,
   deleteNotification,
   getUpcomingAppointmentsSummary,
+  createNotification, // <-- ADDED import for Admin creation
 } from "../controllers/notification";
-import { guestAuth, verifyToken } from "../middleware/auth"; 
+import { guestAuth, verifyToken, authorize } from "../middleware/auth"; // <-- ADDED authorize
 
 const notificationRouter = express.Router();
 
-// 🔒 All routes protected
+// 🔒 Routes protected by default (User/Doctor)
 notificationRouter.use(guestAuth, verifyToken);
 
 // Read
@@ -24,8 +25,11 @@ notificationRouter.get("/appointments-summary", getUpcomingAppointmentsSummary);
 notificationRouter.put("/:notificationId/read", markAsRead);
 notificationRouter.put("/read-all", markAllAsRead);
 
+// Create (Admin/System Use)
+// 🔒 Only Admin can create notifications manually
+notificationRouter.post("/", authorize("Admin"), createNotification); // <-- ADDED Admin route
+
 // Delete
 notificationRouter.delete("/:notificationId", deleteNotification);
 
-// ❌ REMOVE public create endpoint
 export default notificationRouter;

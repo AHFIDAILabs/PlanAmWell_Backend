@@ -37,7 +37,7 @@ export const createDoctor = asyncHandler(async (req: Request, res: Response) => 
     res.status(400);
     throw new Error("Doctor profile image is required for registration.");
   }
-  
+
   // 2. Hash Password (CRITICAL SECURITY STEP)
   if (!password) {
     res.status(400);
@@ -56,7 +56,7 @@ export const createDoctor = asyncHandler(async (req: Request, res: Response) => 
       "doctor-profiles"
     );
 
-   // 4. Create new Image document
+    // 4. Create new Image document
     newImage = await Image.create({
       imageUrl: secure_url,
       imageCldId: public_id,
@@ -68,17 +68,17 @@ export const createDoctor = asyncHandler(async (req: Request, res: Response) => 
       ...doctorData,
       passwordHash,
       // 🎯 FIX APPLIED HERE: Assert to 'unknown' first, then to mongoose.Types.ObjectId
-      doctorImage: newImage._id as unknown as mongoose.Types.ObjectId, 
+      doctorImage: newImage._id as unknown as mongoose.Types.ObjectId,
       status: "submitted", // default on self-registration
     });
 
-    newDoctor = createdDoctor as IDoctor; 
-    
+    newDoctor = createdDoctor as IDoctor;
+
     // 6. Update the Image document with the doctor's ID
     if (newImage && newDoctor._id) {
-        // You might need the double assertion here too if newDoctor._id is a string type
-        newImage.uploadedBy = newDoctor._id as unknown as mongoose.Types.ObjectId;
-        await newImage.save();
+      // You might need the double assertion here too if newDoctor._id is a string type
+      newImage.uploadedBy = newDoctor._id as unknown as mongoose.Types.ObjectId;
+      await newImage.save();
     }
     // 7. Fetch final document for response
     // The result from findById is also a complex Mongoose type, assert it too.
@@ -86,27 +86,27 @@ export const createDoctor = asyncHandler(async (req: Request, res: Response) => 
       .populate("doctorImage")
       .select("-passwordHash") as IDoctor; // <-- Assertion here as well
 
-    res.status(201).json({ 
-        success: true, 
-        data: responseDoctor,
-        message: "Registration successful. Your profile is now under review."
+    res.status(201).json({
+      success: true,
+      data: responseDoctor,
+      message: "Registration successful. Your profile is now under review."
     });
-    
+
   } catch (error: any) {
     console.error("Doctor Registration Failed:", error.message);
-    
+
     // CRITICAL: Cleanup if doctor creation failed but image upload succeeded
     if (newImage?.imageCldId) {
       await deleteFromCloudinary(newImage.imageCldId);
       await Image.findByIdAndDelete(newImage._id);
     }
-    
+
     // If the error is a duplicate key error (e.g., email unique constraint), handle it
     if (error.code === 11000) {
-        res.status(409);
-        throw new Error("Registration failed: Email already in use.");
+      res.status(409);
+      throw new Error("Registration failed: Email already in use.");
     }
-    
+
     res.status(500);
     throw new Error(`Registration failed: ${error.message}`);
   }
@@ -241,3 +241,27 @@ export const deleteDoctor = asyncHandler(async (req: Request, res: Response) => 
 
   res.status(200).json({ success: true, message: "Doctor deleted successfully" });
 });
+
+
+// controllers/doctorController.ts
+export const updateDoctorPushToken = async (req: Request, res: Response) => {
+  try {
+    const doctorId = req.auth!.id;
+    const { expoPushToken } = req.body;
+
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ message: 'Doctor not found' });
+    }
+
+    // Add token if not already present
+    if (!doctor.expoPushTokens?.includes(expoPushToken)) {
+      doctor.expoPushTokens?.push(expoPushToken);
+      await doctor.save();
+    }
+
+    res.json({ success: true, message: 'Push token updated' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

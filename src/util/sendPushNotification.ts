@@ -1,28 +1,40 @@
 import { Document } from "mongoose";
 import Expo from "expo-server-sdk";
 import { User } from "../models/user";
+import { Doctor } from "../models/doctor";
 import Notification, { INotification } from "../models/notifications";
 
 // Create a new Expo SDK client
 const expo = new Expo();
 
 /**
- * 📲 Send push notification to a user
+ * 📲 Send push notification to ANY user (User or Doctor)
+ * @param userId - ID of the User or Doctor to notify
+ * @param notification - The Mongoose notification document
  */
 export async function sendPushNotification(
   userId: string,
+  // Use a Mongoose Document type with the INotification interface
   notification: Document<unknown, {}, INotification> & INotification
 ) {
   try {
-    const user = await User.findById(userId).select("expoPushTokens");
+    // Try to find user in User model first
+    let user = await User.findById(userId).select("expoPushTokens");
+
+    // If not found, try Doctor model
+    if (!user) {
+      // Use the Doctor model's type definition for better safety than 'as any'
+      user = await Doctor.findById(userId).select("expoPushTokens") as typeof Doctor.prototype | null;
+    }
+
     if (!user || !user.expoPushTokens?.length) {
       console.log(`[PushNotification] No tokens found for user ${userId}`);
       return;
     }
 
     const messages = user.expoPushTokens
-      .filter((token) => Expo.isExpoPushToken(token))
-      .map((token) => ({
+      .filter((token: string) => Expo.isExpoPushToken(token))
+      .map((token: string) => ({
         to: token,
         sound: "default" as const,
         title: notification.title,
@@ -39,7 +51,9 @@ export async function sendPushNotification(
     for (const chunk of chunks) {
       try {
         const tickets = await expo.sendPushNotificationsAsync(chunk);
-        console.log(`[PushNotification] Sent ${tickets.length} notifications to user ${userId}`);
+        console.log(
+          `[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`
+        );
       } catch (err) {
         console.error("[PushNotification] Error sending push notifications:", err);
       }
@@ -50,7 +64,46 @@ export async function sendPushNotification(
 }
 
 /**
- * 🔔 Create appointment notification and send push
+ * 🔔 NEW: Create notification for ANY user (User or Doctor)
+ */
+export const createNotificationForUser = async (
+  userId: string,
+  title: string,
+  message: string,
+  type: "appointment" | "order" | "article" | "supplement" | "system",
+  metadata?: any
+) => {
+  try {
+    const notification = await Notification.create({
+      userId,
+      type,
+      title,
+      message,
+      metadata,
+      isRead: false,
+    });
+
+    // Send push notification
+    try {
+      await sendPushNotification(
+        userId,
+        // The return type of .create() is complex, but the function handles the Document type
+        notification as Document<unknown, {}, INotification> & INotification
+      );
+    } catch (err) {
+      console.error("Failed to send push notification:", err);
+    }
+
+    console.log(`✅ Notification created and sent to ${userId}`);
+    return notification;
+  } catch (error) {
+    console.error(`❌ Failed to create notification for ${userId}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * 🔔 LEGACY: Create appointment notification for patients (backward compatibility)
  */
 export const createAppointmentNotification = async (
   userId: string,
@@ -68,18 +121,29 @@ export const createAppointmentNotification = async (
 
   const notification = await Notification.create({
     userId,
-    type: "appointment", // ✅ Fixed: matches schema enum
-    title: type === "reminder" ? "Appointment Starting Soon" : "Appointment Update",
+    type: "appointment",
+    title:
+      type === "reminder" ? "Appointment Starting Soon" : "Appointment Update",
     message: messages[type],
-    metadata: { 
-      appointmentId, 
-      time: scheduledAt.toISOString() // Store as ISO string
+    metadata: {
+      appointmentId,
+      doctorName,
+      scheduledAt: scheduledAt.toISOString(),
+      status: type, // Added 'status' for consistency
     },
     isRead: false,
   });
 
   // Send push notification
-  await sendPushNotification(userId, notification);
+  try {
+    await sendPushNotification(
+      userId,
+      notification as Document<unknown, {}, INotification> & INotification
+    );
+  } catch (err) {
+    console.error("Failed to send push notification:", err);
+  }
+
   return notification;
 };
 
@@ -109,6 +173,9 @@ export const createOrderNotification = async (
     isRead: false,
   });
 
-  await sendPushNotification(userId, notification);
+  await sendPushNotification(
+    userId,
+    notification as Document<unknown, {}, INotification> & INotification
+  );
   return notification;
 };

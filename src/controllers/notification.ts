@@ -2,49 +2,8 @@ import { Request, Response } from "express";
 import Notification, { INotification } from "../models/notifications";
 import { Appointment } from "../models/appointment";
 import { Document } from "mongoose";
-import { sendPushNotification } from "../util/sendPushNotification"; 
+import {  createNotificationForUser } from "../util/sendPushNotification"; // 👈 Imported
 
-/**
- * 🔔 Helper: Create notification for appointment status changes
- */
-export const createAppointmentNotification = async (
-  userId: string,
-  appointmentId: string,
-  type: "confirmed" | "rejected" | "cancelled" | "reminder",
-  doctorName: string,
-  scheduledAt: Date
-) => {
-  const messages = {
-    confirmed: `Dr. ${doctorName} confirmed your appointment for ${scheduledAt.toLocaleString()}`,
-    rejected: `Dr. ${doctorName} declined your appointment request. Please choose another time.`,
-    cancelled: `Your appointment with Dr. ${doctorName} has been cancelled.`,
-    reminder: `Your appointment with Dr. ${doctorName} starts in 15 minutes!`,
-  };
-
-const notification = await Notification.create({
-  userId,
-  type: "appointment", // ✅ matches schema
-  title: type === "reminder" ? "Appointment Starting Soon" : "Appointment Update",
-  message: messages[type],
-  metadata: {
-    appointmentId,
-    status: type,
-    doctorName,
-    scheduledAt,
-  },
-  isRead: false,
-});
-
-
-  // ✅ Send push notification via Expo
-try {
-  await sendPushNotification(userId, notification as Document<unknown, {}, INotification> & INotification);
-} catch (err) {
-  console.error("Failed to send push notification:", err);
-}
-
-  return notification;
-};
 
 /**
  * 📥 Get user notifications
@@ -54,6 +13,8 @@ export const getNotifications = async (req: Request, res: Response) => {
     const filter = (req.query.filter as string) || "all";
     const userId = req.auth!.id;
 
+    console.log("🔍 Fetching notifications for:", userId, "filter:", filter);
+
     const query: any = { userId };
     if (filter === "unread") query.isRead = false;
 
@@ -61,8 +22,11 @@ export const getNotifications = async (req: Request, res: Response) => {
       .sort({ createdAt: -1 })
       .limit(50);
 
+    console.log("✅ Found notifications:", notifications.length);
+
     res.json({ success: true, data: notifications });
   } catch (error: any) {
+    console.error("❌ Error fetching notifications:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -75,15 +39,14 @@ export const getUnreadCount = async (req: Request, res: Response) => {
     const userId = req.auth!.id;
     const count = await Notification.countDocuments({ userId, isRead: false });
 
-    res.json({ 
-      success: true, 
-      data: { count }  // ✅ wrap inside "data"
+    res.json({
+      success: true,
+      data: { count },
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 
 /**
  * ✅ Mark notification as read
@@ -116,14 +79,26 @@ export const markAllAsRead = async (req: Request, res: Response) => {
  */
 export const createNotification = async (req: Request, res: Response) => {
   try {
-    const notification = await Notification.create(req.body);
-    // Optional: send push notification automatically if userId is provided
-    if (notification.userId) {
-      const userIdStr = notification.userId.toString();
-      await sendPushNotification(userIdStr, notification as Document<unknown, {}, INotification> & INotification);
+    const { userId, title, message, type, metadata } = req.body;
+
+    if (!userId || !title || !message || !type) {
+      return res.status(400).json({ success: false, message: "Missing required fields (userId, title, message, type)." });
     }
+
+    // ✅ ALIGNMENT FIX: Use the high-level wrapper utility
+    const notification = await createNotificationForUser(
+      userId.toString(),
+      title,
+      message,
+      type,
+      metadata
+    );
+
+    // The utility function already created the DB entry and sent the push.
     res.status(201).json({ success: true, data: notification });
   } catch (error: any) {
+    console.error("❌ Error in createNotification (Admin):", error);
+    // Ensure 500 status if the utility function threw an error
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -144,12 +119,14 @@ export const deleteNotification = async (req: Request, res: Response) => {
 /**
  * 📊 Get upcoming appointments summary for profile screen
  */
-export const getUpcomingAppointmentsSummary = async (req: Request, res: Response) => {
+export const getUpcomingAppointmentsSummary = async (
+  req: Request,
+  res: Response
+) => {
   try {
     const userId = req.auth!.id;
     const now = new Date();
 
-    // Get next 3 upcoming confirmed appointments
     const upcomingAppointments = await Appointment.find({
       userId,
       status: "confirmed",
@@ -159,7 +136,6 @@ export const getUpcomingAppointmentsSummary = async (req: Request, res: Response
       .sort({ scheduledAt: 1 })
       .limit(3);
 
-    // Count pending appointments
     const pendingCount = await Appointment.countDocuments({
       userId,
       status: "pending",

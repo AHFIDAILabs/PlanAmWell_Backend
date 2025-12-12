@@ -7,6 +7,7 @@ import {
   updateDoctor,
   getMyDoctorProfile,
   updateDoctorAvailability,
+  updateDoctorPushToken,
   deleteDoctor,
 } from "../controllers/doctorController";
 import { verifyToken, authorize, guestAuth } from "../middleware/auth";
@@ -48,6 +49,8 @@ doctorRouter.get("/doctorCategories", getDoctorCategories )
 doctorRouter.get("/profile", guestAuth, verifyToken, getMyDoctorProfile);
 
 doctorRouter.put("/availability", guestAuth, verifyToken, authorize("Doctor"), updateDoctorAvailability);
+
+doctorRouter.put("/update-push-token", guestAuth, verifyToken, authorize("Doctor"), updateDoctorPushToken);
 
 
 // NOW the /:id routes
