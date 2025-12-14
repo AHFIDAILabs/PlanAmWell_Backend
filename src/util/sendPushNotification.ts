@@ -1,29 +1,24 @@
+// util/sendPushNotification.ts
 import { Document } from "mongoose";
 import Expo from "expo-server-sdk";
 import { User } from "../models/user";
 import { Doctor } from "../models/doctor";
 import Notification, { INotification } from "../models/notifications";
+import { emitNotification } from "../index"; // ✅ Import Socket.IO emitter
 
-// Create a new Expo SDK client
 const expo = new Expo();
 
 /**
  * 📲 Send push notification to ANY user (User or Doctor)
- * @param userId - ID of the User or Doctor to notify
- * @param notification - The Mongoose notification document
  */
 export async function sendPushNotification(
   userId: string,
-  // Use a Mongoose Document type with the INotification interface
   notification: Document<unknown, {}, INotification> & INotification
 ) {
   try {
-    // Try to find user in User model first
     let user = await User.findById(userId).select("expoPushTokens");
 
-    // If not found, try Doctor model
     if (!user) {
-      // Use the Doctor model's type definition for better safety than 'as any'
       user = await Doctor.findById(userId).select("expoPushTokens") as typeof Doctor.prototype | null;
     }
 
@@ -51,9 +46,7 @@ export async function sendPushNotification(
     for (const chunk of chunks) {
       try {
         const tickets = await expo.sendPushNotificationsAsync(chunk);
-        console.log(
-          `[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`
-        );
+        console.log(`[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`);
       } catch (err) {
         console.error("[PushNotification] Error sending push notifications:", err);
       }
@@ -64,7 +57,8 @@ export async function sendPushNotification(
 }
 
 /**
- * 🔔 NEW: Create notification for ANY user (User or Doctor)
+ * 🔔 Create notification for ANY user (User or Doctor)
+ * ✅ FIXED: Always emit Socket.IO notification
  */
 export const createNotificationForUser = async (
   userId: string,
@@ -83,18 +77,22 @@ export const createNotificationForUser = async (
       isRead: false,
     });
 
-    // Send push notification
-    try {
-      await sendPushNotification(
-        userId,
-        // The return type of .create() is complex, but the function handles the Document type
-        notification as Document<unknown, {}, INotification> & INotification
-      );
-    } catch (err) {
-      console.error("Failed to send push notification:", err);
+    // ✅ Send push notification (non-blocking)
+    sendPushNotification(
+      userId,
+      notification as Document<unknown, {}, INotification> & INotification
+    ).catch((err) => console.error("Failed to send push notification:", err));
+
+    // ✅ ALWAYS emit real-time notification via Socket.IO
+    const emitted = emitNotification(userId, notification);
+    
+    if (emitted) {
+      console.log(`🔔 Real-time notification emitted to user ${userId}`);
+    } else {
+      console.log(`⚠️ User ${userId} offline, will receive on next login`);
     }
 
-    console.log(`✅ Notification created and sent to ${userId}`);
+    console.log(`✅ Notification created for ${userId}`);
     return notification;
   } catch (error) {
     console.error(`❌ Failed to create notification for ${userId}:`, error);
@@ -103,7 +101,7 @@ export const createNotificationForUser = async (
 };
 
 /**
- * 🔔 LEGACY: Create appointment notification for patients (backward compatibility)
+ * 🔔 LEGACY: Create appointment notification (backward compatibility)
  */
 export const createAppointmentNotification = async (
   userId: string,
@@ -119,36 +117,22 @@ export const createAppointmentNotification = async (
     reminder: `Your appointment with Dr. ${doctorName} starts in 15 minutes!`,
   };
 
-  const notification = await Notification.create({
+  return await createNotificationForUser(
     userId,
-    type: "appointment",
-    title:
-      type === "reminder" ? "Appointment Starting Soon" : "Appointment Update",
-    message: messages[type],
-    metadata: {
+    type === "reminder" ? "Appointment Starting Soon" : "Appointment Update",
+    messages[type],
+    "appointment",
+    {
       appointmentId,
       doctorName,
       scheduledAt: scheduledAt.toISOString(),
-      status: type, // Added 'status' for consistency
-    },
-    isRead: false,
-  });
-
-  // Send push notification
-  try {
-    await sendPushNotification(
-      userId,
-      notification as Document<unknown, {}, INotification> & INotification
-    );
-  } catch (err) {
-    console.error("Failed to send push notification:", err);
-  }
-
-  return notification;
+      status: type,
+    }
+  );
 };
 
 /**
- * 📦 Create order notification and send push
+ * 📦 Create order notification
  */
 export const createOrderNotification = async (
   userId: string,
@@ -164,18 +148,11 @@ export const createOrderNotification = async (
     cancelled: "Your order has been cancelled.",
   };
 
-  const notification = await Notification.create({
+  return await createNotificationForUser(
     userId,
-    type: "order",
-    title: `Order ${type.charAt(0).toUpperCase() + type.slice(1)}`,
-    message: orderDetails || messages[type],
-    metadata: { orderId },
-    isRead: false,
-  });
-
-  await sendPushNotification(
-    userId,
-    notification as Document<unknown, {}, INotification> & INotification
+    `Order ${type.charAt(0).toUpperCase() + type.slice(1)}`,
+    orderDetails || messages[type],
+    "order",
+    { orderId }
   );
-  return notification;
 };

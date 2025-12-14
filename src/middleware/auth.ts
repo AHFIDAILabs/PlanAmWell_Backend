@@ -93,6 +93,19 @@ export const signRefreshToken = async (entity: any) => {
   return { token, hashedToken };
 };
 
+
+export const verifyJwtToken = (token: string) => {
+  if (!token) throw new Error("Token required");
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+    return decoded;
+  } catch (err) {
+    throw new Error("Invalid token");
+  }
+};
+
+
 // =======================================================
 //               🛂 GUEST / AUTH MIDDLEWARE
 // =======================================================
@@ -220,4 +233,5 @@ export default {
   verifyRefreshToken,
   revokeToken,
   hydrateUser,
+  verifyJwtToken
 };
