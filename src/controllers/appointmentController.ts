@@ -12,8 +12,10 @@ import { createNotificationForUser } from "../util/sendPushNotification"; // �
  */
 export const createAppointment = asyncHandler(
   async (req: Request, res: Response) => {
-    const { doctorId, scheduledAt, duration, notes, reason, shareUserInfo } =
+    const { doctorId, scheduledAt, duration, notes, reason, shareUserInfo, consultationType } =
       req.body;
+
+      
 
     if (!doctorId || !scheduledAt) {
       res.status(400);
@@ -45,6 +47,19 @@ export const createAppointment = asyncHandler(
       };
     }
 
+    const scheduledDate = new Date(scheduledAt);
+if (isNaN(scheduledDate.getTime())) {
+  res.status(400);
+  throw new Error("Invalid scheduledAt date.");
+}
+
+if (!req.auth?.id) {
+  res.status(401);
+  throw new Error("Unauthorized");
+}
+
+
+
     const appointment = await Appointment.create({
       userId: req.auth?.id,
       doctorId,
@@ -54,7 +69,9 @@ export const createAppointment = asyncHandler(
       reason,
       shareUserInfo: !!shareUserInfo,
       patientSnapshot,
+      consultationType,
     });
+
 
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = user?.name || "A patient";
@@ -153,65 +170,136 @@ export const updateAppointment = asyncHandler(
     const userId = req.auth?.id;
     const role = req.auth?.role;
 
+    if (!userId || !role) {
+      res.status(401);
+      throw new Error("Unauthorized");
+    }
+
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("🔍 APPOINTMENT UPDATE");
     console.log("User ID:", userId, "Role:", role);
-    console.log("Appointment UserID:", appointment.userId?.toString());
-    console.log("Appointment DoctorID:", appointment.doctorId?.toString());
+    console.log("Appointment UserID:", appointment.userId.toString());
+    console.log("Appointment DoctorID:", appointment.doctorId.toString());
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    // Permission checks
-    if (role === "User" && appointment.userId?.toString() !== userId) {
+    /* --------------------------------
+     * Permission checks
+     * -------------------------------- */
+    if (role === "User" && appointment.userId.toString() !== userId) {
       return res
         .status(403)
         .json({ message: "You can only update your own appointments." });
     }
 
-    if (role === "Doctor" && appointment.doctorId?.toString() !== userId) {
+    if (role === "Doctor" && appointment.doctorId.toString() !== userId) {
       return res.status(403).json({
         message: "You can only update appointments assigned to you.",
       });
     }
 
-    const updates: Partial<IAppointment> = {};
+    /* --------------------------------
+     * Safe update payload
+     * -------------------------------- */
+    type AppointmentUpdatePayload = {
+      status?: IAppointment["status"];
+      scheduledAt?: Date;
+      notes?: string;
+      shareUserInfo?: boolean;
+      patientSnapshot?: IAppointment["patientSnapshot"];
+      consultationType?: IAppointment["consultationType"];
+    };
+
+    const updates: AppointmentUpdatePayload = {};
     const oldStatus = appointment.status;
 
-    // User updates
+    /* --------------------------------
+     * USER updates
+     * -------------------------------- */
     if (role === "User") {
-      // ✅ FIX APPLIED: Allow cancellation of both 'pending' and 'confirmed' appointments
+      // Cancel (pending OR confirmed)
       if (
         req.body.status === "cancelled" &&
         ["pending", "confirmed"].includes(appointment.status)
       ) {
         updates.status = "cancelled";
       }
-      if (req.body.scheduledAt) updates.scheduledAt = req.body.scheduledAt;
+
+      if (req.body.scheduledAt) {
+        const newDate = new Date(req.body.scheduledAt);
+        if (isNaN(newDate.getTime())) {
+          return res.status(400).json({ message: "Invalid scheduledAt date." });
+        }
+        updates.scheduledAt = newDate;
+      }
+
       if (req.body.notes) updates.notes = req.body.notes;
-      if (typeof req.body.shareUserInfo === "boolean")
+
+      if (typeof req.body.shareUserInfo === "boolean") {
         updates.shareUserInfo = req.body.shareUserInfo;
-      if (req.body.patientSnapshot)
+      }
+
+      if (req.body.patientSnapshot) {
         updates.patientSnapshot = req.body.patientSnapshot;
+      }
     }
 
-    // Doctor updates
+    if (role === "User" && req.body.consultationType) {
+  updates.consultationType = req.body.consultationType;
+}
+
+    /* --------------------------------
+     * DOCTOR updates
+     * -------------------------------- */
     if (role === "Doctor") {
-      if (req.body.status) updates.status = req.body.status;
+      if (req.body.status) {
+        const allowedDoctorStatuses: IAppointment["status"][] = [
+          "confirmed",
+          "rejected",
+          "cancelled",
+          "rescheduled",
+        ];
+
+        if (!allowedDoctorStatuses.includes(req.body.status)) {
+          return res
+            .status(400)
+            .json({ message: "Invalid status update." });
+        }
+
+        updates.status = req.body.status;
+      }
+
+      if (req.body.scheduledAt) {
+        const newDate = new Date(req.body.scheduledAt);
+        if (isNaN(newDate.getTime())) {
+          return res.status(400).json({ message: "Invalid scheduledAt date." });
+        }
+
+        if (role === "Doctor" && req.body.consultationType) {
+  updates.consultationType = req.body.consultationType;
+}
+        updates.scheduledAt = newDate;
+
+        // If doctor changes time, mark as rescheduled
+        if (appointment.status !== "rescheduled") {
+          updates.status = "rescheduled";
+        }
+      }
+
       if (req.body.notes) updates.notes = req.body.notes;
-      if (req.body.scheduledAt) updates.scheduledAt = req.body.scheduledAt;
     }
 
     console.log("📝 Applying updates:", updates);
 
-    // Apply updates
-    const updatedAppointment = (await Appointment.findByIdAndUpdate(
+    /* --------------------------------
+     * Apply updates
+     * -------------------------------- */
+    const updatedAppointment = await Appointment.findByIdAndUpdate(
       req.params.id,
       updates,
       { new: true, runValidators: true }
     )
       .populate("doctorId", "firstName lastName")
-      .populate("userId", "name firstName lastName")) as (IAppointment & {
-      _id: string;
-    }) | null;
+      .populate("userId", "name firstName lastName userImage email");
 
     if (!updatedAppointment) {
       res.status(404);
@@ -220,16 +308,21 @@ export const updateAppointment = asyncHandler(
 
     console.log("✅ Appointment updated successfully!");
 
-    // Get names for notifications
+    /* --------------------------------
+     * Notification helpers
+     * -------------------------------- */
     const doctor = updatedAppointment.doctorId as any;
     const patient = updatedAppointment.userId as any;
+
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName =
       patient?.name ||
       `${patient?.firstName || ""} ${patient?.lastName || ""}`.trim() ||
       "Patient";
 
-    // 🔔 DOCTOR UPDATES → Notify Patient
+    /* --------------------------------
+     * Doctor → Patient notifications
+     * -------------------------------- */
     if (
       role === "Doctor" &&
       updates.status &&
@@ -247,7 +340,7 @@ export const updateAppointment = asyncHandler(
         },
         rejected: {
           title: "Appointment Declined",
-          message: `${doctorName} declined your appointment request. Please choose another time.`,
+          message: `${doctorName} declined your appointment request.`,
         },
         cancelled: {
           title: "Appointment Cancelled",
@@ -257,7 +350,7 @@ export const updateAppointment = asyncHandler(
         },
         rescheduled: {
           title: "Appointment Rescheduled",
-          message: `${doctorName} has rescheduled your appointment to ${new Date(
+          message: `${doctorName} rescheduled your appointment to ${new Date(
             updatedAppointment.scheduledAt
           ).toLocaleString()}`,
         },
@@ -281,12 +374,14 @@ export const updateAppointment = asyncHandler(
       }
     }
 
-    // 🔔 PATIENT CANCELS → Notify Doctor
+    /* --------------------------------
+     * Patient cancels → Doctor notification
+     * -------------------------------- */
     if (role === "User" && updates.status === "cancelled") {
       await createNotificationForUser(
         updatedAppointment.doctorId.toString(),
         "Appointment Cancelled by Patient",
-        `${patientName} has cancelled their appointment scheduled for ${new Date(
+        `${patientName} cancelled the appointment scheduled for ${new Date(
           updatedAppointment.scheduledAt
         ).toLocaleString()}`,
         "appointment",
@@ -300,9 +395,11 @@ export const updateAppointment = asyncHandler(
       );
     }
 
-    // ⏰ Schedule 15-minute reminder when confirmed
+    /* --------------------------------
+     * 15-minute reminder scheduling (unchanged)
+     * -------------------------------- */
     if (
-      updatedAppointment?.status === "confirmed" &&
+      updatedAppointment.status === "confirmed" &&
       !updatedAppointment.reminderSent &&
       oldStatus !== "confirmed"
     ) {
@@ -316,7 +413,6 @@ export const updateAppointment = asyncHandler(
           try {
             const appt = await Appointment.findById(updatedAppointment._id);
             if (appt && !appt.reminderSent && appt.status === "confirmed") {
-              // Notify PATIENT
               await createNotificationForUser(
                 appt.userId.toString(),
                 "Appointment Starting Soon ⏰",
@@ -331,7 +427,6 @@ export const updateAppointment = asyncHandler(
                 }
               );
 
-              // Notify DOCTOR
               await createNotificationForUser(
                 appt.doctorId.toString(),
                 "Appointment Starting Soon ⏰",
@@ -349,8 +444,8 @@ export const updateAppointment = asyncHandler(
               appt.reminderSent = true;
               await appt.save();
             }
-          } catch (error) {
-            console.error("❌ Failed to send reminder:", error);
+          } catch (err) {
+            console.error("❌ Failed to send reminder:", err);
           }
         }, delay);
       }
@@ -361,6 +456,7 @@ export const updateAppointment = asyncHandler(
     res.status(200).json({ success: true, data: updatedAppointment });
   }
 );
+
 
 /**
  * @desc Admin — get ALL appointments
