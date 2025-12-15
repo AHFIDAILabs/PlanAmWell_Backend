@@ -35,6 +35,10 @@ export interface IAppointment extends Document {
     dateOfBirth?: Date;
     homeAddress?: string;
   };
+  callDuration?: number;
+  callQuality?: 'excellent' | 'good' | 'fair' | 'poor';
+  callEndedBy?: 'Doctor' | 'User';
+  callEndedAt?: Date;
 
   reminderSent?: boolean; // ✨ NEW: Track if 15-min reminder was sent
 
@@ -85,7 +89,12 @@ const AppointmentSchema = new Schema<IAppointment>(
       homeAddress: String,
     },
 
-    reminderSent: { type: Boolean, default: false }, // ✨ NEW
+callDuration: { type: Number },
+callQuality: { type: String, enum: ['excellent', 'good', 'fair', 'poor'] },
+callEndedBy: { type: String, enum: ['Doctor', 'User'] },
+callEndedAt: { type: Date },
+
+reminderSent: { type: Boolean, default: false }, // ✨ NEW
 
   },
   { timestamps: true }
