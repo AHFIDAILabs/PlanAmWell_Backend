@@ -44,13 +44,13 @@ export interface IAppointment extends Document {
   };
 
   // Call metadata (kept flat for now)
+  callStartedAt?: Date;
+  callStartedBy?: CallEndedBy;
   callDuration?: number;
   callQuality?: CallQuality;
   callEndedBy?: CallEndedBy;
   callEndedAt?: Date;
-
   reminderSent: boolean;
-
   createdAt: Date;
   updatedAt: Date;
 }
@@ -100,10 +100,13 @@ const AppointmentSchema = new Schema<IAppointment>(
       homeAddress: String,
     },
 
+    callStartedAt: Date,
+    callStartedBy: { type: String, enum: ["Doctor", "User"] },
     callDuration: Number,
     callQuality: { type: String, enum: ["excellent", "good", "fair", "poor"] },
     callEndedBy: { type: String, enum: ["Doctor", "User"] },
     callEndedAt: Date,
+
 
     reminderSent: { type: Boolean, default: false },
   },
