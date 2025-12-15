@@ -49,21 +49,38 @@ export const generateVideoToken = asyncHandler(
     }
 
     // ✅ FIX: Proper type checking for populated fields
-    const doctorId = typeof appointment.doctorId === 'object' 
-      ? (appointment.doctorId as any)._id 
-      : appointment.doctorId;
-    const patientId = typeof appointment.userId === 'object'
-      ? (appointment.userId as any)._id
-      : appointment.userId;
+  const doctorId = String(
+  typeof appointment.doctorId === 'object'
+    ? (appointment.doctorId as any)._id
+    : appointment.doctorId
+);
+
+const patientId = String(
+  typeof appointment.userId === 'object'
+    ? (appointment.userId as any)._id
+    : appointment.userId
+);
+
+const requesterId = String(userId);
+
 
     // Check if user is authorized (either doctor or patient)
-    const isDoctor = role === 'Doctor' && doctorId.toString() === userId;
-    const isPatient = role === 'User' && patientId.toString() === userId;
+const isDoctor = doctorId === requesterId;
+const isPatient = patientId === requesterId;
 
-    if (!isDoctor && !isPatient) {
-      res.status(403);
-      throw new Error('You are not authorized to join this call');
-    }
+if (!isDoctor && !isPatient) {
+  res.status(403);
+  throw new Error('You are not authorized to join this call');
+}
+
+console.log('🔐 VIDEO AUTH CHECK', {
+  requesterId,
+  doctorId,
+  patientId,
+  role,
+  status: appointment.status,
+});
+
 
     // Check if appointment is confirmed
     if (appointment.status !== 'confirmed') {
