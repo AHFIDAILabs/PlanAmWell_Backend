@@ -6,6 +6,7 @@ import {
   updateAppointment,
   getAllAppointments,
   deleteAppointment,
+  getAppointmentById,
 } from "../controllers/appointmentController";
 
 import { guestAuth, verifyToken, authorize } from "../middleware/auth";
@@ -17,6 +18,8 @@ appointmentRouter.post("/", guestAuth, createAppointment);
 
 // User: get their own appointments
 appointmentRouter.get("/my", guestAuth, verifyToken, getMyAppointments);
+
+appointmentRouter.get("/appointment/:id", guestAuth, verifyToken, getAppointmentById);
 
 // Doctor: get their appointment calendar
 appointmentRouter.get("/doctor", guestAuth, verifyToken, getDoctorAppointments);

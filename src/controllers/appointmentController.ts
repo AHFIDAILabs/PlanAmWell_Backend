@@ -464,6 +464,42 @@ export const getAllAppointments = asyncHandler(
   }
 );
 
+
+/**
+ * @desc User/Doctor — Get appointment by ID
+ * @route GET /api/v1/appointments/:id
+ * @access User | Doctor
+ */
+
+export const getAppointmentById = asyncHandler(
+  async (req: Request, res: Response) => {
+    const appointment = await Appointment.findById(req.params.id)
+      .populate("doctorId", "firstName lastName") // populate only essential fields
+      .populate("userId", "firstName lastName name email userImage");
+
+    if (!appointment) {
+      res.status(404);
+      throw new Error("Appointment not found.");
+    }
+
+    // Optional: Authorization check
+    const userId = req.auth?.id;
+    const role = req.auth?.role;
+
+    if (role === "User" && (appointment.userId as any)._id.toString() !== userId) {
+      return res.status(403).json({ message: "You can only access your own appointments." });
+    }
+
+    if (role === "Doctor" && (appointment.doctorId as any)._id.toString() !== userId) {
+      return res.status(403).json({ message: "You can only access your assigned appointments." });
+    }
+
+    res.status(200).json({ success: true, data: appointment });
+  }
+);
+
+
+
 /**
  * @desc Admin — Delete appointment
  * @route DELETE /api/v1/appointments/:id
