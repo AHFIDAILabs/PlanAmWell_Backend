@@ -11,17 +11,16 @@ export type AppointmentStatus =
   | "rescheduled"
   | "in-progress";
 
-  export type CallStatus =
+export type CallStatus =
   | "idle"        // no call started
   | "ringing"     // call initiated, waiting for other party
   | "in-progress" // both connected
   | "ended";      // call completed
 
-
 export type PaymentStatus = "pending" | "paid" | "failed";
 export type CallQuality = "excellent" | "good" | "fair" | "poor";
 export type CallEndedBy = "Doctor" | "User";
-export type consultationType = "video" | "in-person" | "chat" | "audio";
+export type ConsultationType = "video" | "in-person" | "chat" | "audio";
 
 export interface IAppointment extends Document {
   userId: Types.ObjectId;
@@ -34,7 +33,7 @@ export interface IAppointment extends Document {
 
   status: AppointmentStatus;
   paymentStatus: PaymentStatus;
-  consultationType?: consultationType;
+  consultationType?: ConsultationType;
 
   reason?: string;
   notes?: string;
@@ -50,7 +49,7 @@ export interface IAppointment extends Document {
     homeAddress?: string;
   };
 
-  // ✅ Call state (NEW)
+  // ✅ Call state
   callStatus: CallStatus;
   callChannelName?: string;
   callInitiatedBy?: CallEndedBy;
@@ -73,7 +72,6 @@ export interface IAppointment extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
-
 
 const AppointmentSchema = new Schema<IAppointment>(
   {
@@ -125,51 +123,29 @@ const AppointmentSchema = new Schema<IAppointment>(
       homeAddress: String,
     },
 
-    // ✅ CALL STATE (NEW)
+    // ✅ CALL STATE
     callStatus: {
       type: String,
       enum: ["idle", "ringing", "in-progress", "ended"],
       default: "idle",
     },
-
-    callChannelName: { type: String },
-
-    callInitiatedBy: {
-      type: String,
-      enum: ["Doctor", "User"],
-    },
-
-    callParticipants: [
-      { type: Schema.Types.ObjectId, ref: "User" },
-    ],
+    callChannelName: { type: String, default: "" },
+    callInitiatedBy: { type: String, enum: ["Doctor", "User"], default: undefined },
+    callParticipants: { type: [{ type: Schema.Types.ObjectId, ref: "User" }], default: [] },
 
     // ✅ Agora metadata
-    agoraUidMap: {
-      doctor: Number,
-      user: Number,
-    },
+    agoraUidMap: { doctor: Number, user: Number, _id: false },
 
     callStartedAt: Date,
     callEndedAt: Date,
     callDuration: Number,
 
-    callQuality: {
-      type: String,
-      enum: ["excellent", "good", "fair", "poor"],
-    },
-
-    callEndedBy: {
-      type: String,
-      enum: ["Doctor", "User"],
-    },
+    callQuality: { type: String, enum: ["excellent", "good", "fair", "poor"] },
+    callEndedBy: { type: String, enum: ["Doctor", "User"] },
 
     reminderSent: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-
-export const Appointment = mongoose.model<IAppointment>(
-  "Appointment",
-  AppointmentSchema
-);
+export const Appointment = mongoose.model<IAppointment>("Appointment", AppointmentSchema);
