@@ -5,6 +5,15 @@ import { Doctor } from "../models/doctor";
 import { User } from "../models/user";
 import { createNotificationForUser } from "../util/sendPushNotification"; // 👈 Imported
 
+const extractId = (field: any): string => {
+  if (!field) return '';
+  if (typeof field === 'string') return field;
+  if (typeof field === 'object' && field._id) {
+    return String(field._id);
+  }
+  return String(field);
+};
+
 /**
  * @desc Create Appointment (Users)
  * @route POST /api/v1/appointments
@@ -182,9 +191,7 @@ export const updateAppointment = asyncHandler(
     console.log("Appointment DoctorID:", appointment.doctorId.toString());
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    /* --------------------------------
-     * Permission checks
-     * -------------------------------- */
+    // Permission checks
     if (role === "User" && appointment.userId.toString() !== userId) {
       return res
         .status(403)
@@ -197,9 +204,7 @@ export const updateAppointment = asyncHandler(
       });
     }
 
-    /* --------------------------------
-     * Safe update payload
-     * -------------------------------- */
+    // Safe update payload
     type AppointmentUpdatePayload = {
       status?: IAppointment["status"];
       scheduledAt?: Date;
@@ -212,11 +217,8 @@ export const updateAppointment = asyncHandler(
     const updates: AppointmentUpdatePayload = {};
     const oldStatus = appointment.status;
 
-    /* --------------------------------
-     * USER updates
-     * -------------------------------- */
+    // USER updates
     if (role === "User") {
-      // Cancel (pending OR confirmed)
       if (
         req.body.status === "cancelled" &&
         ["pending", "confirmed"].includes(appointment.status)
@@ -241,15 +243,13 @@ export const updateAppointment = asyncHandler(
       if (req.body.patientSnapshot) {
         updates.patientSnapshot = req.body.patientSnapshot;
       }
+
+      if (req.body.consultationType) {
+        updates.consultationType = req.body.consultationType;
+      }
     }
 
-    if (role === "User" && req.body.consultationType) {
-  updates.consultationType = req.body.consultationType;
-}
-
-    /* --------------------------------
-     * DOCTOR updates
-     * -------------------------------- */
+    // DOCTOR updates
     if (role === "Doctor") {
       if (req.body.status) {
         const allowedDoctorStatuses: IAppointment["status"][] = [
@@ -274,9 +274,8 @@ export const updateAppointment = asyncHandler(
           return res.status(400).json({ message: "Invalid scheduledAt date." });
         }
 
-        if (role === "Doctor" && req.body.consultationType) {
-  updates.consultationType = req.body.consultationType;
-}
+        if (req.body.consultationType) updates.consultationType = req.body.consultationType;
+
         updates.scheduledAt = newDate;
 
         // If doctor changes time, mark as rescheduled
@@ -290,9 +289,7 @@ export const updateAppointment = asyncHandler(
 
     console.log("📝 Applying updates:", updates);
 
-    /* --------------------------------
-     * Apply updates
-     * -------------------------------- */
+    // Apply updates
     const updatedAppointment = await Appointment.findByIdAndUpdate(
       req.params.id,
       updates,
@@ -308,9 +305,12 @@ export const updateAppointment = asyncHandler(
 
     console.log("✅ Appointment updated successfully!");
 
-    /* --------------------------------
-     * Notification helpers
-     * -------------------------------- */
+    // Extract clean IDs
+    const patientId = extractId(updatedAppointment.userId);
+    const doctorId = extractId(updatedAppointment.doctorId);
+
+    console.log(`📧 Clean IDs - Patient: ${patientId}, Doctor: ${doctorId}`);
+
     const doctor = updatedAppointment.doctorId as any;
     const patient = updatedAppointment.userId as any;
 
@@ -320,18 +320,9 @@ export const updateAppointment = asyncHandler(
       `${patient?.firstName || ""} ${patient?.lastName || ""}`.trim() ||
       "Patient";
 
-    /* --------------------------------
-     * Doctor → Patient notifications
-     * -------------------------------- */
-    if (
-      role === "Doctor" &&
-      updates.status &&
-      updates.status !== oldStatus
-    ) {
-      const statusMessages: Record<
-        string,
-        { title: string; message: string }
-      > = {
+    // Doctor → Patient notifications
+    if (role === "Doctor" && updates.status && updates.status !== oldStatus) {
+      const statusMessages: Record<string, { title: string; message: string }> = {
         confirmed: {
           title: "Appointment Confirmed ✅",
           message: `${doctorName} has confirmed your appointment for ${new Date(
@@ -359,13 +350,13 @@ export const updateAppointment = asyncHandler(
       const notification = statusMessages[updates.status];
       if (notification) {
         await createNotificationForUser(
-          updatedAppointment.userId.toString(),
+          patientId,
           notification.title,
           notification.message,
           "appointment",
           {
             appointmentId: updatedAppointment._id,
-            doctorId: doctor._id,
+            doctorId,
             doctorName,
             scheduledAt: updatedAppointment.scheduledAt,
             status: updates.status,
@@ -374,12 +365,10 @@ export const updateAppointment = asyncHandler(
       }
     }
 
-    /* --------------------------------
-     * Patient cancels → Doctor notification
-     * -------------------------------- */
+    // Patient cancels → Doctor notifications
     if (role === "User" && updates.status === "cancelled") {
       await createNotificationForUser(
-        updatedAppointment.doctorId.toString(),
+        doctorId,
         "Appointment Cancelled by Patient",
         `${patientName} cancelled the appointment scheduled for ${new Date(
           updatedAppointment.scheduledAt
@@ -387,7 +376,7 @@ export const updateAppointment = asyncHandler(
         "appointment",
         {
           appointmentId: updatedAppointment._id,
-          userId: patient._id,
+          userId: patientId,
           patientName,
           scheduledAt: updatedAppointment.scheduledAt,
           status: "cancelled",
@@ -395,9 +384,7 @@ export const updateAppointment = asyncHandler(
       );
     }
 
-    /* --------------------------------
-     * 15-minute reminder scheduling (unchanged)
-     * -------------------------------- */
+    // 15-minute reminder scheduling
     if (
       updatedAppointment.status === "confirmed" &&
       !updatedAppointment.reminderSent &&
@@ -413,14 +400,17 @@ export const updateAppointment = asyncHandler(
           try {
             const appt = await Appointment.findById(updatedAppointment._id);
             if (appt && !appt.reminderSent && appt.status === "confirmed") {
+              const apptPatientId = extractId(appt.userId);
+              const apptDoctorId = extractId(appt.doctorId);
+
               await createNotificationForUser(
-                appt.userId.toString(),
+                apptPatientId,
                 "Appointment Starting Soon ⏰",
                 `Your appointment with ${doctorName} starts in 15 minutes!`,
                 "appointment",
                 {
                   appointmentId: appt._id,
-                  doctorId: appt.doctorId,
+                  doctorId: apptDoctorId,
                   doctorName,
                   scheduledAt: appt.scheduledAt,
                   type: "reminder",
@@ -428,13 +418,13 @@ export const updateAppointment = asyncHandler(
               );
 
               await createNotificationForUser(
-                appt.doctorId.toString(),
+                apptDoctorId,
                 "Appointment Starting Soon ⏰",
                 `Your appointment with ${patientName} starts in 15 minutes!`,
                 "appointment",
                 {
                   appointmentId: appt._id,
-                  userId: appt.userId,
+                  userId: apptPatientId,
                   patientName,
                   scheduledAt: appt.scheduledAt,
                   type: "reminder",

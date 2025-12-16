@@ -10,6 +10,7 @@ export interface IDoctor extends Document {
   specialization: string;
   licenseNumber: string;
   yearsOfExperience?: number;
+  roles?: string[];
   bio?: string;
   profileImage?: string;
   contactNumber?: string;
@@ -31,6 +32,7 @@ const DoctorSchema = new Schema<IDoctor>(
     specialization: { type: String, required: true },
     licenseNumber: { type: String, required: true },
     yearsOfExperience: Number,
+    roles: { type: [String], required: false , default: ["Doctor"] },
     bio: String,
     profileImage: String,
     contactNumber: String,

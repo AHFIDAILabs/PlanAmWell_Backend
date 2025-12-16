@@ -11,6 +11,13 @@ export type AppointmentStatus =
   | "rescheduled"
   | "in-progress";
 
+  export type CallStatus =
+  | "idle"        // no call started
+  | "ringing"     // call initiated, waiting for other party
+  | "in-progress" // both connected
+  | "ended";      // call completed
+
+
 export type PaymentStatus = "pending" | "paid" | "failed";
 export type CallQuality = "excellent" | "good" | "fair" | "poor";
 export type CallEndedBy = "Doctor" | "User";
@@ -23,7 +30,7 @@ export interface IAppointment extends Document {
   scheduledAt: Date;
   proposedAt?: Date;
 
-  duration: number;                 // ✅ no longer optional
+  duration: number;
 
   status: AppointmentStatus;
   paymentStatus: PaymentStatus;
@@ -32,7 +39,7 @@ export interface IAppointment extends Document {
   reason?: string;
   notes?: string;
 
-  shareUserInfo: boolean;            // ✅ no longer optional
+  shareUserInfo: boolean;
 
   patientSnapshot?: {
     name?: string;
@@ -43,17 +50,30 @@ export interface IAppointment extends Document {
     homeAddress?: string;
   };
 
-  // Call metadata (kept flat for now)
+  // ✅ Call state (NEW)
+  callStatus: CallStatus;
+  callChannelName?: string;
+  callInitiatedBy?: CallEndedBy;
+  callParticipants: Types.ObjectId[];
+
+  // ✅ Agora-safe metadata
+  agoraUidMap?: {
+    doctor?: number;
+    user?: number;
+  };
+
+  // Call timing & quality
   callStartedAt?: Date;
-  callStartedBy?: CallEndedBy;
+  callEndedAt?: Date;
   callDuration?: number;
   callQuality?: CallQuality;
   callEndedBy?: CallEndedBy;
-  callEndedAt?: Date;
+
   reminderSent: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
+
 
 const AppointmentSchema = new Schema<IAppointment>(
   {
@@ -64,7 +84,12 @@ const AppointmentSchema = new Schema<IAppointment>(
     proposedAt: { type: Date },
 
     duration: { type: Number, default: 30 },
-    consultationType: { type: String, enum: ["video", "in-person", "chat", "audio"], default: "video" },
+
+    consultationType: {
+      type: String,
+      enum: ["video", "in-person", "chat", "audio"],
+      default: "video",
+    },
 
     status: {
       type: String,
@@ -75,7 +100,7 @@ const AppointmentSchema = new Schema<IAppointment>(
         "completed",
         "rejected",
         "rescheduled",
-        "in-progress"
+        "in-progress",
       ],
       default: "pending",
     },
@@ -86,8 +111,8 @@ const AppointmentSchema = new Schema<IAppointment>(
       default: "pending",
     },
 
-    reason: { type: String },
-    notes: { type: String },
+    reason: String,
+    notes: String,
 
     shareUserInfo: { type: Boolean, default: false },
 
@@ -100,18 +125,49 @@ const AppointmentSchema = new Schema<IAppointment>(
       homeAddress: String,
     },
 
-    callStartedAt: Date,
-    callStartedBy: { type: String, enum: ["Doctor", "User"] },
-    callDuration: Number,
-    callQuality: { type: String, enum: ["excellent", "good", "fair", "poor"] },
-    callEndedBy: { type: String, enum: ["Doctor", "User"] },
-    callEndedAt: Date,
+    // ✅ CALL STATE (NEW)
+    callStatus: {
+      type: String,
+      enum: ["idle", "ringing", "in-progress", "ended"],
+      default: "idle",
+    },
 
+    callChannelName: { type: String },
+
+    callInitiatedBy: {
+      type: String,
+      enum: ["Doctor", "User"],
+    },
+
+    callParticipants: [
+      { type: Schema.Types.ObjectId, ref: "User" },
+    ],
+
+    // ✅ Agora metadata
+    agoraUidMap: {
+      doctor: Number,
+      user: Number,
+    },
+
+    callStartedAt: Date,
+    callEndedAt: Date,
+    callDuration: Number,
+
+    callQuality: {
+      type: String,
+      enum: ["excellent", "good", "fair", "poor"],
+    },
+
+    callEndedBy: {
+      type: String,
+      enum: ["Doctor", "User"],
+    },
 
     reminderSent: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
+
 
 export const Appointment = mongoose.model<IAppointment>(
   "Appointment",
