@@ -165,7 +165,7 @@ export const generateVideoToken = asyncHandler(
     if (appointment.callStatus === "idle" || !appointment.callStatus) {
       appointment.callStatus = "ringing";
       appointment.callInitiatedBy = role as any;
-      appointment.callStartedAt = new Date();
+     
       
       // Update appointment status to in-progress when call starts
       if (appointment.status === "confirmed") {
@@ -189,7 +189,8 @@ export const generateVideoToken = asyncHandler(
       appointment.callParticipants.length === 2
     ) {
       appointment.callStatus = "in-progress";
-      
+      appointment.callStartedAt = new Date(); // ✅ REAL start
+
       console.log(`✅ Both parties joined - Call is now in-progress`);
       
       // Optionally notify the initiator that other party joined
@@ -303,6 +304,15 @@ export const endVideoCall = asyncHandler(async (req, res) => {
   const appointment = await Appointment.findById(appointmentId);
   if (!appointment) return res.status(404).json({ message: 'Appointment not found' });
 
+  if (appointment.callStatus === "ended") {
+  return res.json({
+    success: true,
+    message: "Call already ended",
+    data: appointment,
+  });
+}
+
+
   appointment.callStatus = 'ended';
   appointment.callEndedAt = new Date();
   appointment.callEndedBy = req.auth?.role as any;
@@ -312,6 +322,24 @@ export const endVideoCall = asyncHandler(async (req, res) => {
   // Only mark appointment as completed if both participants left
   appointment.status = 'completed';
   await appointment.save();
+
+  const doctorId = extractId(appointment.doctorId);
+const patientId = extractId(appointment.userId);
+
+const otherPartyId =
+  req.auth?.role === "Doctor" ? patientId : doctorId;
+
+await createNotificationForUser(
+  otherPartyId,
+  "Call Ended",
+  "The video call has ended.",
+  "appointment",
+  {
+    appointmentId:( appointment._id as any).toString(),
+    callDuration,
+  }
+);
+
 
   res.json({ success: true, message: 'Call ended successfully', data: appointment });
 });
