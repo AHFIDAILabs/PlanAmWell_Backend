@@ -67,6 +67,7 @@ export interface IAppointment extends Document {
   callDuration?: number;
   callQuality?: CallQuality;
   callEndedBy?: CallEndedBy;
+  expiryWarningSent: boolean;
 
   reminderSent: boolean;
   createdAt: Date;
@@ -132,6 +133,10 @@ const AppointmentSchema = new Schema<IAppointment>(
     callChannelName: { type: String, default: "" },
     callInitiatedBy: { type: String, enum: ["Doctor", "User"], default: undefined },
     callParticipants: { type: [{ type: Schema.Types.ObjectId, ref: "User" }], default: [] },
+    expiryWarningSent: {
+      type: Boolean,
+      default: false,
+    },
 
     // ✅ Agora metadata
     agoraUidMap: { doctor: Number, user: Number, _id: false },
