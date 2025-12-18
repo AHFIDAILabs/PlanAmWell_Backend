@@ -17,7 +17,7 @@ videoRouter.post(
 videoRouter.post(
   '/end-call',
  guestAuth, verifyToken,
-  authorize('Doctor'),
+  authorize('Doctor', 'User'),
   endVideoCall
 );
 
