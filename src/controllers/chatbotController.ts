@@ -56,36 +56,74 @@ export const transcribeAudio = [
   }
 ];
 
-// GPT response
-export const getGPTResponse = async (prompt: string): Promise<string> => {
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-  });
 
-  return completion.choices[0].message?.content || '';
+// --- Helper Functions ---
+export const getGPTResponse = async (userPrompt: string, history: any[] = []): Promise<string> => {
+    
+    // 1. Explicitly type the system message
+    const systemMessage: OpenAI.Chat.ChatCompletionMessageParam = {
+        role: 'system',
+        content: `You are "Ask AmWell", a highly empathetic and professional reproductive health assistant. 
+        Provide accurate, medically-sound information about periods, fertility, contraception, and STIs. 
+        Always be confidential and supportive. If a situation sounds like a medical emergency, advise the user to seek immediate professional help.`
+    };
+
+    // 2. Map history and cast the role specifically
+    const formattedHistory: OpenAI.Chat.ChatCompletionMessageParam[] = history.slice(-5).map(msg => ({
+        role: (msg.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: msg.text
+    }));
+
+    // 3. Combine them into a typed array
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        systemMessage,
+        ...formattedHistory,
+        { role: 'user' as const, content: userPrompt }
+    ];
+
+    const completion = await openai.chat.completions.create({
+        model: 'gpt-4',
+        messages: messages, // Now matches Overload 3
+        temperature: 0.7,
+    });
+
+    return completion.choices[0].message?.content || 'I am having trouble connecting right now. Please try again.';
 };
-
 // --- Intent & Product Helpers ---
 const detectIntent = (message: string): Intent => {
-  const m = message.toLowerCase();
-  const healthKeywords = [
-    'period', 'menstrual', 'ovulation', 'fertility',
-    'pregnant', 'pregnancy', 'missed period',
-    'contraception', 'birth control', 'iud', 'implant',
-    'condom', 'safe sex', 'sex', 'sexual',
-    'std', 'sti', 'infection', 'discharge',
-    'hormone', 'hormonal', 'cramps',
-    'emergency contraception', 'postinor',
-    'abortion', 'miscarriage'
-  ];
+  const m = message.toLowerCase().trim();
 
-  if (healthKeywords.some(k => m.includes(k))) return 'health';
-  if (['appointment', 'book', 'schedule', 'doctor', 'consultation'].some(k => m.includes(k))) return 'appointment';
-  if (['buy', 'order', 'purchase', 'add to cart'].some(k => m.includes(k))) return 'buy';
-  if (['what is', 'how', 'why', 'explain', 'tell me about'].some(k => m.includes(k))) return 'info';
-  if (['hi', 'hello', 'hey'].some(k => m.startsWith(k))) return 'greeting';
+  // 1. GREETINGS (Check first for quick exit)
+  const greetingKeywords = ['hi', 'hello', 'hey', 'good morning', 'good afternoon'];
+  if (greetingKeywords.some(k => m.startsWith(k)) && m.split(' ').length <= 3) {
+    return 'greeting';
+  }
+
+  // 2. BUY/COMMERCE (High Priority)
+  // If they use buying verbs OR mention "cart"/"price"/"cost"
+  const purchaseKeywords = ['buy', 'order', 'purchase', 'add to cart', 'price', 'cost', 'how much is'];
+  if (purchaseKeywords.some(k => m.includes(k))) return 'buy';
+
+  // 3. APPOINTMENTS
+  const appointmentKeywords = ['appointment', 'book', 'schedule', 'doctor', 'consultation', 'see a nurse'];
+  if (appointmentKeywords.some(k => m.includes(k))) return 'appointment';
+
+  // 4. REPRODUCTIVE HEALTH (Specific medical terms)
+  const healthKeywords = [
+    'period', 'menstrual', 'ovulation', 'fertility', 'pregnant', 'pregnancy', 
+    'missed period', 'contraception', 'birth control', 'iud', 'implant', 
+    'condom', 'safe sex', 'sex', 'sexual', 'std', 'sti', 'infection', 
+    'discharge', 'hormone', 'hormonal', 'cramps', 'postinor', 'abortion', 'miscarriage'
+  ];
+  if (healthKeywords.some(k => m.includes(k))) {
+    // If they ask "What is postinor", it's info. 
+    // If they just say "postinor", we treat it as health for OpenAI to explain.
+    return 'health';
+  }
+
+  // 5. GENERAL INFO
+  const infoKeywords = ['what is', 'how to', 'why', 'explain', 'tell me about', 'meaning of'];
+  if (infoKeywords.some(k => m.includes(k))) return 'info';
 
   return 'general';
 };
@@ -159,91 +197,85 @@ const generateBotResponse = (intent: Intent, products: any[], userMessage: strin
 
 // --- CONTROLLERS ---
 export const sendMessage = [
-  upload.single('file'), // optional audio file
-  async (req: Request, res: Response): Promise<Response> => {
-    try {
-      const { message: textMessage, userId, sessionId } = req.body as ChatbotRequest;
+    upload.single('file'),
+    async (req: Request, res: Response): Promise<Response> => {
+        try {
+            const { message: textMessage, userId, sessionId } = req.body as ChatbotRequest;
+            const session = sessionId || `session_${Date.now()}`;
+            const effectiveUserId = userId ? new mongoose.Types.ObjectId(userId) : null;
 
-      if (!textMessage && !req.file) {
-        return res.status(400).json({ success:false, message:'Message text or audio file is required' });
-      }
+            let userText = textMessage || '';
+            let audioData;
 
-      const session = sessionId || `session_${Date.now()}_${userId||'guest'}`;
-      const effectiveUserId = userId ? new mongoose.Types.ObjectId(userId) : null;
+            // 1. Voice handling
+            if (req.file) {
+                const { fileUrl, fileCldId } = await uploadDocumentToCloudinary(req.file.buffer, 'whisper-audio', req.file.mimetype);
+                const transcription = await openai.audio.transcriptions.create({ file: req.file.buffer as any, model: 'whisper-1' });
+                userText = transcription.text || '';
+                audioData = { cloudinaryId: fileCldId, cloudinaryUrl: fileUrl };
+            }
 
-      let message = textMessage;
+            // 2. Fetch Conversation
+            let conversation = await ChatConversation.findOne({ sessionId: session, isActive: true });
+            if (!conversation) {
+                conversation = new ChatConversation({ userId: effectiveUserId, sessionId: session, messages: [] });
+            }
 
-      // --- AUDIO TRANSCRIPTION ---
-      let audioCloudinaryId: string | null = null;
-      let audioCloudinaryUrl: string | null = null;
+            // 3. Logic: Intent & Response
+            const intent = detectIntent(userText);
+            let botResponseText = '';
+            let products: any[] = [];
 
-      if (req.file) {
-        const { fileUrl, fileCldId } = await uploadDocumentToCloudinary(
-          req.file.buffer,
-          'whisper-audio',
-          req.file.mimetype
-        );
-        audioCloudinaryId = fileCldId;
-        audioCloudinaryUrl = fileUrl;
-
-        const transcription = await openai.audio.transcriptions.create({
-          file: req.file.buffer as any,
-          model: 'whisper-1',
-        });
-
-        message = transcription.text || '';
-        console.log('✅ Audio transcribed:', message);
-      }
-
-      // --- DETECT INTENT & PRODUCTS ---
-      const intent = detectIntent(message);
-      let products: any[] = [];
-      if(intent === 'buy') products = await searchProducts(extractProductKeywords(message));
-
-      const botResponse = generateBotResponse(intent, products, message);
-
-      // --- SAVE CONVERSATION ---
-      let conversation = await ChatConversation.findOne({ sessionId: session, isActive:true });
-      if(!conversation){
-        conversation = new ChatConversation({ userId: effectiveUserId, sessionId: session, messages: [] });
-      }
-
-      // User message
-      const userMsg: IMessage = {
-        sender: 'user',
-        text: message,
-        intent,
-        timestamp: new Date(),
-        audio: req.file ? { cloudinaryId: audioCloudinaryId!, cloudinaryUrl: audioCloudinaryUrl! } : undefined
-      };
-      conversation.messages.push(userMsg);
-
-      // Bot message
-      const botMsg: IMessage = {
-        sender: 'bot',
-        text: botResponse,
-        products: products.map(p => p._id),
-        intent,
-        timestamp: new Date()
-      };
-      conversation.messages.push(botMsg);
-
-      await conversation.save();
-
-      return res.status(200).json({
-        success:true,
-        response: botResponse,
-        intent,
-        products,
-        sessionId: session,
-        audio: req.file ? { cloudinaryId: audioCloudinaryId, cloudinaryUrl: audioCloudinaryUrl } : undefined
-      });
-
-    } catch (error:any) {
-      console.error('Chatbot error:', error);
-      return res.status(500).json({ success:false, message:'Error processing your message', error:error.message });
+            if (intent === 'buy') {
+                // RESTORED: Search Products
+                const query = extractProductKeywords(userText);
+                products = await searchProducts(query);
+                botResponseText = products.length > 0 
+                    ? `I found ${products.length} product(s) for you. 🛒` 
+                    : `I couldn't find "${query}" in our shop, but I'm here to help with other questions!`;
+            } else if (intent === 'greeting') {
+                botResponseText = "Hello 👋 I’m Ask AmWell, your health assistant. How can I help you today?";
+            } else {
+                // OpenAI for health, info, or general
+                botResponseText = await getGPTResponse(userText, conversation.messages);
+                if (intent === 'health' || intent === 'info') {
+    // Optional: Search products anyway just in case they mentioned a drug
+    const possibleKeywords = extractProductKeywords(userText);
+    const suggestedProducts = await searchProducts(possibleKeywords, 2); 
+    if (suggestedProducts.length > 0) {
+        products = suggestedProducts; // This will attach products to the GPT response!
     }
-  }
+}
+            }
+
+            // 4. Save to DB
+            const userMsg: IMessage = { sender: 'user', text: userText, intent, timestamp: new Date(), audio: audioData };
+            const botMsg: IMessage = { 
+                sender: 'bot', 
+                text: botResponseText, 
+                intent, 
+                timestamp: new Date(),
+                products: products.map(p => p._id) // Save the product IDs found
+            };
+            
+            conversation.messages.push(userMsg, botMsg);
+            await conversation.save();
+
+            // 5. Response
+            return res.status(200).json({
+                success: true,
+                response: botResponseText,
+                intent,
+                products, // Return full product objects for the frontend cards
+                sessionId: session,
+                audio: audioData
+            });
+
+        } catch (error: any) {
+            console.error('Chatbot error:', error);
+            return res.status(500).json({ success: false, message: 'Error processing message' });
+        }
+    }
 ];
 
 export const getConversationHistory = async (req: Request, res: Response): Promise<Response> => {
