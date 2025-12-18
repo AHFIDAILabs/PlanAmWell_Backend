@@ -1,10 +1,16 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export interface IAudio {
+  cloudinaryId: string;
+  cloudinaryUrl: string;
+}
+
 export interface IMessage {
     sender: 'user' | 'bot';
     text: string;
     products?: mongoose.Types.ObjectId[];
     intent?: 'buy' | 'info' | 'appointment' | 'general' | 'greeting' | 'health';
+    audio?: IAudio; // Optional audio info for voice messages
     timestamp: Date;
 }
 
@@ -37,6 +43,10 @@ const messageSchema = new Schema<IMessage>({
         enum: ['buy', 'info', 'appointment', 'general', 'greeting', 'health'],
         default: 'general'
     },
+    audio: {
+        cloudinaryId: { type: String },
+        cloudinaryUrl: { type: String }
+    },
     timestamp: {
         type: Date,
         default: Date.now
@@ -47,14 +57,14 @@ const chatConversationSchema = new Schema<IChatConversation>({
     userId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
-        required: false, // Not required for guest users
+        required: false,
         default: null,
         index: true
     },
     sessionId: {
         type: String,
         required: true,
-        unique: true, // Each session should be unique
+        unique: true,
         index: true
     },
     messages: [messageSchema],
