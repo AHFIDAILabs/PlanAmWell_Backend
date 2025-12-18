@@ -179,7 +179,10 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
 }));
 
-app.use(express.json());
+// Increase limits BEFORE your routes
+app.use(express.json({ limit: '25mb' })); 
+app.use(express.urlencoded({ limit: '25mb', extended: true }));
+
 app.use(morgan("dev"));
 
 // Health check
