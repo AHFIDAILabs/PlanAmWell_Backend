@@ -87,9 +87,10 @@ export const getGPTResponse = async (userPrompt: string, history: any[] = []): P
 
  // Inside getGPTResponse
 const completion = await openai.chat.completions.create({
-    model: 'openai/gpt-4', // Use OpenRouter's model string format
+    model: 'openai/gpt-4', 
     messages: messages,
     temperature: 0.7,
+    max_tokens: 250, // Limit response length so it's "cheaper" to start
 });
 
     return completion.choices[0].message?.content || 'I am having trouble connecting right now. Please try again.';
