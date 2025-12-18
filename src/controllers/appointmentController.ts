@@ -1,14 +1,15 @@
+// controllers/appointmentController.ts
 import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import { Appointment, IAppointment } from "../models/appointment";
 import { Doctor } from "../models/doctor";
 import { User } from "../models/user";
-import { createNotificationForUser } from "../util/sendPushNotification"; // 👈 Imported
+import { createNotificationForUser } from "../util/sendPushNotification";
 
 const extractId = (field: any): string => {
-  if (!field) return '';
-  if (typeof field === 'string') return field;
-  if (typeof field === 'object' && field._id) {
+  if (!field) return "";
+  if (typeof field === "string") return field;
+  if (typeof field === "object" && field._id) {
     return String(field._id);
   }
   return String(field);
@@ -21,10 +22,15 @@ const extractId = (field: any): string => {
  */
 export const createAppointment = asyncHandler(
   async (req: Request, res: Response) => {
-    const { doctorId, scheduledAt, duration, notes, reason, shareUserInfo, consultationType } =
-      req.body;
-
-      
+    const {
+      doctorId,
+      scheduledAt,
+      duration,
+      notes,
+      reason,
+      shareUserInfo,
+      consultationType,
+    } = req.body;
 
     if (!doctorId || !scheduledAt) {
       res.status(400);
@@ -57,17 +63,15 @@ export const createAppointment = asyncHandler(
     }
 
     const scheduledDate = new Date(scheduledAt);
-if (isNaN(scheduledDate.getTime())) {
-  res.status(400);
-  throw new Error("Invalid scheduledAt date.");
-}
+    if (isNaN(scheduledDate.getTime())) {
+      res.status(400);
+      throw new Error("Invalid scheduledAt date.");
+    }
 
-if (!req.auth?.id) {
-  res.status(401);
-  throw new Error("Unauthorized");
-}
-
-
+    if (!req.auth?.id) {
+      res.status(401);
+      throw new Error("Unauthorized");
+    }
 
     const appointment = await Appointment.create({
       userId: req.auth?.id,
@@ -81,46 +85,45 @@ if (!req.auth?.id) {
       consultationType,
     });
 
-
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = user?.name || "A patient";
 
     // 🔔 Notify PATIENT: Request sent
-    if (req.auth?.id) {
-      await createNotificationForUser(
-        req.auth.id,
-        "Appointment Request Sent",
-        `Your appointment request with ${doctorName} for ${new Date(
-          scheduledAt
-        ).toLocaleString()} has been sent. Awaiting confirmation.`,
-        "appointment",
-        {
-          appointmentId: appointment._id,
-          doctorId,
-          doctorName,
-          scheduledAt,
-          status: "pending",
+        if (req.auth?.id) {
+          await createNotificationForUser(
+            req.auth.id,
+            "Appointment Request Sent",
+            `Your appointment request with ${doctorName} for ${new Date(
+              scheduledAt
+            ).toLocaleString()} has been sent. Awaiting confirmation.`,
+            "appointment",
+            {
+              appointmentId: String(appointment._id),
+              doctorId,
+              doctorName,
+              scheduledAt,
+              status: "pending",
+            }
+          );
         }
-      );
-    }
 
     // 🔔 Notify DOCTOR: New request
-    await createNotificationForUser(
-      doctorId,
-      "New Appointment Request",
-      `${patientName} has requested an appointment for ${new Date(
-        scheduledAt
-      ).toLocaleString()}${reason ? ` - ${reason}` : ""}`,
-      "appointment",
-      {
-        appointmentId: appointment._id,
-        userId: req.auth?.id,
-        patientName,
-        scheduledAt,
-        reason,
-        status: "pending",
-      }
-    );
+        await createNotificationForUser(
+          doctorId,
+          "New Appointment Request",
+          `${patientName} has requested an appointment for ${new Date(
+            scheduledAt
+          ).toLocaleString()}${reason ? ` - ${reason}` : ""}`,
+          "appointment",
+          {
+            appointmentId: String(appointment._id),
+            userId: req.auth?.id,
+            patientName,
+            scheduledAt,
+            reason,
+            status: "pending",
+          }
+        );
 
     res.status(201).json({
       success: true,
@@ -260,9 +263,7 @@ export const updateAppointment = asyncHandler(
         ];
 
         if (!allowedDoctorStatuses.includes(req.body.status)) {
-          return res
-            .status(400)
-            .json({ message: "Invalid status update." });
+          return res.status(400).json({ message: "Invalid status update." });
         }
 
         updates.status = req.body.status;
@@ -274,7 +275,8 @@ export const updateAppointment = asyncHandler(
           return res.status(400).json({ message: "Invalid scheduledAt date." });
         }
 
-        if (req.body.consultationType) updates.consultationType = req.body.consultationType;
+        if (req.body.consultationType)
+          updates.consultationType = req.body.consultationType;
 
         updates.scheduledAt = newDate;
 
@@ -290,13 +292,13 @@ export const updateAppointment = asyncHandler(
     console.log("📝 Applying updates:", updates);
 
     // Apply updates
-    const updatedAppointment = await Appointment.findByIdAndUpdate(
+    const updatedAppointment = (await Appointment.findByIdAndUpdate(
       req.params.id,
       updates,
       { new: true, runValidators: true }
     )
-      .populate("doctorId", "firstName lastName")
-      .populate("userId", "name firstName lastName userImage email");
+      .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
+      .populate("userId", "name userImage email")) as any;
 
     if (!updatedAppointment) {
       res.status(404);
@@ -316,128 +318,153 @@ export const updateAppointment = asyncHandler(
 
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName =
-      patient?.name ||
-      `${patient?.firstName || ""} ${patient?.lastName || ""}`.trim() ||
-      "Patient";
+      patient?.name || "Patient";
 
-    // Doctor → Patient notifications
-    if (role === "Doctor" && updates.status && updates.status !== oldStatus) {
-      const statusMessages: Record<string, { title: string; message: string }> = {
-        confirmed: {
-          title: "Appointment Confirmed ✅",
-          message: `${doctorName} has confirmed your appointment for ${new Date(
-            updatedAppointment.scheduledAt
-          ).toLocaleString()}`,
-        },
-        rejected: {
-          title: "Appointment Declined",
-          message: `${doctorName} declined your appointment request.`,
-        },
-        cancelled: {
-          title: "Appointment Cancelled",
-          message: `${doctorName} cancelled your appointment scheduled for ${new Date(
-            updatedAppointment.scheduledAt
-          ).toLocaleString()}`,
-        },
-        rescheduled: {
-          title: "Appointment Rescheduled",
-          message: `${doctorName} rescheduled your appointment to ${new Date(
-            updatedAppointment.scheduledAt
-          ).toLocaleString()}`,
-        },
-      };
-
-      const notification = statusMessages[updates.status];
-      if (notification) {
-        await createNotificationForUser(
-          patientId,
-          notification.title,
-          notification.message,
-          "appointment",
-          {
-            appointmentId: updatedAppointment._id,
-            doctorId,
-            doctorName,
-            scheduledAt: updatedAppointment.scheduledAt,
-            status: updates.status,
+    // ✅ Doctor → Patient notifications (prevent duplicates)
+        if (role === "Doctor" && updates.status && updates.status !== oldStatus) {
+          const statusMessages: Record<
+            string,
+            { title: string; message: string }
+          > = {
+            confirmed: {
+              title: "Appointment Confirmed ✅",
+              message: `${doctorName} has confirmed your appointment for ${new Date(
+                updatedAppointment.scheduledAt
+              ).toLocaleString()}`,
+            },
+            rejected: {
+              title: "Appointment Declined",
+              message: `${doctorName} declined your appointment request.`,
+            },
+            cancelled: {
+              title: "Appointment Cancelled",
+              message: `${doctorName} cancelled your appointment scheduled for ${new Date(
+                updatedAppointment.scheduledAt
+              ).toLocaleString()}`,
+            },
+            rescheduled: {
+              title: "Appointment Rescheduled",
+              message: `${doctorName} rescheduled your appointment to ${new Date(
+                updatedAppointment.scheduledAt
+              ).toLocaleString()}`,
+            },
+          };
+    
+          const notification = statusMessages[updates.status];
+          if (notification) {
+            await createNotificationForUser(
+              patientId,
+              notification.title,
+              notification.message,
+              "appointment",
+              {
+                appointmentId: String(updatedAppointment._id),
+                doctorId,
+                doctorName,
+                scheduledAt: updatedAppointment.scheduledAt.toISOString(),
+                status: updates.status,
+              }
+            );
           }
-        );
-      }
-    }
-
-    // Patient cancels → Doctor notifications
-    if (role === "User" && updates.status === "cancelled") {
-      await createNotificationForUser(
-        doctorId,
-        "Appointment Cancelled by Patient",
-        `${patientName} cancelled the appointment scheduled for ${new Date(
-          updatedAppointment.scheduledAt
-        ).toLocaleString()}`,
-        "appointment",
-        {
-          appointmentId: updatedAppointment._id,
-          userId: patientId,
-          patientName,
-          scheduledAt: updatedAppointment.scheduledAt,
-          status: "cancelled",
         }
-      );
-    }
 
-    // 15-minute reminder scheduling
+    // ✅ Patient cancels → Doctor notifications
+        if (role === "User" && updates.status === "cancelled") {
+          await createNotificationForUser(
+            doctorId,
+            "Appointment Cancelled by Patient",
+            `${patientName} cancelled the appointment scheduled for ${new Date(
+              updatedAppointment.scheduledAt
+            ).toLocaleString()}`,
+            "appointment",
+            {
+              appointmentId: String(updatedAppointment._id),
+              userId: patientId,
+              patientName,
+              scheduledAt: updatedAppointment.scheduledAt.toISOString(),
+              status: "cancelled",
+            }
+          );
+        }
+
+    // ✅ IMPROVED: 15-minute reminder scheduling (prevent duplicates)
     if (
       updatedAppointment.status === "confirmed" &&
-      !updatedAppointment.reminderSent &&
+      !updatedAppointment.notificationsSent?.reminder &&
       oldStatus !== "confirmed"
     ) {
       const reminderTime =
-        new Date(updatedAppointment.scheduledAt).getTime() -
-        15 * 60 * 1000;
+        new Date(updatedAppointment.scheduledAt).getTime() - 15 * 60 * 1000;
       const delay = reminderTime - Date.now();
 
-      if (delay > 0) {
+      if (delay > 0 && delay < 7 * 24 * 60 * 60 * 1000) {
+        // Only schedule if within 7 days
         setTimeout(async () => {
           try {
             const appt = await Appointment.findById(updatedAppointment._id);
-            if (appt && !appt.reminderSent && appt.status === "confirmed") {
+            if (
+              appt &&
+              !appt.notificationsSent?.reminder &&
+              appt.status === "confirmed"
+            ) {
               const apptPatientId = extractId(appt.userId);
               const apptDoctorId = extractId(appt.doctorId);
 
-              await createNotificationForUser(
-                apptPatientId,
-                "Appointment Starting Soon ⏰",
-                `Your appointment with ${doctorName} starts in 15 minutes!`,
-                "appointment",
-                {
-                  appointmentId: appt._id,
-                  doctorId: apptDoctorId,
-                  doctorName,
-                  scheduledAt: appt.scheduledAt,
-                  type: "reminder",
-                }
-              );
+              await Promise.all([
+                // Notify patient
+                createNotificationForUser(
+                  apptPatientId,
+                  "Appointment Starting Soon ⏰",
+                  `Your appointment with ${doctorName} starts in 15 minutes!`,
+                  "appointment",
+                  {
+                    appointmentId: String(appt._id),
+                    doctorId: apptDoctorId,
+                    doctorName,
+                    scheduledAt: appt.scheduledAt.toISOString(),
+                    type: "reminder",
+                  }
+                ),
 
-              await createNotificationForUser(
-                apptDoctorId,
-                "Appointment Starting Soon ⏰",
-                `Your appointment with ${patientName} starts in 15 minutes!`,
-                "appointment",
-                {
-                  appointmentId: appt._id,
-                  userId: apptPatientId,
-                  patientName,
-                  scheduledAt: appt.scheduledAt,
-                  type: "reminder",
-                }
-              );
+                // Notify doctor
+                createNotificationForUser(
+                  apptDoctorId,
+                  "Appointment Starting Soon ⏰",
+                  `Your appointment with ${patientName} starts in 15 minutes!`,
+                  "appointment",
+                  {
+                    appointmentId: String(appt._id),
+                    userId: apptPatientId,
+                    patientName,
+                    scheduledAt: appt.scheduledAt.toISOString(),
+                    type: "reminder",
+                  }
+                ),
+              ]);
 
-              appt.reminderSent = true;
+              // ✅ Mark reminder as sent
+              if (!appt.notificationsSent) {
+                appt.notificationsSent = {
+                  reminder: false,
+                  expiryWarning: false,
+                  callStarted: false,
+                  callEnded: false,
+                };
+              }
+              appt.notificationsSent.reminder = true;
+              appt.reminderSent = true; // Legacy field
               await appt.save();
+
+              console.log(`✅ Sent 15-min reminder for appointment ${appt._id}`);
             }
           } catch (err) {
             console.error("❌ Failed to send reminder:", err);
           }
         }, delay);
+
+        console.log(
+          `⏰ Scheduled reminder in ${Math.floor(delay / 60000)} minutes`
+        );
       }
     }
 
@@ -446,7 +473,6 @@ export const updateAppointment = asyncHandler(
     res.status(200).json({ success: true, data: updatedAppointment });
   }
 );
-
 
 /**
  * @desc Admin — get ALL appointments
@@ -464,17 +490,15 @@ export const getAllAppointments = asyncHandler(
   }
 );
 
-
 /**
  * @desc User/Doctor — Get appointment by ID
  * @route GET /api/v1/appointments/:id
  * @access User | Doctor
  */
-
 export const getAppointmentById = asyncHandler(
   async (req: Request, res: Response) => {
     const appointment = await Appointment.findById(req.params.id)
-      .populate("doctorId", "firstName lastName") // populate only essential fields
+      .populate("doctorId", "firstName lastName")
       .populate("userId", "firstName lastName name email userImage");
 
     if (!appointment) {
@@ -486,19 +510,27 @@ export const getAppointmentById = asyncHandler(
     const userId = req.auth?.id;
     const role = req.auth?.role;
 
-    if (role === "User" && (appointment.userId as any)._id.toString() !== userId) {
-      return res.status(403).json({ message: "You can only access your own appointments." });
+    if (
+      role === "User" &&
+      (appointment.userId as any)._id.toString() !== userId
+    ) {
+      return res
+        .status(403)
+        .json({ message: "You can only access your own appointments." });
     }
 
-    if (role === "Doctor" && (appointment.doctorId as any)._id.toString() !== userId) {
-      return res.status(403).json({ message: "You can only access your assigned appointments." });
+    if (
+      role === "Doctor" &&
+      (appointment.doctorId as any)._id.toString() !== userId
+    ) {
+      return res
+        .status(403)
+        .json({ message: "You can only access your assigned appointments." });
     }
 
     res.status(200).json({ success: true, data: appointment });
   }
 );
-
-
 
 /**
  * @desc Admin — Delete appointment
@@ -528,24 +560,28 @@ export const deleteAppointment = asyncHandler(
 
 /**
  * ⏰ Cron job: Send appointment reminders
+ * ✅ IMPROVED: Now uses notificationsSent to prevent duplicates
  */
 export const sendAppointmentReminders = async () => {
   try {
     const now = new Date();
-    const reminderTime = new Date(now.getTime() + 15 * 60 * 1000);
+    const reminderTimeStart = new Date(now.getTime() + 15 * 60 * 1000);
+    const reminderTimeEnd = new Date(reminderTimeStart.getTime() + 60 * 1000);
 
     const upcomingAppointments = (await Appointment.find({
       status: "confirmed",
       scheduledAt: {
-        $gte: now,
-        $lte: reminderTime,
+        $gte: reminderTimeStart,
+        $lt: reminderTimeEnd,
       },
-      reminderSent: { $ne: true },
+      "notificationsSent.reminder": { $ne: true },
     })
       .populate("doctorId", "firstName lastName")
       .populate("userId", "name firstName lastName")) as (IAppointment & {
       _id: string;
     })[];
+
+    let sentCount = 0;
 
     for (const appt of upcomingAppointments) {
       const doctor = appt.doctorId as any;
@@ -555,44 +591,62 @@ export const sendAppointmentReminders = async () => {
         patient?.name ||
         `${patient?.firstName || ""} ${patient?.lastName || ""}`.trim();
 
-      // Notify PATIENT
-      await createNotificationForUser(
-        appt.userId.toString(),
-        "Appointment Starting Soon ⏰",
-        `Your appointment with ${doctorName} starts in 15 minutes!`,
-        "appointment",
-        {
-          appointmentId: appt._id,
-          doctorId: appt.doctorId,
-          doctorName,
-          scheduledAt: appt.scheduledAt,
-          type: "reminder",
-        }
-      );
+      try {
+        await Promise.all([
+          createNotificationForUser(
+            String(appt.userId),
+            "Appointment Starting Soon ⏰",
+            `Your appointment with ${doctorName} starts in 15 minutes!`,
+            "appointment",
+            {
+              appointmentId: String(appt._id),
+              doctorId: String(appt.doctorId),
+              doctorName,
+              scheduledAt: appt.scheduledAt.toISOString(),
+              type: "reminder",
+            }
+          ),
 
-      // Notify DOCTOR
-      await createNotificationForUser(
-        appt.doctorId.toString(),
-        "Appointment Starting Soon ⏰",
-        `Your appointment with ${patientName} starts in 15 minutes!`,
-        "appointment",
-        {
-          appointmentId: appt._id,
-          userId: appt.userId,
-          patientName,
-          scheduledAt: appt.scheduledAt,
-          type: "reminder",
-        }
-      );
+          createNotificationForUser(
+            String(appt.doctorId),
+            "Appointment Starting Soon ⏰",
+            `Your appointment with ${patientName} starts in 15 minutes!`,
+            "appointment",
+            {
+              appointmentId: String(appt._id),
+              userId: String(appt.userId),
+              patientName,
+              scheduledAt: appt.scheduledAt.toISOString(),
+              type: "reminder",
+            }
+          ),
+        ]);
 
-      appt.reminderSent = true;
-      await appt.save();
+        if (!appt.notificationsSent) {
+          appt.notificationsSent = {
+            reminder: false,
+            expiryWarning: false,
+            callStarted: false,
+            callEnded: false,
+          };
+        }
+        appt.notificationsSent.reminder = true;
+        appt.reminderSent = true;
+        await appt.save();
+
+        sentCount++;
+      } catch (err) {
+        console.error(`❌ Failed to send reminder for ${appt._id}:`, err);
+      }
     }
 
-    console.log(
-      `✅ Sent ${upcomingAppointments.length * 2} appointment reminders`
-    );
+    if (sentCount > 0) {
+      console.log(`✅ Sent ${sentCount * 2} appointment reminders`);
+    }
+
+    return { success: true, count: sentCount };
   } catch (error) {
     console.error("❌ Error sending reminders:", error);
+    return { success: false, error };
   }
 };

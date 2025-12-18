@@ -40,11 +40,7 @@ export const generateVideoToken = asyncHandler(
   async (req: Request, res: Response) => {
     const { appointmentId } = req.body;
     const userId = req.auth?.id;
-    const role = req.auth?.role; // "Doctor" | "User"
-
-    // ========================================================================
-    // 1️⃣ VALIDATION
-    // ========================================================================
+    const role = req.auth?.role;
 
     if (!appointmentId || !userId || !role) {
       return res.status(400).json({
@@ -61,13 +57,9 @@ export const generateVideoToken = asyncHandler(
       });
     }
 
-    // ========================================================================
-    // 2️⃣ FETCH & AUTHORIZE
-    // ========================================================================
-
-    const appointment = await Appointment.findById(appointmentId)
-      .populate("doctorId", "firstName lastName")
-      .populate("userId", "firstName lastName");
+    let appointment = await Appointment.findById(appointmentId)
+      .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
+      .populate("userId", "name userImage email phone");
 
     if (!appointment) {
       return res.status(404).json({
@@ -79,7 +71,6 @@ export const generateVideoToken = asyncHandler(
     const doctorId = extractId(appointment.doctorId);
     const patientId = extractId(appointment.userId);
 
-    // Authorization check
     if (![doctorId, patientId].includes(userId)) {
       return res.status(403).json({
         success: false,
@@ -87,7 +78,6 @@ export const generateVideoToken = asyncHandler(
       });
     }
 
-    // Check if appointment is in valid status
     if (appointment.status === "cancelled") {
       return res.status(400).json({
         success: false,
@@ -102,145 +92,146 @@ export const generateVideoToken = asyncHandler(
       });
     }
 
-    // Optional: Check if appointment time is reasonable
-    const appointmentTime = new Date(appointment.scheduledAt);
-    const now = new Date();
-    const timeDiff = appointmentTime.getTime() - now.getTime();
-    const hoursDiff = timeDiff / (1000 * 60 * 60);
-
-    // Warn if joining too early (more than 15 minutes before)
-    if (hoursDiff > 0.25) {
-      console.log(`⚠️  User joining ${hoursDiff.toFixed(1)} hours early`);
-    }
-
-    const isDoctor = role === "Doctor";
-    const isUser = role === "User";
-
-    // ========================================================================
-    // 3️⃣ INITIALIZE CALL METADATA (Idempotent)
-    // ========================================================================
-
-    if (!appointment.callChannelName) {
-      appointment.callChannelName = `appt_${appointment._id}`;
-    }
-
-    if (!appointment.callParticipants) {
-      appointment.callParticipants = [];
-    }
-
-    if (!appointment.agoraUidMap) {
-      appointment.agoraUidMap = {};
-    }
-
-    const participantObjectId = new mongoose.Types.ObjectId(userId);
-    const uid = generateUid(userId);
-
-    // Add participant if not already present
-    if (
-      !appointment.callParticipants.some((id) =>
-        id.equals(participantObjectId)
-      )
-    ) {
-      appointment.callParticipants.push(participantObjectId);
-    }
-
-    // Map UID
-    if (isDoctor) {
-      appointment.agoraUidMap.doctor = uid;
-    } else {
-      appointment.agoraUidMap.user = uid;
-    }
-
-    // ========================================================================
-    // 4️⃣ CALL LIFECYCLE MANAGEMENT
-    // ========================================================================
-
-    let shouldNotifyOtherParty = false;
-    let otherPartyId: string | null = null;
-    let notificationMessage = "";
-
-    /**
-     * STATE: idle → ringing (First person joins)
-     */
-    if (appointment.callStatus === "idle" || !appointment.callStatus) {
-      appointment.callStatus = "ringing";
-      appointment.callInitiatedBy = role as any;
-     
-      
-      // Update appointment status to in-progress when call starts
-      if (appointment.status === "confirmed") {
-        appointment.status = "in-progress";
-      }
-
-      shouldNotifyOtherParty = true;
-      otherPartyId = isDoctor ? patientId : doctorId;
-      notificationMessage = isDoctor
-        ? "Dr. is calling you 📞"
-        : "Your patient is calling you 📞";
-
-      console.log(`📞 ${role} initiated call for appointment ${appointmentId}`);
-    }
-
-    /**
-     * STATE: ringing → in-progress (Second person joins)
-     */
-    else if (
-      appointment.callStatus === "ringing" &&
-      appointment.callParticipants.length === 2
-    ) {
-      appointment.callStatus = "in-progress";
-      appointment.callStartedAt = new Date(); // ✅ REAL start
-
-      console.log(`✅ Both parties joined - Call is now in-progress`);
-      
-      // Optionally notify the initiator that other party joined
-      const initiatorId = isDoctor ? patientId : doctorId;
-      shouldNotifyOtherParty = true;
-      otherPartyId = initiatorId;
-      notificationMessage = isDoctor
-        ? "Patient has joined the call"
-        : "Doctor has joined the call";
-    }
-
-    /**
-     * STATE: in-progress → Allow rejoining
-     */
-    else if (appointment.callStatus === "in-progress") {
-      console.log(`🔄 ${role} rejoining in-progress call`);
-      // Just generate token, no state change needed
-    }
-
-    /**
-     * STATE: ended → Prevent rejoining
-     */
-    else if (appointment.callStatus === "ended") {
+    if (appointment.callStatus === "ended") {
       return res.status(400).json({
         success: false,
         message: "This call has already ended and cannot be rejoined",
       });
     }
 
-    // ========================================================================
-    // 5️⃣ SAVE CHANGES & GENERATE TOKEN
-    // ========================================================================
+    const appointmentTime = new Date(appointment.scheduledAt);
+    const now = new Date();
+    const timeDiff = appointmentTime.getTime() - now.getTime();
+    const minutesDiff = timeDiff / (1000 * 60);
 
-    try {
-      // Save appointment state
+    if (minutesDiff > 15) {
+      return res.status(400).json({
+        success: false,
+        message: `Call can only be joined within 15 minutes of scheduled time. Please wait ${Math.floor(minutesDiff - 15)} more minutes.`,
+        minutesUntilAvailable: Math.floor(minutesDiff - 15),
+      });
+    }
+
+    const isDoctor = role === "Doctor";
+    const isUser = role === "User";
+    const participantObjectId = new mongoose.Types.ObjectId(userId);
+    const uid = generateUid(userId);
+
+    let shouldNotifyOtherParty = false;
+    let otherPartyId: string | null = null;
+    let notificationMessage = "";
+    let callWasInitiated = false;
+
+    if (!appointment.callStatus || appointment.callStatus === "idle") {
+      console.log(`📞 ${role} attempting to initiate call for appointment ${appointmentId}`);
+
+      const updatedAppointment = await Appointment.findOneAndUpdate(
+        {
+          _id: appointmentId,
+          callStatus: { $in: ["idle", null] },
+        },
+        {
+          $set: {
+            callStatus: "ringing",
+            callInitiatedBy: role,
+            callChannelName: `appt_${appointmentId}`,
+            status: "in-progress",
+            [`agoraUidMap.${isDoctor ? "doctor" : "user"}`]: uid,
+          },
+          $addToSet: {
+            callParticipants: participantObjectId,
+          },
+        },
+        { new: true }
+      )
+        .populate("doctorId", "firstName lastName")
+        .populate("userId", "firstName lastName");
+
+      if (updatedAppointment) {
+        appointment = updatedAppointment;
+        callWasInitiated = true;
+        shouldNotifyOtherParty = true;
+        otherPartyId = isDoctor ? patientId : doctorId;
+        notificationMessage = isDoctor
+          ? "Dr. is calling you 📞"
+          : "Your patient is calling you 📞";
+
+        console.log(`✅ ${role} successfully initiated call`);
+      } else {
+        appointment = await Appointment.findById(appointmentId)
+          .populate("doctorId", "firstName lastName")
+          .populate("userId", "firstName lastName");
+
+        if (!appointment) {
+          return res.status(404).json({
+            success: false,
+            message: "Appointment not found after race condition",
+          });
+        }
+
+        console.log(`🔄 ${role} joining call initiated by ${appointment.callInitiatedBy}`);
+      }
+    }
+
+    if (
+      appointment.callStatus === "ringing" &&
+      !callWasInitiated &&
+      !appointment.callParticipants.some((id) => id.equals(participantObjectId))
+    ) {
+      console.log(`✅ ${role} is second participant - transitioning to in-progress`);
+
+      if (!appointment.agoraUidMap) {
+        appointment.agoraUidMap = {};
+      }
+      if (isDoctor) {
+        appointment.agoraUidMap.doctor = uid;
+      } else {
+        appointment.agoraUidMap.user = uid;
+      }
+
+      appointment.callParticipants.push(participantObjectId);
       await appointment.save();
 
-      // Generate Agora token (1 hour validity)
+      const initiatorId = isDoctor ? patientId : doctorId;
+      shouldNotifyOtherParty = true;
+      otherPartyId = initiatorId;
+      notificationMessage = isDoctor
+        ? "Patient is joining the call"
+        : "Doctor is joining the call";
+    }
+
+    if (appointment.callStatus === "in-progress") {
+      console.log(`🔄 ${role} rejoining in-progress call`);
+
+      if (!appointment.agoraUidMap) {
+        appointment.agoraUidMap = {};
+      }
+      if (isDoctor && !appointment.agoraUidMap.doctor) {
+        appointment.agoraUidMap.doctor = uid;
+      } else if (isUser && !appointment.agoraUidMap.user) {
+        appointment.agoraUidMap.user = uid;
+      }
+
+      if (!appointment.callParticipants.some((id) => id.equals(participantObjectId))) {
+        appointment.callParticipants.push(participantObjectId);
+      }
+
+      await appointment.save();
+    }
+
+    try {
+      const channelName = appointment.callChannelName || `appt_${appointmentId}`;
       const expireAt = Math.floor(Date.now() / 1000) + 60 * 60;
 
       const token = RtcTokenBuilder.buildTokenWithUid(
         AGORA_APP_ID,
         AGORA_APP_CERTIFICATE,
-        appointment.callChannelName,
+        channelName,
         uid,
         RtcRole.PUBLISHER,
         expireAt
       );
 
-      // Send notification AFTER successful token generation
       if (shouldNotifyOtherParty && otherPartyId) {
         try {
           await createNotificationForUser(
@@ -249,14 +240,13 @@ export const generateVideoToken = asyncHandler(
             notificationMessage,
             "appointment",
             {
-              appointmentId: (appointment._id as any).toString(),
+              appointmentId: appointmentId.toString(),
               autoJoin: true,
               fromNotification: true,
             }
           );
           console.log(`📨 Notification sent to ${otherPartyId}`);
         } catch (notifError) {
-          // Don't fail the request if notification fails
           console.error("⚠️  Failed to send notification:", notifError);
         }
       }
@@ -265,25 +255,34 @@ export const generateVideoToken = asyncHandler(
         success: true,
         data: {
           token,
-          channelName: appointment.callChannelName,
+          channelName,
           uid,
           appId: AGORA_APP_ID,
           callStatus: appointment.callStatus,
           participantCount: appointment.callParticipants.length,
           isInitiator: appointment.callInitiatedBy === role,
+          doctorName: `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
+          patientName: `${(appointment.userId as any).firstName} ${(appointment.userId as any).lastName}`,
         },
         message: "Token generated successfully",
       });
     } catch (error: any) {
       console.error("❌ Token generation failed:", error);
 
-      // Rollback state if needed
-      if (appointment.callStatus === "ringing" && appointment.callParticipants.length === 1) {
-        appointment.callStatus = "idle";
-        appointment.callParticipants = [];
-        appointment.callInitiatedBy = undefined;
-        appointment.callStartedAt = undefined;
-        await appointment.save().catch(console.error);
+      if (callWasInitiated) {
+        try {
+          await Appointment.findByIdAndUpdate(appointmentId, {
+            $set: {
+              callStatus: "idle",
+              callInitiatedBy: undefined,
+              callChannelName: "",
+            },
+            $pull: { callParticipants: participantObjectId },
+          });
+          console.log("🔄 Rolled back call state due to token generation failure");
+        } catch (rollbackError) {
+          console.error("❌ Rollback failed:", rollbackError);
+        }
       }
 
       return res.status(500).json({
@@ -296,132 +295,393 @@ export const generateVideoToken = asyncHandler(
 );
 
 /* -------------------------------------------------------------------------- */
-/*                                End Call                                    */
+/*                       Confirm Call Join                                    */
 /* -------------------------------------------------------------------------- */
 
-export const endVideoCall = asyncHandler(async (req, res) => {
-  const { appointmentId, callDuration, callQuality } = req.body;
-  const appointment = await Appointment.findById(appointmentId);
-  if (!appointment) return res.status(404).json({ message: 'Appointment not found' });
-
-  if (appointment.callStatus === "ended") {
-  return res.json({
-    success: true,
-    message: "Call already ended",
-    data: appointment,
-  });
-}
-
-
-  appointment.callStatus = 'ended';
-  appointment.callEndedAt = new Date();
-  appointment.callEndedBy = req.auth?.role as any;
-  appointment.callDuration = callDuration;
-  appointment.callQuality = callQuality;
-
-  // Only mark appointment as completed if both participants left
-  appointment.status = 'completed';
-  await appointment.save();
-
-  const doctorId = extractId(appointment.doctorId);
-const patientId = extractId(appointment.userId);
-
-const otherPartyId =
-  req.auth?.role === "Doctor" ? patientId : doctorId;
-
-await createNotificationForUser(
-  otherPartyId,
-  "Call Ended",
-  "The video call has ended.",
-  "appointment",
-  {
-    appointmentId:( appointment._id as any).toString(),
-    callDuration,
-  }
-);
-
-
-  res.json({ success: true, message: 'Call ended successfully', data: appointment });
-});
-
-
-/* -------------------------------------------------------------------------- */
-/*                             Get Call Status                                 */
-/* -------------------------------------------------------------------------- */
-
-export const getCallStatus = asyncHandler(
+export const confirmCallJoin = asyncHandler(
   async (req: Request, res: Response) => {
-    const { appointmentId } = req.params;
+    const { appointmentId } = req.body;
     const userId = req.auth?.id;
     const role = req.auth?.role;
 
+    if (!appointmentId || !userId) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
     const appointment = await Appointment.findById(appointmentId)
-      .populate("doctorId", "firstName lastName")
-      .populate("userId", "firstName lastName");
+      .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
+      .populate("userId", "name userImage email phone");
 
     if (!appointment) {
-      return res.status(404).json({ message: "Appointment not found" });
+      return res.status(404).json({ success: false, message: "Appointment not found" });
     }
 
     const doctorId = extractId(appointment.doctorId);
     const patientId = extractId(appointment.userId);
 
-    if (
-      (role === "Doctor" && doctorId !== userId) ||
-      (role === "User" && patientId !== userId)
-    ) {
-      return res.status(403).json({ message: "Unauthorized" });
+    if (![doctorId, patientId].includes(userId)) {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
-    const now = new Date();
-    const scheduled = new Date(appointment.scheduledAt);
-    const diffMinutes = Math.floor(
-      (scheduled.getTime() - now.getTime()) / 60000
-    );
+    (appointment as any).addActiveParticipant(userId);
+
+    const activeCount = (appointment as any).getActiveParticipantCount();
+
+    if (appointment.callStatus === "ringing" && activeCount === 2) {
+      console.log(`✅ Both participants active - transitioning to in-progress`);
+
+      appointment.callStatus = "in-progress";
+      appointment.callStartedAt = new Date();
+
+      appointment.callAttempts.push({
+        startedAt: new Date(),
+        participants: [
+          new mongoose.Types.ObjectId(doctorId),
+          new mongoose.Types.ObjectId(patientId),
+        ],
+      });
+
+      if (!appointment.notificationsSent.callStarted) {
+        const doctorName = `Dr. ${(appointment.doctorId as any).lastName}`;
+        const patientName = `${(appointment.userId as any).name}`;
+
+        try {
+          await createNotificationForUser(
+            doctorId,
+            "Call Started",
+            `Your call with ${patientName} is now active`,
+            "appointment",
+            { appointmentId: appointmentId.toString() }
+          );
+
+          await createNotificationForUser(
+            patientId,
+            "Call Started",
+            `Your call with ${doctorName} is now active`,
+            "appointment",
+            { appointmentId: appointmentId.toString() }
+          );
+
+          appointment.notificationsSent.callStarted = true;
+        } catch (notifError) {
+          console.error("Failed to send call started notifications:", notifError);
+        }
+      }
+    }
+
+    await appointment.save();
 
     res.json({
       success: true,
       data: {
-        appointmentId: appointment._id,
-        status: appointment.status,
         callStatus: appointment.callStatus,
-       isActive: appointment.callStatus === 'ringing' || appointment.callStatus === 'in-progress',
-canJoin: appointment.callStatus !== 'ended',
-
-        minutesUntilCall: diffMinutes,
-        channelName: appointment.callChannelName,
-        participants: appointment.callParticipants,
-        doctorName: `Dr. ${(appointment.doctorId as any).firstName} ${
-          (appointment.doctorId as any).lastName
-        }`,
-        patientName: `${(appointment.userId as any).firstName} ${
-          (appointment.userId as any).lastName
-        }`,
+        activeParticipants: activeCount,
+        callStartedAt: appointment.callStartedAt,
       },
+      message: "Call join confirmed",
     });
   }
 );
 
-/**
- * Report call issue
- */
+/* -------------------------------------------------------------------------- */
+/*                       Participant Heartbeat                                */
+/* -------------------------------------------------------------------------- */
+
+export const updateParticipantHeartbeat = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { appointmentId } = req.body;
+    const userId = req.auth?.id;
+
+    if (!appointmentId || !userId) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    const appointment = await Appointment.findById(appointmentId);
+
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: "Appointment not found" });
+    }
+
+    const participantId = new mongoose.Types.ObjectId(userId);
+    const participant = appointment.activeParticipants.find((p) =>
+      p.userId.equals(participantId)
+    );
+
+    if (participant) {
+      participant.lastPing = new Date();
+      await appointment.save();
+    }
+
+    res.json({ success: true });
+  }
+);
+
+/* -------------------------------------------------------------------------- */
+/*                       Handle Disconnect                                    */
+/* -------------------------------------------------------------------------- */
+
+export const handleCallDisconnect = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { appointmentId, reason } = req.body;
+    const userId = req.auth?.id;
+    const role = req.auth?.role;
+
+    if (!appointmentId || !userId) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    const appointment = await Appointment.findById(appointmentId)
+      .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
+      .populate("userId", "name userImage email phone");
+
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: "Appointment not found" });
+    }
+
+    const doctorId = extractId(appointment.doctorId);
+    const patientId = extractId(appointment.userId);
+
+    if (![doctorId, patientId].includes(userId)) {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    console.log(`🔌 ${role} disconnecting from call ${appointmentId}`);
+
+    (appointment as any).removeActiveParticipant(userId);
+
+    const activeCount = (appointment as any).getActiveParticipantCount();
+
+    if (activeCount === 0 && appointment.callStatus === "in-progress") {
+      const callDuration = appointment.callStartedAt
+        ? Math.floor((Date.now() - appointment.callStartedAt.getTime()) / 1000)
+        : 0;
+
+      if (callDuration > 30) {
+        console.log(`⏹️  Both participants disconnected - ending call after ${callDuration}s`);
+        appointment.callStatus = "ended";
+        appointment.callEndedAt = new Date();
+        appointment.callEndedBy = "system";
+        appointment.callDuration = callDuration;
+        appointment.status = "completed";
+
+        const lastAttempt = appointment.callAttempts[appointment.callAttempts.length - 1];
+        if (lastAttempt && !lastAttempt.endedAt) {
+          lastAttempt.endedAt = new Date();
+          lastAttempt.endReason = "disconnected";
+          lastAttempt.duration = callDuration;
+        }
+      } else {
+        console.log(`⏳ Call too short (${callDuration}s) - allowing reconnection`);
+      }
+    }
+
+    await appointment.save();
+
+    const otherPartyId = userId === doctorId ? patientId : doctorId;
+    const disconnectedUserName = role === "Doctor"
+      ? `Dr. ${(appointment.doctorId as any).lastName}`
+      : (appointment.userId as any).name;
+
+    try {
+      await createNotificationForUser(
+        otherPartyId,
+        "Participant Disconnected",
+        `${disconnectedUserName} has ${appointment.callStatus === "ended" ? "left" : "temporarily disconnected from"} the call`,
+        "appointment",
+        {
+          appointmentId: appointmentId.toString(),
+          callEnded: appointment.callStatus === "ended",
+        }
+      );
+    } catch (notifError) {
+      console.error("Failed to send disconnect notification:", notifError);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        callStatus: appointment.callStatus,
+        activeParticipants: activeCount,
+        callEnded: appointment.callStatus === "ended",
+      },
+      message: "Disconnect handled",
+    });
+  }
+);
+
+/* -------------------------------------------------------------------------- */
+/*                       End Call                                             */
+/* -------------------------------------------------------------------------- */
+
+export const endVideoCall = asyncHandler(async (req: Request, res: Response) => {
+  const { appointmentId, callDuration, callQuality } = req.body;
+  const userId = req.auth?.id;
+  const role = req.auth?.role;
+
+  const appointment = await Appointment.findById(appointmentId)
+    .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
+    .populate("userId", "name userImage email phone");
+
+  if (!appointment) {
+    return res.status(404).json({ success: false, message: "Appointment not found" });
+  }
+
+  const doctorId = extractId(appointment.doctorId);
+  const patientId = extractId(appointment.userId);
+
+  if (![doctorId, patientId].includes(userId!)) {
+    return res.status(403).json({ success: false, message: "Unauthorized" });
+  }
+
+  const wasAlreadyEnded = appointment.callStatus === "ended";
+
+  if (wasAlreadyEnded) {
+    return res.json({
+      success: true,
+      message: "Call already ended",
+      data: appointment,
+    });
+  }
+
+  console.log(`🛑 ${role} ending call for appointment ${appointmentId}`);
+
+  const finalDuration = callDuration || (appointment.callStartedAt
+    ? Math.floor((Date.now() - appointment.callStartedAt.getTime()) / 1000)
+    : 0);
+
+  appointment.callStatus = "ended";
+  appointment.callEndedAt = new Date();
+  appointment.callEndedBy = role as any;
+  appointment.callDuration = finalDuration;
+  appointment.status = "completed";
+
+  if (callQuality) {
+    appointment.callQuality = callQuality;
+  }
+
+  const lastAttempt = appointment.callAttempts[appointment.callAttempts.length - 1];
+  if (lastAttempt && !lastAttempt.endedAt) {
+    lastAttempt.endedAt = new Date();
+    lastAttempt.endReason = "completed";
+    lastAttempt.duration = finalDuration;
+    lastAttempt.quality = callQuality;
+  }
+
+  await appointment.save();
+
+  if (!appointment.notificationsSent.callEnded) {
+    const otherPartyId = userId === doctorId ? patientId : doctorId;
+    const endedByName = role === "Doctor"
+      ? `Dr. ${(appointment.doctorId as any).lastName}`
+      : (appointment.userId as any).name;
+
+    try {
+      await createNotificationForUser(
+        otherPartyId,
+        "Call Ended",
+        `${endedByName} has ended the video call (Duration: ${Math.floor(finalDuration / 60)} min)`,
+        "appointment",
+        {
+          appointmentId: appointmentId.toString(),
+          callDuration: finalDuration,
+        }
+      );
+
+      appointment.notificationsSent.callEnded = true;
+      await appointment.save();
+    } catch (notifError) {
+      console.error("Failed to send call ended notification:", notifError);
+    }
+  }
+
+  res.json({
+    success: true,
+    message: "Call ended successfully",
+    data: {
+      appointmentId: appointment._id,
+      callDuration: finalDuration,
+      callQuality: appointment.callQuality,
+      endedBy: role,
+      endedAt: appointment.callEndedAt,
+    },
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                             Get Call Status                                */
+/* -------------------------------------------------------------------------- */
+
+export const getCallStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { appointmentId } = req.params;
+  const userId = req.auth?.id;
+  const role = req.auth?.role;
+
+  const appointment = await Appointment.findById(appointmentId)
+    .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
+    .populate("userId", "name userImage email phone");
+
+  if (!appointment) {
+    return res.status(404).json({ success: false, message: "Appointment not found" });
+  }
+
+  const doctorId = extractId(appointment.doctorId);
+  const patientId = extractId(appointment.userId);
+
+  if ((role === "Doctor" && doctorId !== userId) || (role === "User" && patientId !== userId)) {
+    return res.status(403).json({ success: false, message: "Unauthorized" });
+  }
+
+  const now = new Date();
+  const scheduled = new Date(appointment.scheduledAt);
+  const diffMinutes = Math.floor((scheduled.getTime() - now.getTime()) / 60000);
+
+  const canJoinNow = diffMinutes <= 15 && appointment.callStatus !== "ended";
+
+  res.json({
+    success: true,
+    data: {
+      appointmentId: appointment._id,
+      status: appointment.status,
+      callStatus: appointment.callStatus,
+      isActive: appointment.callStatus === "ringing" || appointment.callStatus === "in-progress",
+      canJoin: canJoinNow,
+      minutesUntilCall: diffMinutes,
+      minutesUntilCanJoin: Math.max(0, diffMinutes - 15),
+      channelName: appointment.callChannelName,
+      activeParticipants: (appointment as any).getActiveParticipantCount(),
+      totalParticipants: appointment.callParticipants.length,
+      callStartedAt: appointment.callStartedAt,
+      callDuration: appointment.callDuration,
+      doctorName: `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
+      patientName: `${(appointment.userId as any).name}`,
+    },
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                       Report Call Issue                                    */
+/* -------------------------------------------------------------------------- */
+
 export const reportCallIssue = asyncHandler(async (req: Request, res: Response) => {
   const { appointmentId, issueType, description } = req.body;
   const userId = req.auth?.id;
 
-  if (!appointmentId || !issueType) return res.status(400).json({ message: 'Appointment ID and issue type are required' });
+  if (!appointmentId || !issueType) {
+    return res.status(400).json({ success: false, message: "Appointment ID and issue type are required" });
+  }
 
   const appointment = await Appointment.findById(appointmentId);
-  if (!appointment) return res.status(404).json({ message: 'Appointment not found' });
+  if (!appointment) {
+    return res.status(404).json({ success: false, message: "Appointment not found" });
+  }
 
   console.log(`⚠️ Call issue reported for appointment ${appointmentId}:`, {
     userId,
     issueType,
     description,
     timestamp: new Date(),
+    callStatus: appointment.callStatus,
   });
 
-  res.status(200).json({ success: true, message: 'Issue reported successfully' });
+  res.status(200).json({ success: true, message: "Issue reported successfully. Our team will investigate." });
 });
-
-
