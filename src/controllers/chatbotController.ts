@@ -12,8 +12,12 @@ import multer from 'multer';
 
 const upload = multer({ storage: multer.memoryStorage() }); // keep file in memory
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// chatbotController.ts
 
+const openai = new OpenAI({ 
+  apiKey: process.env.OPENAI_API_KEY, // This is your sk-or-v1... key
+  baseURL: "https://openrouter.ai/api/v1", // THIS IS THE MISSING PIECE
+});
 // Transcribe audio (Whisper)
 export const transcribeAudio = [
   upload.single('file'),
@@ -81,11 +85,12 @@ export const getGPTResponse = async (userPrompt: string, history: any[] = []): P
         { role: 'user' as const, content: userPrompt }
     ];
 
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-4',
-        messages: messages, // Now matches Overload 3
-        temperature: 0.7,
-    });
+ // Inside getGPTResponse
+const completion = await openai.chat.completions.create({
+    model: 'openai/gpt-4', // Use OpenRouter's model string format
+    messages: messages,
+    temperature: 0.7,
+});
 
     return completion.choices[0].message?.content || 'I am having trouble connecting right now. Please try again.';
 };
