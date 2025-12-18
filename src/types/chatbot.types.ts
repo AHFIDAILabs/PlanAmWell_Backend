@@ -1,6 +1,13 @@
 import { IProduct } from '../models/product';
 
-export type Intent = 'buy' | 'info' | 'appointment' | 'general' | 'greeting';
+export type Intent =
+  | 'health'
+  | 'buy'
+  | 'info'
+  | 'appointment'
+  | 'general'
+  | 'greeting';
+
 
 export interface ChatbotRequest {
     message: string;

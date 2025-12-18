@@ -4,7 +4,7 @@ export interface IMessage {
     sender: 'user' | 'bot';
     text: string;
     products?: mongoose.Types.ObjectId[];
-    intent?: 'buy' | 'info' | 'appointment' | 'general' | 'greeting';
+    intent?: 'buy' | 'info' | 'appointment' | 'general' | 'greeting' | 'health';
     timestamp: Date;
 }
 
@@ -34,7 +34,7 @@ const messageSchema = new Schema<IMessage>({
     }],
     intent: {
         type: String,
-        enum: ['buy', 'info', 'appointment', 'general', 'greeting'],
+        enum: ['buy', 'info', 'appointment', 'general', 'greeting', 'health'],
         default: 'general'
     },
     timestamp: {

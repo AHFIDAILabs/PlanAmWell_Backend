@@ -6,34 +6,56 @@ import { Intent, ChatbotRequest, ChatbotResponse } from '../types/chatbot.types'
 
 // Helper function to detect user intent
 const detectIntent = (message: string): Intent => {
-    const lowerMessage = message.toLowerCase();
-    
-    // Buy intent
-    const buyKeywords = ['buy', 'order', 'purchase', 'get', 'need', 'want', 'looking for', 'shop', 'add to cart'];
-    if (buyKeywords.some(keyword => lowerMessage.includes(keyword))) {
-        return 'buy';
-    }
-    
-    // Info/question intent
-    const infoKeywords = ['what is', 'how', 'why', 'tell me', 'explain', 'information', 'about'];
-    if (infoKeywords.some(keyword => lowerMessage.includes(keyword))) {
-        return 'info';
-    }
-    
-    // Appointment intent
-    const appointmentKeywords = ['appointment', 'book', 'schedule', 'doctor', 'consultation', 'see a doctor'];
-    if (appointmentKeywords.some(keyword => lowerMessage.includes(keyword))) {
-        return 'appointment';
-    }
-    
-    // Greeting
-    const greetingKeywords = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'];
-    if (greetingKeywords.some(keyword => lowerMessage.includes(keyword))) {
-        return 'greeting';
-    }
-    
-    return 'general';
+  const m = message.toLowerCase();
+
+  // 1️⃣ REPRODUCTIVE / SEXUAL HEALTH (TOP PRIORITY)
+  const healthKeywords = [
+    'period', 'menstrual', 'ovulation', 'fertility',
+    'pregnant', 'pregnancy', 'missed period',
+    'contraception', 'birth control', 'iud', 'implant',
+    'condom', 'safe sex', 'sex', 'sexual',
+    'std', 'sti', 'infection', 'discharge',
+    'hormone', 'hormonal', 'cramps',
+    'emergency contraception', 'postinor',
+    'abortion', 'miscarriage'
+  ];
+
+  if (healthKeywords.some(k => m.includes(k))) {
+    return 'health';
+  }
+
+  // 2️⃣ Appointment
+  if (
+    ['appointment', 'book', 'schedule', 'doctor', 'consultation']
+      .some(k => m.includes(k))
+  ) {
+    return 'appointment';
+  }
+
+  // 3️⃣ Buy (INTENTIONAL PURCHASE ONLY)
+  if (
+    ['buy', 'order', 'purchase', 'add to cart']
+      .some(k => m.includes(k))
+  ) {
+    return 'buy';
+  }
+
+  // 4️⃣ Information
+  if (
+    ['what is', 'how', 'why', 'explain', 'tell me about']
+      .some(k => m.includes(k))
+  ) {
+    return 'info';
+  }
+
+  // 5️⃣ Greeting
+  if (['hi', 'hello', 'hey'].some(k => m.startsWith(k))) {
+    return 'greeting';
+  }
+
+  return 'general';
 };
+
 
 // Helper function to extract product keywords from message
 // ✅ ULTRA-CLEAN: Extract only the product name
@@ -167,32 +189,68 @@ const searchProducts = async (query: string, limit: number = 5): Promise<any[]> 
 };
 
 // Generate bot response based on intent
-const generateBotResponse = (intent: Intent, products: any[], userMessage: string): string => {
-    switch (intent) {
-        case 'greeting':
-            return "Hello! I'm Ask AmWell, your confidential health assistant. I can help you find services, products, and doctors - and you can book or order directly through our chat!";
-        case 'buy':
-            if (products.length > 0) {
-                const productNames = products.slice(0, 3).map(p => p.name).join(', ');
-                return `Great! I found ${products.length} product${products.length > 1 ? 's' : ''} for you${products.length > 3 ? ' (showing top 3)' : ''}: ${productNames}. You can add them to your cart below! 🛒`;
-            } else {
-                const query = extractProductKeywords(userMessage);
-                if (!query) {
-                    return `I'd be happy to help you find products! 🔍\n\nPlease tell me what you're looking for. You can search by:\n• Product name (e.g., "Paracetamol", "Amoxicillin")\n• Category (e.g., "pain relief", "antibiotics")\n• Brand/Manufacturer\n• Condition (e.g., "headache", "fever")`;
-                }
-                return `I couldn't find any products matching "${query}". 😕\n\nTry:\n• Checking spelling (e.g., "Amoxicillin")\n• Using generic names\n• Searching by category (e.g., "antibiotics")\n• Searching by brand/manufacturer\n\nOr describe your symptoms and I'll suggest products!`;
-            }
-        
-        case 'appointment':
-            return "I can help you book an appointment! 📅\n\nPlease let me know:\n1. What type of doctor or service you need\n2. Your preferred date and time\n\nOr I can show you available doctors right away.";
-        
-        case 'info':
-            return "I'd be happy to provide information! 📚\n\nPlease note that while I can offer general health information, for medical advice specific to your situation, I recommend consulting with one of our healthcare professionals.";
-        
-        default:
-            return "I'm here to help! 👋 You can:\n\n• 💊 Search for medicines & health products\n• 📅 Book appointments with doctors\n• 📚 Get general health information\n• 🛒 Order medications directly\n\nWhat would you like to do?";
-    }
+const generateBotResponse = (
+  intent: Intent,
+  products: any[],
+  userMessage: string
+): string => {
+
+  switch (intent) {
+
+    case 'health':
+      return `
+I’m glad you asked 💗  
+
+I can help explain reproductive and sexual health topics in a clear, safe, and judgment-free way.
+
+Based on your question:
+• I’ll share general health information  
+• I won’t diagnose or pressure you  
+• I’ll suggest seeing a doctor only if needed  
+
+Please tell me a bit more so I can help better.
+`;
+
+    case 'buy':
+      if (products.length > 0) {
+        return `I found ${products.length} option(s) for you. You can review them below and add any to your cart if you wish 🛒`;
+      }
+      return `I couldn’t find matching products. Please try a specific product name or brand.`;
+
+    case 'appointment':
+      return `
+I can help you book a confidential appointment 👩‍⚕️  
+
+Tell me:
+• What kind of care you need  
+• When you’re available
+`;
+
+    case 'greeting':
+      return `
+Hello 👋  
+I’m **Ask AmWell**, your confidential reproductive health assistant.
+
+You can ask me questions about:
+• Periods & fertility  
+• Contraception & pregnancy  
+• Sexual health & STIs  
+• General reproductive concerns
+`;
+
+    default:
+      return `
+I’m here to support you 💬  
+
+You can:
+• Ask health questions  
+• Learn about reproductive wellness  
+• Book a doctor when needed  
+• Order products only if you choose
+`;
+  }
 };
+
 
 // Main chatbot controller - supports both authenticated users and guests
 export const sendMessage = async (req: Request, res: Response): Promise<void> => {
