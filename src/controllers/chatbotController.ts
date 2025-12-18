@@ -213,15 +213,28 @@ export const sendMessage = [
             let userText = textMessage || '';
             let audioData;
 
-            // 1. Voice handling
+            // 1. Voice handling with OpenAI-compatible File wrapping
             if (req.file) {
-                const { fileUrl, fileCldId } = await uploadDocumentToCloudinary(req.file.buffer, 'whisper-audio', req.file.mimetype);
-                const transcription = await openai.audio.transcriptions.create({ file: req.file.buffer as any, model: 'whisper-1' });
+                // Upload to Cloudinary so we have a record of the audio
+                const { fileUrl, fileCldId } = await uploadDocumentToCloudinary(
+                    req.file.buffer, 
+                    'whisper-audio', 
+                    req.file.mimetype
+                );
+                
+                // Transcribe using OpenAI Whisper
+                // We use OpenAI.toFile to ensure the buffer is treated as a file
+                const transcription = await openai.audio.transcriptions.create({
+                    file: await OpenAI.toFile(req.file.buffer, 'speech.m4a'),
+                    model: 'whisper-1',
+                });
+
                 userText = transcription.text || '';
                 audioData = { cloudinaryId: fileCldId, cloudinaryUrl: fileUrl };
+                console.log('✅ Voice Transcribed:', userText);
             }
 
-            // 2. Fetch Conversation
+            // 2. Fetch/Create Conversation
             let conversation = await ChatConversation.findOne({ sessionId: session, isActive: true });
             if (!conversation) {
                 conversation = new ChatConversation({ userId: effectiveUserId, sessionId: session, messages: [] });
@@ -233,7 +246,6 @@ export const sendMessage = [
             let products: any[] = [];
 
             if (intent === 'buy') {
-                // RESTORED: Search Products
                 const query = extractProductKeywords(userText);
                 products = await searchProducts(query);
                 botResponseText = products.length > 0 
@@ -244,41 +256,50 @@ export const sendMessage = [
             } else {
                 // OpenAI for health, info, or general
                 botResponseText = await getGPTResponse(userText, conversation.messages);
-                if (intent === 'health' || intent === 'info') {
-    // Optional: Search products anyway just in case they mentioned a drug
-    const possibleKeywords = extractProductKeywords(userText);
-    const suggestedProducts = await searchProducts(possibleKeywords, 2); 
-    if (suggestedProducts.length > 0) {
-        products = suggestedProducts; // This will attach products to the GPT response!
-    }
-}
+
+                // Fallback: If they mention a drug in a health question, show the product!
+                const possibleKeywords = extractProductKeywords(userText);
+                const suggestedProducts = await searchProducts(possibleKeywords, 2); 
+                if (suggestedProducts.length > 0) {
+                    products = suggestedProducts;
+                }
             }
 
             // 4. Save to DB
-            const userMsg: IMessage = { sender: 'user', text: userText, intent, timestamp: new Date(), audio: audioData };
+            const userMsg: IMessage = { 
+                sender: 'user', 
+                text: userText, 
+                intent, 
+                timestamp: new Date(), 
+                audio: audioData 
+            };
             const botMsg: IMessage = { 
                 sender: 'bot', 
                 text: botResponseText, 
                 intent, 
                 timestamp: new Date(),
-                products: products.map(p => p._id) // Save the product IDs found
+                products: products.map(p => p._id)
             };
             
             conversation.messages.push(userMsg, botMsg);
             await conversation.save();
 
-            // 5. Response
+            // 5. Final Response
             return res.status(200).json({
                 success: true,
                 response: botResponseText,
                 intent,
-                products, // Return full product objects for the frontend cards
+                products, 
                 sessionId: session,
                 audio: audioData
             });
 
         } catch (error: any) {
             console.error('Chatbot error:', error);
+            // Handle the "Too Large" error specifically if it still hits
+            if (error.status === 413) {
+                return res.status(413).json({ success: false, message: 'Audio file is too large. Please keep it under 30 seconds.' });
+            }
             return res.status(500).json({ success: false, message: 'Error processing message' });
         }
     }
