@@ -1,206 +1,151 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import fs from 'fs';
 import OpenAI from 'openai';
 
 import { Product } from '../models/product';
 import { ChatConversation, IMessage } from '../models/ChatConversation';
-import { Intent, ChatbotRequest, ChatbotResponse } from '../types/chatbot.types';
-import { uploadDocumentToCloudinary, uploadVideoToCloudinary } from '../middleware/claudinary';
+import { Intent, ChatbotRequest } from '../types/chatbot.types';
+import {  uploadVideoToCloudinary } from '../middleware/claudinary';
 import multer from 'multer';
 
-
-const upload = multer({ storage: multer.memoryStorage() }); // keep file in memory
-
-// chatbotController.ts
-
-const openai = new OpenAI({ 
-  apiKey: process.env.OPENAI_API_KEY, // This is your sk-or-v1... key
-  baseURL: "https://openrouter.ai/api/v1", // THIS IS THE MISSING PIECE
+// --- CONFIGURATION ---
+// Increase Multer limit to 25MB to match Whisper's maximum allowed size
+const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 25 * 1024 * 1024 } 
 });
-// Transcribe audio (Whisper)
-export const transcribeAudio = [
-  upload.single('file'),
-  async (req: Request, res: Response): Promise<Response> => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ success: false, message: 'No file uploaded' });
-      }
 
-      // Upload audio to Cloudinary
-      const { fileUrl, fileCldId } = await uploadDocumentToCloudinary(
-        req.file.buffer,
-        'whisper-audio',
-        req.file.mimetype
-      );
+// Instance 1: OpenRouter for Chat (Text)
+const openrouter = new OpenAI({ 
+    apiKey: process.env.OPENAI_API_KEY, 
+    baseURL: "https://openrouter.ai/api/v1" 
+});
 
-      console.log('✅ Audio uploaded to Cloudinary:', fileUrl);
+// Instance 2: Direct OpenAI for Whisper (Audio)
+const openaiWhisper = new OpenAI({ 
+    apiKey: process.env.WHISPER_API_KEY 
+});
 
-      // Transcribe audio from buffer (Whisper requires a stream/file)
-      const transcription = await openai.audio.transcriptions.create({
-        file: req.file.buffer as any, // buffer works with OpenAI v5
-        model: 'whisper-1',
-      });
+// --- HELPER FUNCTIONS ---
 
-      return res.status(200).json({
-        success: true,
-        text: transcription.text || '',
-        cloudinaryId: fileCldId,
-        cloudinaryUrl: fileUrl,
-      });
-
-    } catch (error: any) {
-      console.error('Whisper transcription error:', error);
-      return res.status(500).json({
-        success: false,
-        message: 'Error transcribing audio',
-        error: error.message,
-      });
-    }
-  }
-];
-
-
-// --- Helper Functions ---
+/**
+ * Calls OpenRouter for GPT responses with conversation history
+ */
 export const getGPTResponse = async (userPrompt: string, history: any[] = []): Promise<string> => {
-    
-    // 1. Explicitly type the system message
     const systemMessage: OpenAI.Chat.ChatCompletionMessageParam = {
         role: 'system',
-        content: `You are "Ask AmWell", a highly empathetic and professional reproductive health assistant. 
-        Provide accurate, medically-sound information about periods, fertility, contraception, and STIs. 
-        Always be confidential and supportive. If a situation sounds like a medical emergency, advise the user to seek immediate professional help.`
+        content: `You are "Ask AmWell", a professional reproductive health assistant. 
+        Provide medically-sound info on periods, fertility, and contraception. 
+        Be empathetic and confidential. If there's an emergency, advise seeing a doctor.`
     };
 
-    // 2. Map history and cast the role specifically
-    const formattedHistory: OpenAI.Chat.ChatCompletionMessageParam[] = history.slice(-5).map(msg => ({
+    const formattedHistory: OpenAI.Chat.ChatCompletionMessageParam[] = history.slice(-6).map(msg => ({
         role: (msg.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
         content: msg.text
     }));
 
-    // 3. Combine them into a typed array
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
         systemMessage,
         ...formattedHistory,
         { role: 'user' as const, content: userPrompt }
     ];
 
- // Inside getGPTResponse
-const completion = await openai.chat.completions.create({
-    model: 'openai/gpt-4', 
-    messages: messages,
-    temperature: 0.7,
-    max_tokens: 250, // Limit response length so it's "cheaper" to start
-});
+    const completion = await openrouter.chat.completions.create({
+        model: 'openai/gpt-4o-mini', // Cost-effective model via OpenRouter
+        messages: messages,
+        temperature: 0.7,
+        max_tokens: 300,
+    });
 
-    return completion.choices[0].message?.content || 'I am having trouble connecting right now. Please try again.';
+    return completion.choices[0].message?.content || 'I am having trouble connecting right now.';
 };
-// --- Intent & Product Helpers ---
+
+
+// Transcribe audio (Whisper) - Standalone Endpoint
+export const transcribeAudio = [
+    upload.single('file'),
+    async (req: Request, res: Response): Promise<Response> => {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: 'No file uploaded' });
+            }
+
+            // 1. Upload to Cloudinary using Video resource type
+            // This treats the audio as playable media instead of a raw document
+            const { videoUrl, videoCldId } = await uploadVideoToCloudinary(
+                req.file.buffer, 
+                'whisper-audio'
+            );
+
+            console.log('✅ Audio uploaded to Cloudinary as media:', videoUrl);
+
+            // 2. Transcribe audio using the dedicated native OpenAI Whisper instance
+            // We use OpenAI.toFile to properly format the buffer for the API
+            const transcription = await openaiWhisper.audio.transcriptions.create({
+                file: await OpenAI.toFile(req.file.buffer, 'speech.m4a'),
+                model: 'whisper-1',
+            });
+
+            return res.status(200).json({
+                success: true,
+                text: transcription.text || '',
+                cloudinaryId: videoCldId,
+                cloudinaryUrl: videoUrl,
+            });
+
+        } catch (error: any) {
+            console.error('Whisper transcription error:', error);
+            
+            // Specifically handle payload size errors if they slip through
+            if (error.status === 413) {
+                return res.status(413).json({ 
+                    success: false, 
+                    message: 'Audio file too large for processing' 
+                });
+            }
+
+            return res.status(500).json({
+                success: false,
+                message: 'Error transcribing audio',
+                error: error.message,
+            });
+        }
+    }
+];
+
+// --- INTENT & PRODUCT HELPERS ---
+
 const detectIntent = (message: string): Intent => {
-  const m = message.toLowerCase().trim();
-
-  // 1. GREETINGS (Check first for quick exit)
-  const greetingKeywords = ['hi', 'hello', 'hey', 'good morning', 'good afternoon'];
-  if (greetingKeywords.some(k => m.startsWith(k)) && m.split(' ').length <= 3) {
-    return 'greeting';
-  }
-
-  // 2. BUY/COMMERCE (High Priority)
-  // If they use buying verbs OR mention "cart"/"price"/"cost"
-  const purchaseKeywords = ['buy', 'order', 'purchase', 'add to cart', 'price', 'cost', 'how much is'];
-  if (purchaseKeywords.some(k => m.includes(k))) return 'buy';
-
-  // 3. APPOINTMENTS
-  const appointmentKeywords = ['appointment', 'book', 'schedule', 'doctor', 'consultation', 'see a nurse'];
-  if (appointmentKeywords.some(k => m.includes(k))) return 'appointment';
-
-  // 4. REPRODUCTIVE HEALTH (Specific medical terms)
-  const healthKeywords = [
-    'period', 'menstrual', 'ovulation', 'fertility', 'pregnant', 'pregnancy', 
-    'missed period', 'contraception', 'birth control', 'iud', 'implant', 
-    'condom', 'safe sex', 'sex', 'sexual', 'std', 'sti', 'infection', 
-    'discharge', 'hormone', 'hormonal', 'cramps', 'postinor', 'abortion', 'miscarriage'
-  ];
-  if (healthKeywords.some(k => m.includes(k))) {
-    // If they ask "What is postinor", it's info. 
-    // If they just say "postinor", we treat it as health for OpenAI to explain.
-    return 'health';
-  }
-
-  // 5. GENERAL INFO
-  const infoKeywords = ['what is', 'how to', 'why', 'explain', 'tell me about', 'meaning of'];
-  if (infoKeywords.some(k => m.includes(k))) return 'info';
-
-  return 'general';
+    const m = message.toLowerCase().trim();
+    if (['hi', 'hello', 'hey'].some(k => m.startsWith(k)) && m.split(' ').length <= 3) return 'greeting';
+    if (['buy', 'order', 'purchase', 'add to cart', 'price'].some(k => m.includes(k))) return 'buy';
+    if (['appointment', 'book', 'doctor'].some(k => m.includes(k))) return 'appointment';
+    
+    const healthKeywords = ['period', 'menstrual', 'fertility', 'pregnant', 'contraception', 'postinor', 'infection'];
+    if (healthKeywords.some(k => m.includes(k))) return 'health';
+    
+    return 'general';
 };
 
 const extractProductKeywords = (message: string): string => {
-  let cleaned = message.toLowerCase().trim();
-  const leadingPhrases = [
-    'i would like to','would like to','i want to','want to',
-    'i need to','need to','looking for','search for',
-    'find me','show me','give me','get me','i need',
-    'need','buy','order','purchase','get','find'
-  ];
-  leadingPhrases.forEach(phrase => {
-    if (cleaned.startsWith(phrase)) cleaned = cleaned.substring(phrase.length).trim();
-  });
-
-  const trailingPhrases = ['please','plz','pls','thanks','thank you'];
-  trailingPhrases.forEach(phrase => {
-    if (cleaned.endsWith(phrase)) cleaned = cleaned.substring(0, cleaned.length - phrase.length).trim();
-  });
-
-  const articles = ['a ','an ','the ','some '];
-  articles.forEach(article => {
-    if (cleaned.startsWith(article)) cleaned = cleaned.substring(article.length).trim();
-  });
-
-  return cleaned.replace(/\s+/g, ' ').trim();
+    let cleaned = message.toLowerCase().trim();
+    const leadingPhrases = ['i want to buy', 'buy', 'order', 'purchase', 'need', 'get me'];
+    leadingPhrases.forEach(phrase => {
+        if (cleaned.startsWith(phrase)) cleaned = cleaned.replace(phrase, '').trim();
+    });
+    return cleaned.replace(/[^a-zA-Z0-9 ]/g, "").trim();
 };
 
 const searchProducts = async (query: string, limit: number = 5): Promise<any[]> => {
-  if (!query || !query.trim()) return [];
-  const cleanedQuery = query.toLowerCase().replace(/[^\w\s]/g,' ').replace(/\s+/g,' ').trim();
-  const searchTerms = cleanedQuery.split(' ').filter(term => term.length > 2);
-  if (searchTerms.length === 0) return [];
-
-  const orConditions: any[] = [];
-  searchTerms.forEach(term => {
-    orConditions.push(
-      { name: { $regex: term, $options: 'i' } },
-      { categoryName: { $regex: term, $options: 'i' } },
-      { manufacturerName: { $regex: term, $options: 'i' } },
-      { sku: { $regex: term, $options: 'i' } }
-    );
-  });
-  if (cleanedQuery !== searchTerms[0]) {
-    orConditions.push(
-      { name: { $regex: cleanedQuery, $options: 'i' } },
-      { categoryName: { $regex: cleanedQuery, $options: 'i' } },
-      { manufacturerName: { $regex: cleanedQuery, $options: 'i' } }
-    );
-  }
-
-  return await Product.find({
-    $and: [
-      { $or: orConditions },
-      { stockQuantity: { $gt: 0 } },
-      { status: { $ne: 'inactive' } }
-    ]
-  }).limit(limit).lean();
+    if (!query || !query.trim()) return [];
+    return await Product.find({
+        $and: [
+            { $or: [{ name: { $regex: query, $options: 'i' } }, { categoryName: { $regex: query, $options: 'i' } }] },
+            { stockQuantity: { $gt: 0 } },
+            { status: { $ne: 'inactive' } }
+        ]
+    }).limit(limit).lean();
 };
-
-const generateBotResponse = (intent: Intent, products: any[], userMessage: string): string => {
-  switch(intent){
-    case 'health': return `I’m glad you asked 💗\nPlease tell me a bit more so I can help better.`;
-    case 'buy': return products.length>0 ? `I found ${products.length} option(s) for you. 🛒` : `I couldn’t find matching products.`;
-    case 'appointment': return `I can help you book a confidential appointment 👩‍⚕️`;
-    case 'greeting': return `Hello 👋 I’m Ask AmWell, your confidential reproductive health assistant.`;
-    default: return `I’m here to support you 💬 You can ask health questions, learn about reproductive wellness, book doctors, or order products.`;
-  }
-};
-
 // --- CONTROLLERS ---
 export const sendMessage = [
     upload.single('file'),
@@ -213,25 +158,30 @@ export const sendMessage = [
             let userText = textMessage || '';
             let audioData;
 
-            // 1. Voice handling with OpenAI-compatible File wrapping
+            // 1. Voice handling: Using uploadVideoToCloudinary for better media handling
             if (req.file) {
-                // Upload to Cloudinary so we have a record of the audio
-                const { fileUrl, fileCldId } = await uploadDocumentToCloudinary(
+                // We use uploadVideoToCloudinary because Cloudinary treats audio as 
+                // "video without a picture," enabling streaming and media metadata.
+                const { videoUrl, videoCldId } = await uploadVideoToCloudinary(
                     req.file.buffer, 
-                    'whisper-audio', 
-                    req.file.mimetype
+                    'whisper-audio'
                 );
                 
-                // Transcribe using OpenAI Whisper
-                // We use OpenAI.toFile to ensure the buffer is treated as a file
-                const transcription = await openai.audio.transcriptions.create({
+                // Transcribe using Direct OpenAI Key (Whisper)
+                const transcription = await openaiWhisper.audio.transcriptions.create({
                     file: await OpenAI.toFile(req.file.buffer, 'speech.m4a'),
                     model: 'whisper-1',
                 });
 
                 userText = transcription.text || '';
-                audioData = { cloudinaryId: fileCldId, cloudinaryUrl: fileUrl };
-                console.log('✅ Voice Transcribed:', userText);
+                
+                // Note: using videoUrl/videoCldId from the helper response
+                audioData = { 
+                    cloudinaryId: videoCldId, 
+                    cloudinaryUrl: videoUrl 
+                };
+
+                console.log('✅ Voice Uploaded as Media & Transcribed:', userText);
             }
 
             // 2. Fetch/Create Conversation
@@ -249,20 +199,18 @@ export const sendMessage = [
                 const query = extractProductKeywords(userText);
                 products = await searchProducts(query);
                 botResponseText = products.length > 0 
-                    ? `I found ${products.length} product(s) for you. 🛒` 
-                    : `I couldn't find "${query}" in our shop, but I'm here to help with other questions!`;
+                    ? `I found some options for you. 🛒` 
+                    : `I couldn't find "${query}" in our shop.`;
             } else if (intent === 'greeting') {
-                botResponseText = "Hello 👋 I’m Ask AmWell, your health assistant. How can I help you today?";
+                botResponseText = "Hello 👋 I’m Ask AmWell. How can I help you today?";
             } else {
-                // OpenAI for health, info, or general
+                // OpenAI (via OpenRouter) handles health/info/general
                 botResponseText = await getGPTResponse(userText, conversation.messages);
-
-                // Fallback: If they mention a drug in a health question, show the product!
+                
+                // Smart search: Attach products if they were mentioned in the chat
                 const possibleKeywords = extractProductKeywords(userText);
                 const suggestedProducts = await searchProducts(possibleKeywords, 2); 
-                if (suggestedProducts.length > 0) {
-                    products = suggestedProducts;
-                }
+                if (suggestedProducts.length > 0) products = suggestedProducts;
             }
 
             // 4. Save to DB
@@ -277,30 +225,29 @@ export const sendMessage = [
                 sender: 'bot', 
                 text: botResponseText, 
                 intent, 
-                timestamp: new Date(),
-                products: products.map(p => p._id)
+                timestamp: new Date(), 
+                products: products.map(p => p._id) 
             };
             
             conversation.messages.push(userMsg, botMsg);
             await conversation.save();
 
-            // 5. Final Response
+            // 5. Final JSON Response
             return res.status(200).json({
                 success: true,
                 response: botResponseText,
                 intent,
-                products, 
+                products,
                 sessionId: session,
                 audio: audioData
             });
 
         } catch (error: any) {
             console.error('Chatbot error:', error);
-            // Handle the "Too Large" error specifically if it still hits
             if (error.status === 413) {
-                return res.status(413).json({ success: false, message: 'Audio file is too large. Please keep it under 30 seconds.' });
+                return res.status(413).json({ success: false, message: 'Audio file is too large.' });
             }
-            return res.status(500).json({ success: false, message: 'Error processing message' });
+            return res.status(500).json({ success: false, message: 'Server error' });
         }
     }
 ];
