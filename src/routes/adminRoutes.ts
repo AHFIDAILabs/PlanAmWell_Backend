@@ -1,88 +1,34 @@
 import express from "express";
-import { 
-    getAllDoctorsAdmin, 
-    updateDoctorStatus, 
-    registerAdmin, 
-    loginAdmin, 
-    getAllAdmins, 
-    getPendingDoctorsAdmin, 
-    getAllUsersAdmin,
-    getUserByIdAdmin, 
-    getCombinedGrowth,
-} from "../controllers/adminController";
-import { verifyToken, authorize } from "../middleware/auth";
+import { getAllDoctorsAdmin, updateDoctorStatus, registerAdmin, loginAdmin, getAllAdmins, getPendingDoctorsAdmin, getAllUsersAdmin,
+    getUserByIdAdmin, getCombinedGrowth,
+ } from "../controllers/adminController";
+import { verifyToken, authorize, guestAuth } from "../middleware/auth";
 
 const adminRouter = express.Router();
-
-// ============================================================================
-// PUBLIC ROUTES (No Authentication Required)
-// ============================================================================
 
 // Admin Registration & Login
 adminRouter.post("/adminRegister", registerAdmin);
 adminRouter.post("/adminLogin", loginAdmin);
 
-// ============================================================================
-// PROTECTED ADMIN ROUTES (Authentication + Admin Role Required)
-// ============================================================================
+// Admin-only: Get all doctors
+adminRouter.get("/doctors", guestAuth, verifyToken, authorize("Admin"), getAllDoctorsAdmin);
+adminRouter.get("/doctors/pending", guestAuth, verifyToken, authorize("Admin"), getPendingDoctorsAdmin);
 
-// All routes below require: verifyToken + authorize("Admin")
-// DO NOT use guestAuth on admin routes - admins must be authenticated!
 
-// Get all doctors
-adminRouter.get(
-    "/doctors", 
-    verifyToken, 
-    authorize("Admin"), 
-    getAllDoctorsAdmin
-);
+// Admin-only: Get all admins
+adminRouter.get("/allAdmins",  verifyToken, authorize("Admin"), getAllAdmins);
 
-// Get pending doctors only
-adminRouter.get(
-    "/doctors/pending", 
-    verifyToken, 
-    authorize("Admin"), 
-    getPendingDoctorsAdmin
-);
+// Admin-only: Update doctor status
+adminRouter.put("/doctors/:doctorId", guestAuth, verifyToken, authorize("Admin"), updateDoctorStatus);
 
-// Get all admins
-adminRouter.get(
-    "/allAdmins", 
-    verifyToken, 
-    authorize("Admin"), 
-    getAllAdmins
-);
+// Admin-only: Get all users
+adminRouter.get("/users", guestAuth, verifyToken, authorize("Admin"), getAllUsersAdmin);
 
-// Update doctor status
-adminRouter.put(
-    "/doctors/:doctorId", 
-    verifyToken, 
-    authorize("Admin"), 
-    updateDoctorStatus
-);
+// Admin-only: Get a single user
+adminRouter.get("/user/:userId", guestAuth, verifyToken, authorize("Admin"), getUserByIdAdmin)
 
-// Get all users
-adminRouter.get(
-    "/users", 
-    verifyToken, 
-    authorize("Admin"), 
-    getAllUsersAdmin
-);
+// Admin-only: Get number of users per week for the current month
+adminRouter.get("/combinedGrowth", guestAuth, verifyToken, authorize("Admin"), getCombinedGrowth)
 
-// Get a single user by ID
-adminRouter.get(
-    "/user/:userId", 
-    verifyToken, 
-    authorize("Admin"), 
-    getUserByIdAdmin
-);
-
-// Get growth analytics (users/doctors per week/month)
-adminRouter.get(
-    "/combinedGrowth", 
-    verifyToken, 
-    authorize("Admin"), 
-    getCombinedGrowth
-);
 
 export default adminRouter;
