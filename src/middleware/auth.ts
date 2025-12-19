@@ -1,4 +1,4 @@
-// middleware/auth.ts - FIXED VERSION
+// middleware/auth.ts - UPDATED WITH ADMIN SEPARATION
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
@@ -37,7 +37,7 @@ interface JwtPayload {
 }
 
 // =======================================================
-//               🔐 JWT GENERATION (FIXED)
+//               🔐 JWT GENERATION (FIXED FOR ADMIN)
 // =======================================================
 
 export const signJwt = (entity: any) => {
@@ -50,17 +50,25 @@ export const signJwt = (entity: any) => {
     );
   }
 
-  // ✅ FIXED: Determine role correctly
+  // ✅ FIXED: Explicitly detect Admin by checking the collection/model
   let role = "User"; // default
-
-  if (entity.role) {
-    // If entity already has a role, use it
+  
+  // Check if this is an Admin instance
+  if (entity.constructor?.modelName === "Admin" || 
+      (entity.roles && Array.isArray(entity.roles) && entity.roles.includes("Admin"))) {
+    role = "Admin";
+    console.log("🔐 [signJwt] Detected Admin user");
+  } 
+  // Check if entity has explicit role
+  else if (entity.role) {
     role = entity.role;
-  } else if (entity.specialization || entity.licenseNumber) {
-    // If it has doctor-specific fields
+  } 
+  // Check for Doctor-specific fields
+  else if (entity.specialization || entity.licenseNumber) {
     role = "Doctor";
-  } else if (entity.email && entity.password && !entity.name) {
-    // Admin typically has firstName/lastName but not "name" field
+  }
+  // Check for Admin-specific structure (firstName/lastName but no 'name')
+  else if (entity.email && entity.password && entity.firstName && !entity.name) {
     role = "Admin";
   }
 
@@ -79,11 +87,38 @@ export const signJwt = (entity: any) => {
 };
 
 // =======================================================
+//          🔐 ADMIN-SPECIFIC JWT GENERATION
+// =======================================================
+
+export const signAdminJwt = (admin: any) => {
+  const payload: JwtPayload = {
+    id: admin._id?.toString() || admin.id,
+    role: "Admin", // Always set to Admin
+    name: `${admin.firstName || ""} ${admin.lastName || ""}`.trim() || "Admin",
+  };
+
+  console.log("🔐 [signAdminJwt] Generated ADMIN token with payload:", payload);
+
+  return jwt.sign(payload, process.env.JWT_SECRET!, { expiresIn: "7d" });
+};
+
+// =======================================================
 //                🔄 REFRESH TOKEN
 // =======================================================
 
 export const signRefreshToken = async (entity: any) => {
-  const role = entity.role || (entity.specialization ? "Doctor" : "User");
+  // Determine role more accurately
+  let role = "User";
+  
+  if (entity.constructor?.modelName === "Admin" || 
+      (entity.roles && entity.roles.includes("Admin"))) {
+    role = "Admin";
+  } else if (entity.role) {
+    role = entity.role;
+  } else if (entity.specialization) {
+    role = "Doctor";
+  }
+  
   const payload = { id: entity._id.toString(), role };
   
   const token = jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET!, {
@@ -144,7 +179,7 @@ export const guestAuth = async (
       });
     } catch (err) {
       console.log("⚠️ [guestAuth] Token verification failed, continuing as guest");
-      return next(); // Invalid token -> let verifyToken handle if needed
+      return next();
     }
 
     // Handle anonymous sessions
@@ -167,26 +202,12 @@ export const guestAuth = async (
         return next();
       }
 
-      // ✅ FIXED: Properly determine role from user object
-      let userRole = decoded.role;
-      if (!userRole) {
-        if ((user as any).specialization) {
-          userRole = "Doctor";
-        } else if ((user as any).roles?.includes("Admin")) {
-          userRole = "Admin";
-        } else {
-          userRole = "User";
-        }
-      }
-
+      // Use role from token (which should be correct now)
       req.user = user;
       req.auth = {
         id: decoded.id,
-        role: userRole,
-        name:
-          user.name ||
-          `${user.firstName || ""} ${user.lastName || ""}`.trim() ||
-          "User",
+        role: decoded.role || "User",
+        name: decoded.name || "User",
         isAnonymous: false,
       };
 
@@ -204,7 +225,7 @@ export const guestAuth = async (
 };
 
 // =======================================================
-//                🔐 FULL AUTH REQUIRED (FIXED)
+//                🔐 FULL AUTH REQUIRED
 // =======================================================
 
 export const verifyToken = (
@@ -213,11 +234,11 @@ export const verifyToken = (
   next: NextFunction
 ) => {
   console.log("🔑 [verifyToken] Checking authentication...");
-  console.log("🔑 [verifyToken] req.auth before check:", req.auth);
 
-  // ✅ FIXED: Check if guestAuth already populated req.auth
+  // Check if guestAuth already populated req.auth
   if (req.auth?.id && !req.auth.isAnonymous) {
     console.log("✅ [verifyToken] Already authenticated via guestAuth");
+    console.log("✅ [verifyToken] req.auth:", req.auth);
     return next();
   }
 
@@ -241,7 +262,6 @@ export const verifyToken = (
       role: decoded.role,
     });
 
-    // ✅ FIXED: Attach complete auth object
     req.auth = {
       id: decoded.id,
       role: decoded.role,
@@ -260,7 +280,62 @@ export const verifyToken = (
 };
 
 // =======================================================
-//               🎭 ROLE-BASED ACCESS (IMPROVED)
+//        🔐 ADMIN-SPECIFIC VERIFICATION
+// =======================================================
+
+export const verifyAdminToken = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  console.log("👑 [verifyAdminToken] Checking admin authentication...");
+
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader?.startsWith("Bearer ")) {
+    console.log("❌ [verifyAdminToken] No Bearer token found");
+    return res
+      .status(401)
+      .json({ message: "Unauthorized - No token provided" });
+  }
+
+  const token = authHeader.split(" ")[1];
+  
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+    
+    console.log("✅ [verifyAdminToken] Token decoded:", {
+      id: decoded.id,
+      role: decoded.role,
+    });
+
+    // ✅ Explicitly check for Admin role
+    if (decoded.role !== "Admin") {
+      console.log("❌ [verifyAdminToken] User is not an Admin:", decoded.role);
+      return res
+        .status(403)
+        .json({ message: "Forbidden - Admin access required" });
+    }
+
+    req.auth = {
+      id: decoded.id,
+      role: decoded.role,
+      name: decoded.name,
+      isAnonymous: false,
+    };
+
+    console.log("✅ [verifyAdminToken] Admin authenticated:", req.auth);
+    next();
+  } catch (err: any) {
+    console.log("❌ [verifyAdminToken] Token verification failed:", err.message);
+    return res
+      .status(401)
+      .json({ message: "Unauthorized - Invalid or expired token" });
+  }
+};
+
+// =======================================================
+//               🎭 ROLE-BASED ACCESS
 // =======================================================
 
 export const authorize = (...allowedRoles: string[]) => {
@@ -313,7 +388,7 @@ export const revokeToken = async (token: string) => {
 };
 
 // =======================================================
-//                 🧬 HYDRATE USER (FIXED)
+//                 🧬 HYDRATE USER
 // =======================================================
 
 export const hydrateUser = async (
@@ -345,14 +420,7 @@ export const hydrateUser = async (
         .json({ message: "User/Doctor/Admin not found" });
     }
 
-    console.log("✅ [hydrateUser] Entity found:", {
-      id: entity._id,
-      type: (entity as any).specialization
-        ? "Doctor"
-        : (entity as any).roles?.includes("Admin")
-        ? "Admin"
-        : "User",
-    });
+    console.log("✅ [hydrateUser] Entity found");
 
     req.user = entity;
     next();
@@ -364,8 +432,10 @@ export const hydrateUser = async (
 
 export default {
   signJwt,
+  signAdminJwt,
   signRefreshToken,
   verifyToken,
+  verifyAdminToken,
   guestAuth,
   authorize,
   verifyRefreshToken,

@@ -7,7 +7,8 @@ import {
   loginUser, 
   doctorLogin,
   registerPushToken,
-  removePushToken
+  removePushToken,
+  refreshToken
 } from "../controllers/authController";
 import { guestAuth, verifyToken } from "../middleware/auth"; // Make sure you have this middleware
 
@@ -52,5 +53,10 @@ authRouter.post("/register-push-token", guestAuth, verifyToken, registerPushToke
  * PROTECTED - remove Expo push token
  */
 authRouter.post("/remove-push-token", guestAuth, verifyToken, removePushToken);
+
+
+authRouter.post("/refreshToken", refreshToken);
+
+
 
 export default authRouter;

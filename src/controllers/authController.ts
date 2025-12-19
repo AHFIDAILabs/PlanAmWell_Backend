@@ -8,6 +8,8 @@ import { Cart } from "../models/cart";
 import asyncHandler from "../middleware/asyncHandler";
 import {signJwt, signRefreshToken} from "../middleware/auth";
 import bcrypt from "bcryptjs";
+import { Admin } from "../models/admin";
+import { RefreshToken } from "../models/refreshToken";
 
 if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET missing from .env");
 
@@ -318,4 +320,52 @@ export const doctorLogin = asyncHandler(async (req: Request, res: Response) => {
 export const getCurrentUser = asyncHandler(async (req: Request & { user?: any }, res: Response) => {
   if (!req.user) return res.status(401).json({ message: "Unauthorized" });
   res.status(200).json({ success: true, user: req.user });
+});
+
+
+// Refresh token
+
+export const refreshToken = asyncHandler(async (req: Request, res: Response) => {
+  const { refreshToken } = req.body;
+  
+  if (!refreshToken) {
+    res.status(400);
+    throw new Error("Refresh token is required");
+  } 
+
+  try {
+    // ✅ FIX 1: Use REFRESH_TOKEN_SECRET to verify
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!) as any;
+    
+    const userId = decoded.id; 
+
+    // ✅ FIX 2: Check for the user in all collections (User, Doctor, Admin)
+    const user = await User.findById(userId) || 
+                 await Doctor.findById(userId) || 
+                 await Admin.findById(userId);
+
+    if (!user) {
+      res.status(401);
+      throw new Error("User not found");
+    } 
+
+    // ✅ FIX 3: Optional but recommended - Verify the token exists in your DB
+    // This allows you to "revoke" tokens if a user logs out or is banned.
+    const storedToken = await RefreshToken.findOne({ userId: user._id });
+    if (!storedToken) throw new Error("Token revoked");
+
+    // Generate a new short-lived access token
+    const newToken = signJwt(user);
+
+    res.status(200).json({ 
+      success: true, 
+      token: newToken 
+      // Note: Do NOT send a new refresh token here unless you want to "rotate" it
+    });
+
+  } catch (err: any) {
+    console.error("Refresh Token Error:", err.message);
+    res.status(401);
+    throw new Error("Invalid or expired refresh token");
+  }
 });
