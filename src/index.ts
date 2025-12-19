@@ -27,9 +27,11 @@ import commentRouter from "./routes/commentRoutes";
 import adminRouter from "./routes/adminRoutes";
 import appointmentRouter from "./routes/appointmentRoutes";
 import videoRouter from "./routes/videoRoutes";
+import partnerRouter from "./routes/partnerRoutes";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
+import { ap } from "@faker-js/faker/dist/airline-DF6RqYmq";
 
 const app = express();
 const server = http.createServer(app);
@@ -224,6 +226,7 @@ app.use("/api/v1/advocacy", advocacyRouter);
 app.use("/api/v1/comment", commentRouter);
 app.use("/api/v1/appointments", appointmentRouter);
 app.use("/api/v1/video", videoRouter);
+app.use("/api/v1/partners", partnerRouter);
 
 app.use(errorHandler);
 
