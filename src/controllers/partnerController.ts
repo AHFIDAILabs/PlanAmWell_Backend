@@ -13,10 +13,21 @@ import { Image } from "../models/image";
  */
 export const createPartner = async (req: Request, res: Response): Promise<void> => {
   try {
-     console.log("📥 Received request body:", req.body);
+    console.log("📥 Received request body:", req.body);
     console.log("📥 Received file:", req.file);
+    
     const adminId = req.user?.id;
     let imageId: mongoose.Types.ObjectId | undefined;
+
+    // Handle socialLinks - it might come as array or need parsing
+    let socialLinks = req.body.socialLinks;
+    if (typeof socialLinks === 'string') {
+      try {
+        socialLinks = JSON.parse(socialLinks);
+      } catch (e) {
+        socialLinks = [socialLinks];
+      }
+    }
 
     // 📤 Upload image if provided
     if (req.file?.buffer) {
@@ -26,8 +37,8 @@ export const createPartner = async (req: Request, res: Response): Promise<void> 
       );
 
       const image = await Image.create({
-        url: uploadResult.secure_url,
-        publicId: uploadResult.public_id,
+        imageUrl: uploadResult.secure_url,      // ✅ Changed from 'url'
+        imageCldId: uploadResult.public_id,     // ✅ Changed from 'publicId'
         createdBy: adminId,
       });
 
@@ -36,6 +47,7 @@ export const createPartner = async (req: Request, res: Response): Promise<void> 
 
     const partner = await Partner.create({
       ...req.body,
+      socialLinks,
       partnerImage: imageId,
       createdBy: adminId,
     });
@@ -46,6 +58,7 @@ export const createPartner = async (req: Request, res: Response): Promise<void> 
       data: partner,
     });
   } catch (error: any) {
+    console.error("❌ Create partner error:", error);
     res.status(400).json({
       success: false,
       message: error.message || "Failed to create partner",
@@ -178,14 +191,24 @@ export const updatePartner = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Handle socialLinks
+    let socialLinks = req.body.socialLinks;
+    if (typeof socialLinks === 'string') {
+      try {
+        socialLinks = JSON.parse(socialLinks);
+      } catch (e) {
+        socialLinks = [socialLinks];
+      }
+    }
+
     // 🖼️ If new image uploaded → replace old one
     if (req.file?.buffer) {
       // Delete old image from Cloudinary
       if (partner.partnerImage && typeof partner.partnerImage !== "string") {
         const oldImage = partner.partnerImage as any;
 
-        if (oldImage.publicId) {
-          await deleteFromCloudinary(oldImage.publicId);
+        if (oldImage.imageCldId) {                    // ✅ Changed from 'publicId'
+          await deleteFromCloudinary(oldImage.imageCldId);
         }
 
         await Image.findByIdAndDelete(oldImage._id);
@@ -198,8 +221,8 @@ export const updatePartner = async (req: Request, res: Response): Promise<void> 
       );
 
       const newImage = await Image.create({
-        url: uploadResult.secure_url,
-        publicId: uploadResult.public_id,
+        imageUrl: uploadResult.secure_url,          // ✅ Changed from 'url'
+        imageCldId: uploadResult.public_id,         // ✅ Changed from 'publicId'
         createdBy: adminId,
       });
 
@@ -207,7 +230,7 @@ export const updatePartner = async (req: Request, res: Response): Promise<void> 
     }
 
     // Update other fields
-    Object.assign(partner, req.body);
+    Object.assign(partner, { ...req.body, socialLinks });
     await partner.save();
 
     res.status(200).json({
@@ -222,7 +245,6 @@ export const updatePartner = async (req: Request, res: Response): Promise<void> 
     });
   }
 };
-
 
 /**
  * ===============================
@@ -245,8 +267,8 @@ export const deletePartner = async (req: Request, res: Response): Promise<void> 
     if (partner.partnerImage && typeof partner.partnerImage !== "string") {
       const image = partner.partnerImage as any;
 
-      if (image.publicId) {
-        await deleteFromCloudinary(image.publicId);
+      if (image.imageCldId) {                       // ✅ Changed from 'publicId'
+        await deleteFromCloudinary(image.imageCldId);
       }
 
       await Image.findByIdAndDelete(image._id);
@@ -265,7 +287,6 @@ export const deletePartner = async (req: Request, res: Response): Promise<void> 
     });
   }
 };
-
 
 /**
  * ===============================
