@@ -5,18 +5,40 @@ import { Partner, IPartner } from "../models/partner";
 import { uploadToCloudinary, deleteFromCloudinary } from "../middleware/claudinary";
 import { Image } from "../models/image";
 
+// Extend Request type to include auth
+interface AuthRequest extends Request {
+  auth?: {
+    id: string;
+    role?: string;
+    name?: string;
+  };
+}
+
 /**
  * ===============================
  * CREATE PARTNER (ADMIN)
  * POST /api/partners
  * ===============================
  */
-export const createPartner = async (req: Request, res: Response): Promise<void> => {
+export const createPartner = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     console.log("📥 Received request body:", req.body);
     console.log("📥 Received file:", req.file);
+    console.log("🔐 req.auth:", req.auth);
     
-    const adminId = req.user?.id;
+    // ✅ Get admin ID from req.auth (set by verifyAdminToken middleware)
+    const adminId = req.auth?.id;
+    
+    console.log("🆔 Admin ID resolved to:", adminId);
+    
+    if (!adminId) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication failed: Admin ID not found. Please log in again.",
+      });
+      return;
+    }
+
     let imageId: mongoose.Types.ObjectId | undefined;
 
     // Handle socialLinks - it might come as array or need parsing
@@ -37,8 +59,8 @@ export const createPartner = async (req: Request, res: Response): Promise<void> 
       );
 
       const image = await Image.create({
-        imageUrl: uploadResult.secure_url,      // ✅ Changed from 'url'
-        imageCldId: uploadResult.public_id,     // ✅ Changed from 'publicId'
+        imageUrl: uploadResult.secure_url,
+        imageCldId: uploadResult.public_id,
         createdBy: adminId,
       });
 
@@ -51,6 +73,8 @@ export const createPartner = async (req: Request, res: Response): Promise<void> 
       partnerImage: imageId,
       createdBy: adminId,
     });
+
+    console.log("✅ Partner created successfully:", partner._id);
 
     res.status(201).json({
       success: true,
@@ -91,7 +115,7 @@ export const getAllPartners = async (req: Request, res: Response): Promise<void>
 
     const partners = await Partner.find(filter)
       .populate("partnerImage")
-      .populate("createdBy", "name email")
+      .populate("createdBy", "firstName lastName email")
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -149,7 +173,7 @@ export const getPartnerById = async (req: Request, res: Response): Promise<void>
 
     const partner = await Partner.findById(partnerId)
       .populate("partnerImage")
-      .populate("createdBy", "name email");
+      .populate("createdBy", "firstName lastName email");
 
     if (!partner) {
       res.status(404).json({ success: false, message: "Partner not found" });
@@ -174,10 +198,18 @@ export const getPartnerById = async (req: Request, res: Response): Promise<void>
  * PUT /api/partners/:partnerId
  * ===============================
  */
-export const updatePartner = async (req: Request, res: Response): Promise<void> => {
+export const updatePartner = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { partnerId } = req.params;
-    const adminId = req.user?.id;
+    const adminId = req.auth?.id; // ✅ Use req.auth.id
+
+    if (!adminId) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication failed: Admin ID not found",
+      });
+      return;
+    }
 
     if (!mongoose.Types.ObjectId.isValid(partnerId)) {
       res.status(400).json({ success: false, message: "Invalid partner ID" });
@@ -207,7 +239,7 @@ export const updatePartner = async (req: Request, res: Response): Promise<void> 
       if (partner.partnerImage && typeof partner.partnerImage !== "string") {
         const oldImage = partner.partnerImage as any;
 
-        if (oldImage.imageCldId) {                    // ✅ Changed from 'publicId'
+        if (oldImage.imageCldId) {
           await deleteFromCloudinary(oldImage.imageCldId);
         }
 
@@ -221,8 +253,8 @@ export const updatePartner = async (req: Request, res: Response): Promise<void> 
       );
 
       const newImage = await Image.create({
-        imageUrl: uploadResult.secure_url,          // ✅ Changed from 'url'
-        imageCldId: uploadResult.public_id,         // ✅ Changed from 'publicId'
+        imageUrl: uploadResult.secure_url,
+        imageCldId: uploadResult.public_id,
         createdBy: adminId,
       });
 
@@ -267,7 +299,7 @@ export const deletePartner = async (req: Request, res: Response): Promise<void> 
     if (partner.partnerImage && typeof partner.partnerImage !== "string") {
       const image = partner.partnerImage as any;
 
-      if (image.imageCldId) {                       // ✅ Changed from 'publicId'
+      if (image.imageCldId) {
         await deleteFromCloudinary(image.imageCldId);
       }
 
