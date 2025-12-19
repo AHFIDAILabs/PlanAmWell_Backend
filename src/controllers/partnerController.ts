@@ -13,6 +13,8 @@ import { Image } from "../models/image";
  */
 export const createPartner = async (req: Request, res: Response): Promise<void> => {
   try {
+     console.log("📥 Received request body:", req.body);
+    console.log("📥 Received file:", req.file);
     const adminId = req.user?.id;
     let imageId: mongoose.Types.ObjectId | undefined;
 
