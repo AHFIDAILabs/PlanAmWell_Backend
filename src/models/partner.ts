@@ -71,14 +71,16 @@ const PartnerSchema: Schema = new Schema(
         "Please provide a valid email address",
       ],
     },
-    phone: {
-      type: String,
-      trim: true,
-      match: [
-        /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/,
-        "Please provide a valid phone number",
-      ],
+   phone: {
+  type: String,
+  validate: {
+    validator: function(v: string) {
+      return /^(\+234|0)\d{10}$/.test(v); // Allows +2348012345678 or 08012345678
     },
+    message: "Please provide a valid phone number"
+  },
+  required: [true, "Phone number is required"],
+},
     description: {
       type: String,
       trim: true,
