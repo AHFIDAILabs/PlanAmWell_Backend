@@ -156,12 +156,32 @@ export const guestAuth = async (req: Request, res: Response, next: NextFunction)
 // =======================================================
 
 export const verifyToken = (req: Request, res: Response, next: NextFunction) => {
-  if (!req.auth?.id) {
-    return res.status(401).json({ message: "Unauthorized - Login required" });
-  }
-  next();
-};
+  // If guestAuth already populated req.auth, just proceed
+  if (req.auth?.id) return next();
 
+  // Otherwise, try to extract it here
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized - No token provided" });
+  }
+
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+    
+    // Attach to req.auth so 'authorize' middleware can see the role
+    req.auth = {
+      id: decoded.id,
+      role: decoded.role,
+      name: decoded.name,
+      isAnonymous: false
+    };
+    
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: "Unauthorized - Invalid or expired token" });
+  }
+};
 
 // =======================================================
 //               🎭 ROLE-BASED ACCESS

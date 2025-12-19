@@ -88,3 +88,29 @@ export const deleteFromCloudinary = async (publicId: string): Promise<any> => {
     throw new Error("Error deleting file from Cloudinary");
   }
 };
+
+
+/**
+ * Optimized for Audio/Video (transcribable and streamable)
+ */
+export const uploadMediaToCloudinary = async (
+  buffer: Buffer,
+  folderPath: string,
+  mimetype: string
+): Promise<{ url: string; publicId: string }> => {
+  try {
+    const base64 = buffer.toString("base64");
+    const dataURI = `data:${mimetype};base64,${base64}`;
+
+    const { secure_url, public_id } = await cloudinary.uploader.upload(dataURI, {
+      // "video" allows Cloudinary to treat audio files as playable media
+      resource_type: "video", 
+      folder: folderPath,
+    });
+
+    return { url: secure_url, publicId: public_id };
+  } catch (error: any) {
+    console.error("Cloudinary Media Error:", error.message);
+    throw new Error("Failed to upload media");
+  }
+};
