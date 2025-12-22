@@ -210,45 +210,45 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
-    return res.status(400).json({ message: "Email and password are required" });
+    res.status(400);
+    throw new Error("Email and password are required");
   }
 
-  // Select password and populate relations
-  const user = await User.findOne({ email })
-    .select("+password")
-    .populate("userImage");
+  // Find user
+  const user = await User.findOne({ email }).select("+password");
 
   if (!user) {
-    return res.status(401).json({ message: "Invalid credentials" });
+    res.status(401);
+    throw new Error("Invalid credentials");
   }
 
-  if (!user.password) {
-    console.log("⚠️ User attempting login without password:", {
-      email: user.email,
-      isAnonymous: user.isAnonymous,
-    });
-
-    return res.status(401).json({
-      message: "Invalid credentials. Please register or reset your password.",
-    });
-  }
-
+  // Verify password
   const isMatch = await user.comparePassword(password);
+
   if (!isMatch) {
-    return res.status(401).json({ message: "Invalid credentials" });
+    res.status(401);
+    throw new Error("Invalid credentials");
   }
 
-  // Generate JWT
+  // Generate tokens
   const token = signJwt(user);
+  const { token: refreshToken } = await signRefreshToken(user); // ← Generate refresh token
 
-  // Full user object
-  const userResponse = user.toObject({ virtuals: true });
-  delete userResponse.password;
+  console.log("[Auth] User logged in:", user.email);
 
   res.status(200).json({
     success: true,
     token,
-    user: userResponse,
+    refreshToken, // ← Return refresh token
+    user: {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      roles: user.roles,
+      userImage: user.userImage,
+    },
+    message: "Login successful",
   });
 });
 
@@ -263,54 +263,51 @@ export const doctorLogin = asyncHandler(async (req: Request, res: Response) => {
 
   if (!email || !password) {
     res.status(400);
-    throw new Error("Please provide both email and password");
+    throw new Error("Email and password are required");
   }
 
-  // 1. Find the Doctor by email
-  const doctor = await Doctor.findOne({ email });
+  // Find doctor
+  const doctor = await Doctor.findOne({ email }).select("+passwordHash");
 
   if (!doctor) {
     res.status(401);
-    throw new Error("Invalid Credentials");
+    throw new Error("Invalid credentials");
   }
 
-  // 2. Check Password Hash
+  // Verify password
   const isMatch = await bcrypt.compare(password, doctor.passwordHash);
 
   if (!isMatch) {
     res.status(401);
-    throw new Error("Invalid Credentials");
+    throw new Error("Invalid credentials");
   }
 
-  // 3. Authorization Check: Ensure the doctor is APPROVED
+  // Check if doctor is approved
   if (doctor.status !== "approved") {
     res.status(403);
-    const message =
-      doctor.status === "submitted" || doctor.status === "reviewing"
-        ? "Your account is pending verification and approval by the admin."
-        : "Your account is not active. Please contact support.";
-    throw new Error(message);
+    throw new Error("Your account is pending approval");
   }
 
-  // 4. Generate Tokens
+  // Generate tokens
   const token = signJwt(doctor);
-  const { token: refreshToken } = await signRefreshToken(doctor);
+  const { token: refreshToken } = await signRefreshToken(doctor); // ← Generate refresh token
 
-  // 5. Send Response
+  console.log("[Auth] Doctor logged in:", doctor.email);
+
   res.status(200).json({
     success: true,
-    message: "Doctor logged in successfully",
     token,
-    refreshToken,
-    user: { // Return necessary profile info, excluding password hash
-        _id: doctor._id,
-        firstName: doctor.firstName,
-        lastName: doctor.lastName,
-        email: doctor.email,
-        specialization: doctor.specialization,
-        status: doctor.status,
-        role: "Doctor", // Explicitly set role
+    refreshToken, // ← Return refresh token
+    user: {
+      _id: doctor._id,
+      firstName: doctor.firstName,
+      lastName: doctor.lastName,
+      email: doctor.email,
+      specialization: doctor.specialization,
+      profileImage: doctor.profileImage,
+      role: "Doctor",
     },
+    message: "Login successful",
   });
 });
 
