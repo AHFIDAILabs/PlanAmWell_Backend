@@ -1,4 +1,4 @@
-// routes/notificationRoutes.ts
+// routes/notificationRoutes.ts - FIXED VERSION
 import express from "express";
 import {
   getNotifications,
@@ -7,29 +7,33 @@ import {
   markAllAsRead,
   deleteNotification,
   getUpcomingAppointmentsSummary,
-  createNotification, // <-- ADDED import for Admin creation
+  createNotification,
 } from "../controllers/notification";
-import { guestAuth, verifyToken, authorize } from "../middleware/auth"; // <-- ADDED authorize
+import { verifyToken, authorize } from "../middleware/auth";
 
 const notificationRouter = express.Router();
 
-// 🔒 Routes protected by default (User/Doctor)
-notificationRouter.use(guestAuth, verifyToken);
+// ✅ ALL notification routes require authentication
+// Apply verifyToken to all routes in this router
+notificationRouter.use(verifyToken);
 
-// Read
+// 📥 Read notifications
 notificationRouter.get("/", getNotifications);
+
+// 🔢 Get unread count
 notificationRouter.get("/unread-count", getUnreadCount);
+
+// 📊 Get appointments summary
 notificationRouter.get("/appointments-summary", getUpcomingAppointmentsSummary);
 
-// Update
+// ✅ Mark as read
 notificationRouter.put("/:notificationId/read", markAsRead);
 notificationRouter.put("/read-all", markAllAsRead);
 
-// Create (Admin/System Use)
-// 🔒 Only Admin can create notifications manually
-notificationRouter.post("/", authorize("Admin"), createNotification); // <-- ADDED Admin route
+// ➕ Create notification (Admin only)
+notificationRouter.post("/", authorize("Admin"), createNotification);
 
-// Delete
+// 🗑️ Delete notification
 notificationRouter.delete("/:notificationId", deleteNotification);
 
 export default notificationRouter;

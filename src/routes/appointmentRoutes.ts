@@ -9,28 +9,19 @@ import {
   getAppointmentById,
 } from "../controllers/appointmentController";
 
-import { guestAuth, verifyToken, authorize } from "../middleware/auth";
+import { guestAuth, verifyToken, authorize, verifyAdminToken } from "../middleware/auth";
 
 const appointmentRouter = express.Router();
 
-// User: create appointment
+// Public routes (allow guest booking)
 appointmentRouter.post("/", guestAuth, createAppointment);
 
-// User: get their own appointments
-appointmentRouter.get("/my", guestAuth, verifyToken, getMyAppointments);
-
-appointmentRouter.get("/appointment/:id", guestAuth, verifyToken, getAppointmentById);
-
-// Doctor: get their appointment calendar
-appointmentRouter.get("/doctor", guestAuth, verifyToken, getDoctorAppointments);
-
-// Admin: all appointments
-appointmentRouter.get("/", authorize("Admin"), getAllAppointments);
-
-// Update (user or doctor)
-appointmentRouter.patch("/:id", guestAuth, authorize("User", "Doctor"), updateAppointment);
-
-// Admin: delete
-appointmentRouter.delete("/:id", authorize("Admin"), deleteAppointment);
+// Protected routes (require auth) - use verifyToken consistently
+appointmentRouter.get("/my", verifyToken, authorize("User"), getMyAppointments);
+appointmentRouter.get("/appointment/:id", verifyToken, getAppointmentById);
+appointmentRouter.get("/doctor", verifyToken, authorize("Doctor"), getDoctorAppointments);
+appointmentRouter.patch("/:id", verifyToken, authorize("User", "Doctor"), updateAppointment);
+appointmentRouter.get("/", verifyAdminToken, authorize("Admin"), getAllAppointments);
+appointmentRouter.delete("/:id", verifyAdminToken, authorize("Admin"), deleteAppointment);
 
 export default appointmentRouter;
