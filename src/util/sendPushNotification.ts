@@ -1,10 +1,8 @@
-// util/sendPushNotification.ts
-import { Document } from "mongoose";
 import Expo from "expo-server-sdk";
 import { User } from "../models/user";
 import { Doctor } from "../models/doctor";
-import Notification, { INotification } from "../models/notifications";
-import { emitNotification } from "../index"; // ✅ Import Socket.IO emitter
+import Notification, { NotificationDocument } from "../models/notifications";
+import { emitNotification } from "../index";
 
 const expo = new Expo();
 
@@ -13,13 +11,13 @@ const expo = new Expo();
  */
 export async function sendPushNotification(
   userId: string,
-  notification: Document<unknown, {}, INotification> & INotification
+  notification: NotificationDocument
 ) {
   try {
     let user = await User.findById(userId).select("expoPushTokens");
 
     if (!user) {
-      user = await Doctor.findById(userId).select("expoPushTokens") as typeof Doctor.prototype | null;
+      user = await Doctor.findById(userId).select("expoPushTokens");
     }
 
     if (!user || !user.expoPushTokens?.length) {
@@ -34,7 +32,7 @@ export async function sendPushNotification(
         sound: "default" as const,
         title: notification.title,
         body: notification.message,
-        data: notification.metadata || {},
+        data: notification.metadata ?? {},
       }));
 
     if (!messages.length) {
@@ -42,11 +40,12 @@ export async function sendPushNotification(
       return;
     }
 
-    const chunks = expo.chunkPushNotifications(messages);
-    for (const chunk of chunks) {
+    for (const chunk of expo.chunkPushNotifications(messages)) {
       try {
         const tickets = await expo.sendPushNotificationsAsync(chunk);
-        console.log(`[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`);
+        console.log(
+          `[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`
+        );
       } catch (err) {
         console.error("[PushNotification] Error sending push notifications:", err);
       }
@@ -58,18 +57,26 @@ export async function sendPushNotification(
 
 /**
  * 🔔 Create notification for ANY user (User or Doctor)
- * ✅ FIXED: Always emit Socket.IO notification
  */
 export const createNotificationForUser = async (
   userId: string,
+  userType: "User" | "Doctor",
   title: string,
   message: string,
-  type: "appointment" | "order" | "article" | "supplement" | "system",
+  type:
+    | "appointment"
+    | "order"
+    | "article"
+    | "supplement"
+    | "system"
+    | "call_ended",
   metadata?: any
 ) => {
   try {
+    // ✅ Create notification in DB
     const notification = await Notification.create({
       userId,
+      userType,
       type,
       title,
       message,
@@ -77,22 +84,31 @@ export const createNotificationForUser = async (
       isRead: false,
     });
 
+    console.log(`💾 Notification created in DB for ${userType} ${userId}:`, {
+      _id: notification._id,
+      title: notification.title,
+      type: notification.type,
+    });
+
+    // ✅ Convert to plain object for Socket.IO emission
+    const notificationObject = {
+      _id: notification._id.toString(),
+      userId: notification.userId.toString(),
+      userType: notification.userType,
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      metadata: notification.metadata,
+      isRead: notification.isRead,
+      createdAt: notification.createdAt,
+    };
+
+    // ✅ Emit real-time notification
+    emitNotification(userId, notificationObject);
+
     // ✅ Send push notification (non-blocking)
-    sendPushNotification(
-      userId,
-      notification as Document<unknown, {}, INotification> & INotification
-    ).catch((err) => console.error("Failed to send push notification:", err));
+    sendPushNotification(userId, notification).catch(console.error);
 
-    // ✅ ALWAYS emit real-time notification via Socket.IO
-    const emitted = emitNotification(userId, notification);
-    
-    if (emitted) {
-      console.log(`🔔 Real-time notification emitted to user ${userId}`);
-    } else {
-      console.log(`⚠️ User ${userId} offline, will receive on next login`);
-    }
-
-    console.log(`✅ Notification created for ${userId}`);
     return notification;
   } catch (error) {
     console.error(`❌ Failed to create notification for ${userId}:`, error);
@@ -101,10 +117,11 @@ export const createNotificationForUser = async (
 };
 
 /**
- * 🔔 LEGACY: Create appointment notification (backward compatibility)
+ * 🔔 Create appointment notification
  */
 export const createAppointmentNotification = async (
   userId: string,
+  userType: "User" | "Doctor",
   appointmentId: string,
   type: "confirmed" | "rejected" | "cancelled" | "reminder",
   doctorName: string,
@@ -119,6 +136,7 @@ export const createAppointmentNotification = async (
 
   return await createNotificationForUser(
     userId,
+    userType,
     type === "reminder" ? "Appointment Starting Soon" : "Appointment Update",
     messages[type],
     "appointment",
@@ -136,6 +154,7 @@ export const createAppointmentNotification = async (
  */
 export const createOrderNotification = async (
   userId: string,
+  userType: "User" | "Doctor",
   orderId: string,
   type: "placed" | "confirmed" | "shipped" | "delivered" | "cancelled",
   orderDetails?: string
@@ -150,6 +169,7 @@ export const createOrderNotification = async (
 
   return await createNotificationForUser(
     userId,
+    userType,
     `Order ${type.charAt(0).toUpperCase() + type.slice(1)}`,
     orderDetails || messages[type],
     "order",

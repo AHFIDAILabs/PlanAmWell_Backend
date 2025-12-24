@@ -1,7 +1,10 @@
-import mongoose, { Document, Schema } from "mongoose";
+import mongoose, { Schema, Types, HydratedDocument } from "mongoose";
 
-export interface INotification extends Document {
-  userId: mongoose.Types.ObjectId;
+export type NotificationOwnerType = "User" | "Doctor" | "Admin";
+
+export interface INotification {
+  userId: Types.ObjectId;
+  userType: NotificationOwnerType; // dynamic reference
   type: "supplement" | "order" | "appointment" | "article" | "system";
   title: string;
   message: string;
@@ -12,36 +15,41 @@ export interface INotification extends Document {
     articleId?: string;
     time?: string;
   };
-  createdAt: Date;
+  createdAt?: Date;
 }
 
-const notificationSchema = new Schema<INotification>({
-  userId: {
-    type: Schema.Types.ObjectId,
-    ref: "User",
-    required: true,
-    index: true,
+export type NotificationDocument = HydratedDocument<INotification>;
+
+const notificationSchema = new Schema<INotification>(
+  {
+    userId: {
+      type: Schema.Types.ObjectId,
+      required: true,
+      refPath: "userType", // dynamic reference to User or Doctor
+      index: true,
+    },
+    userType: {
+      type: String,
+      enum: ["User", "Doctor"],
+      required: true,
+    },
+    type: {
+      type: String,
+      enum: ["supplement", "order", "appointment", "article", "system"],
+      required: true,
+    },
+    title: { type: String, required: true },
+    message: { type: String, required: true },
+    isRead: { type: Boolean, default: false },
+    metadata: {
+      orderId: String,
+      appointmentId: String,
+      articleId: String,
+      time: String,
+    },
   },
-  type: {
-    type: String,
-    enum: ["supplement", "order", "appointment", "article", "system"],
-    required: true,
-  },
-  title: { type: String, required: true },
-  message: { type: String, required: true },
-  isRead: { type: Boolean, default: false },
-  metadata: {
-    orderId: String,
-    appointmentId: String,
-    articleId: String,
-    time: String,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-    index: true,
-  },
-});
+  { timestamps: true }
+);
 
 notificationSchema.index({ userId: 1, createdAt: -1 });
 

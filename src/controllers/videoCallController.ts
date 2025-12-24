@@ -1,10 +1,11 @@
-// controllers/videoCallController.ts
+// controllers/videoCallController.ts - FIXED NOTIFICATIONS
 import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import mongoose from "mongoose";
 import { RtcTokenBuilder, RtcRole } from "agora-access-token";
 import { Appointment } from "../models/appointment";
 import { createNotificationForUser } from "../util/sendPushNotification";
+import { emitRejoinCallAlert, emitCallEnded } from "../index";
 
 const AGORA_APP_ID = process.env.AGORA_APP_ID!;
 const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE!;
@@ -59,7 +60,7 @@ export const generateVideoToken = asyncHandler(
 
     let appointment = await Appointment.findById(appointmentId)
       .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
-      .populate("userId", "name userImage email phone");
+      .populate("userId", "firstName lastName name userImage email phone");
 
     if (!appointment) {
       return res.status(404).json({
@@ -119,8 +120,13 @@ export const generateVideoToken = asyncHandler(
 
     let shouldNotifyOtherParty = false;
     let otherPartyId: string | null = null;
-    let notificationMessage = "";
     let callWasInitiated = false;
+
+    // ✅ CRITICAL FIX: Determine who to notify
+    const notifyingUserId = isDoctor ? patientId : doctorId;
+    const currentUserName = isDoctor
+      ? `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`
+      : ((appointment.userId as any).firstName || (appointment.userId as any).name);
 
     if (!appointment.callStatus || appointment.callStatus === "idle") {
       console.log(`📞 ${role} attempting to initiate call for appointment ${appointmentId}`);
@@ -145,22 +151,46 @@ export const generateVideoToken = asyncHandler(
         { new: true }
       )
         .populate("doctorId", "firstName lastName")
-        .populate("userId", "firstName lastName");
+        .populate("userId", "firstName lastName name");
 
       if (updatedAppointment) {
         appointment = updatedAppointment;
         callWasInitiated = true;
         shouldNotifyOtherParty = true;
-        otherPartyId = isDoctor ? patientId : doctorId;
-        notificationMessage = isDoctor
-          ? "Dr. is calling you 📞"
-          : "Your patient is calling you 📞";
+        otherPartyId = notifyingUserId;
 
         console.log(`✅ ${role} successfully initiated call`);
+
+        // ✅ FIXED: Send notification to OTHER party only (not self)
+        try {
+         // Determine recipient type dynamically
+const recipientType = isDoctor ? "User" : "Doctor" ;
+
+await createNotificationForUser(
+  notifyingUserId,   // recipient's id
+  recipientType,     
+  "Video Call Starting",
+  `${currentUserName} is joining the video call`,
+  "appointment",
+  {
+    appointmentId: appointmentId.toString(),
+    autoJoin: true,
+    fromNotification: true,
+  }
+);
+
+
+          // ✅ Send real-time rejoin alert
+          emitRejoinCallAlert(notifyingUserId, appointmentId.toString(), currentUserName);
+
+          console.log(`📨 Notification sent to ${isDoctor ? 'PATIENT' : 'DOCTOR'} (${notifyingUserId})`);
+        } catch (notifError) {
+          console.error("⚠️ Failed to send notification:", notifError);
+        }
       } else {
         appointment = await Appointment.findById(appointmentId)
           .populate("doctorId", "firstName lastName")
-          .populate("userId", "firstName lastName");
+          .populate("userId", "firstName lastName name");
 
         if (!appointment) {
           return res.status(404).json({
@@ -192,12 +222,15 @@ export const generateVideoToken = asyncHandler(
       appointment.callParticipants.push(participantObjectId);
       await appointment.save();
 
+      // ✅ Notify initiator that other person joined
       const initiatorId = isDoctor ? patientId : doctorId;
-      shouldNotifyOtherParty = true;
-      otherPartyId = initiatorId;
-      notificationMessage = isDoctor
-        ? "Patient is joining the call"
-        : "Doctor is joining the call";
+      
+      try {
+        emitRejoinCallAlert(initiatorId, appointmentId.toString(), currentUserName);
+        console.log(`📨 Rejoin alert sent to initiator (${initiatorId})`);
+      } catch (notifError) {
+        console.error("⚠️ Failed to send rejoin alert:", notifError);
+      }
     }
 
     if (appointment.callStatus === "in-progress") {
@@ -217,6 +250,16 @@ export const generateVideoToken = asyncHandler(
       }
 
       await appointment.save();
+
+      // ✅ Notify other party about rejoin
+      const otherPartyId = isDoctor ? patientId : doctorId;
+      
+      try {
+        emitRejoinCallAlert(otherPartyId, appointmentId.toString(), currentUserName);
+        console.log(`📨 Rejoin alert sent to other party (${otherPartyId})`);
+      } catch (notifError) {
+        console.error("⚠️ Failed to send rejoin alert:", notifError);
+      }
     }
 
     try {
@@ -232,25 +275,6 @@ export const generateVideoToken = asyncHandler(
         expireAt
       );
 
-      if (shouldNotifyOtherParty && otherPartyId) {
-        try {
-          await createNotificationForUser(
-            otherPartyId,
-            "Video Call",
-            notificationMessage,
-            "appointment",
-            {
-              appointmentId: appointmentId.toString(),
-              autoJoin: true,
-              fromNotification: true,
-            }
-          );
-          console.log(`📨 Notification sent to ${otherPartyId}`);
-        } catch (notifError) {
-          console.error("⚠️  Failed to send notification:", notifError);
-        }
-      }
-
       return res.status(200).json({
         success: true,
         data: {
@@ -262,7 +286,7 @@ export const generateVideoToken = asyncHandler(
           participantCount: appointment.callParticipants.length,
           isInitiator: appointment.callInitiatedBy === role,
           doctorName: `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
-          patientName: `${(appointment.userId as any).firstName} ${(appointment.userId as any).lastName}`,
+          patientName: (appointment.userId as any).firstName || (appointment.userId as any).name,
         },
         message: "Token generated successfully",
       });
@@ -310,7 +334,7 @@ export const confirmCallJoin = asyncHandler(
 
     const appointment = await Appointment.findById(appointmentId)
       .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
-      .populate("userId", "name userImage email phone");
+      .populate("userId", "firstName lastName name userImage email phone");
 
     if (!appointment) {
       return res.status(404).json({ success: false, message: "Appointment not found" });
@@ -341,32 +365,7 @@ export const confirmCallJoin = asyncHandler(
         ],
       });
 
-      if (!appointment.notificationsSent.callStarted) {
-        const doctorName = `Dr. ${(appointment.doctorId as any).lastName}`;
-        const patientName = `${(appointment.userId as any).name}`;
-
-        try {
-          await createNotificationForUser(
-            doctorId,
-            "Call Started",
-            `Your call with ${patientName} is now active`,
-            "appointment",
-            { appointmentId: appointmentId.toString() }
-          );
-
-          await createNotificationForUser(
-            patientId,
-            "Call Started",
-            `Your call with ${doctorName} is now active`,
-            "appointment",
-            { appointmentId: appointmentId.toString() }
-          );
-
-          appointment.notificationsSent.callStarted = true;
-        } catch (notifError) {
-          console.error("Failed to send call started notifications:", notifError);
-        }
-      }
+      // ✅ Don't send "Call Started" notifications here - already sent when first person joined
     }
 
     await appointment.save();
@@ -432,7 +431,7 @@ export const handleCallDisconnect = asyncHandler(
 
     const appointment = await Appointment.findById(appointmentId)
       .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
-      .populate("userId", "name userImage email phone");
+      .populate("userId", "firstName lastName name userImage email phone");
 
     if (!appointment) {
       return res.status(404).json({ success: false, message: "Appointment not found" });
@@ -457,7 +456,7 @@ export const handleCallDisconnect = asyncHandler(
         : 0;
 
       if (callDuration > 30) {
-        console.log(`⏹️  Both participants disconnected - ending call after ${callDuration}s`);
+        console.log(`⏹️ Both participants disconnected - ending call after ${callDuration}s`);
         appointment.callStatus = "ended";
         appointment.callEndedAt = new Date();
         appointment.callEndedBy = "system";
@@ -470,6 +469,12 @@ export const handleCallDisconnect = asyncHandler(
           lastAttempt.endReason = "disconnected";
           lastAttempt.duration = callDuration;
         }
+
+        // ✅ CRITICAL FIX: Send "call-ended" event to BOTH participants
+        emitCallEnded(doctorId, appointmentId.toString(), callDuration);
+        emitCallEnded(patientId, appointmentId.toString(), callDuration);
+
+        console.log(`🔔 Call ended notifications sent to both participants`);
       } else {
         console.log(`⏳ Call too short (${callDuration}s) - allowing reconnection`);
       }
@@ -477,26 +482,7 @@ export const handleCallDisconnect = asyncHandler(
 
     await appointment.save();
 
-    const otherPartyId = userId === doctorId ? patientId : doctorId;
-    const disconnectedUserName = role === "Doctor"
-      ? `Dr. ${(appointment.doctorId as any).lastName}`
-      : (appointment.userId as any).name;
-
-    try {
-      await createNotificationForUser(
-        otherPartyId,
-        "Participant Disconnected",
-        `${disconnectedUserName} has ${appointment.callStatus === "ended" ? "left" : "temporarily disconnected from"} the call`,
-        "appointment",
-        {
-          appointmentId: appointmentId.toString(),
-          callEnded: appointment.callStatus === "ended",
-        }
-      );
-    } catch (notifError) {
-      console.error("Failed to send disconnect notification:", notifError);
-    }
-
+    // ✅ Don't send "disconnected" notification - only send on call end
     res.json({
       success: true,
       data: {
@@ -520,7 +506,7 @@ export const endVideoCall = asyncHandler(async (req: Request, res: Response) => 
 
   const appointment = await Appointment.findById(appointmentId)
     .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
-    .populate("userId", "name userImage email phone");
+    .populate("userId", "firstName lastName name userImage email phone");
 
   if (!appointment) {
     return res.status(404).json({ success: false, message: "Appointment not found" });
@@ -569,30 +555,11 @@ export const endVideoCall = asyncHandler(async (req: Request, res: Response) => 
 
   await appointment.save();
 
-  if (!appointment.notificationsSent.callEnded) {
-    const otherPartyId = userId === doctorId ? patientId : doctorId;
-    const endedByName = role === "Doctor"
-      ? `Dr. ${(appointment.doctorId as any).lastName}`
-      : (appointment.userId as any).name;
+  // ✅ CRITICAL FIX: Send "call-ended" event to BOTH participants
+  emitCallEnded(doctorId, appointmentId.toString(), finalDuration);
+  emitCallEnded(patientId, appointmentId.toString(), finalDuration);
 
-    try {
-      await createNotificationForUser(
-        otherPartyId,
-        "Call Ended",
-        `${endedByName} has ended the video call (Duration: ${Math.floor(finalDuration / 60)} min)`,
-        "appointment",
-        {
-          appointmentId: appointmentId.toString(),
-          callDuration: finalDuration,
-        }
-      );
-
-      appointment.notificationsSent.callEnded = true;
-      await appointment.save();
-    } catch (notifError) {
-      console.error("Failed to send call ended notification:", notifError);
-    }
-  }
+  console.log(`🔔 Call ended events sent to both doctor and patient`);
 
   res.json({
     success: true,
@@ -618,7 +585,7 @@ export const getCallStatus = asyncHandler(async (req: Request, res: Response) =>
 
   const appointment = await Appointment.findById(appointmentId)
     .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
-    .populate("userId", "name userImage email phone");
+    .populate("userId", "firstName lastName name userImage email phone");
 
   if (!appointment) {
     return res.status(404).json({ success: false, message: "Appointment not found" });
@@ -653,7 +620,7 @@ export const getCallStatus = asyncHandler(async (req: Request, res: Response) =>
       callStartedAt: appointment.callStartedAt,
       callDuration: appointment.callDuration,
       doctorName: `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
-      patientName: `${(appointment.userId as any).name}`,
+      patientName: (appointment.userId as any).firstName || (appointment.userId as any).name,
     },
   });
 });

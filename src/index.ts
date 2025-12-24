@@ -1,4 +1,4 @@
-// index.ts - Updated Socket.IO configuration for React Native
+// index.ts - FIXED Socket.IO configuration
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -31,26 +31,24 @@ import partnerRouter from "./routes/partnerRoutes";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
-import { ap } from "@faker-js/faker/dist/airline-DF6RqYmq";
 
 const app = express();
 const server = http.createServer(app);
 
-// backend/index.ts - Verify this section
 export const io = new Server(server, {
   cors: {
-    origin: "*", // ✅ Good for development
+    origin: "*",
     methods: ["GET", "POST"],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   },
-  transports: ['websocket', 'polling'], // ✅ Both transports
-  allowEIO3: true, // ✅ Support older clients
+  transports: ['websocket', 'polling'],
+  allowEIO3: true,
   pingTimeout: 60000,
   pingInterval: 25000,
   connectTimeout: 45000,
-  serveClient: false, // Don't serve client files
-  cookie: false, // Disable cookies for mobile
+  serveClient: false,
+  cookie: false,
 });
 
 // ✅ Track connected users
@@ -62,7 +60,6 @@ io.use((socket, next) => {
   
   if (!token) {
     console.log("❌ Socket connection rejected: No token");
-    console.log("Handshake data:", socket.handshake);
     return next(new Error("Authentication error: No token provided"));
   }
 
@@ -115,7 +112,6 @@ io.on("connection", (socket) => {
   socket.on("mark-notification-read", async (notificationId: string) => {
     try {
       console.log(`✅ User ${userId} marked notification ${notificationId} as read`);
-      // Add DB update here if needed
     } catch (error) {
       console.error("Error marking notification as read:", error);
     }
@@ -139,15 +135,17 @@ io.on("connection", (socket) => {
   });
 });
 
-// ✅ Enhanced Notification Emitter with validation
+// ✅ FIXED: Emit notification with correct event name
 export const emitNotification = (userId: string, notification: any) => {
   try {
     const roomName = `user_${userId}`;
     const userSocketId = connectedUsers.get(userId);
 
     if (userSocketId) {
-      io.to(roomName).emit("new-notification", notification);
+      // ✅ CRITICAL FIX: Use "notification" event name (matching frontend)
+      io.to(roomName).emit("notification", notification);
       console.log(`🔔 Real-time notification sent to user ${userId} (socket: ${userSocketId})`);
+      console.log(`📨 Notification:`, JSON.stringify(notification, null, 2));
       return true;
     } else {
       console.log(`⚠️ User ${userId} not connected, notification queued for next login`);
@@ -159,32 +157,93 @@ export const emitNotification = (userId: string, notification: any) => {
   }
 };
 
+// ✅ NEW: Emit rejoin call alert to patient
+export const emitRejoinCallAlert = (
+  patientId: string, 
+  appointmentId: string, 
+  doctorName: string
+) => {
+  try {
+    const roomName = `user_${patientId}`;
+    const userSocketId = connectedUsers.get(patientId);
+
+    if (userSocketId) {
+      io.to(roomName).emit("patient-rejoin-call", {
+        appointmentId,
+        doctorName,
+        message: `${doctorName} is in the call and waiting for you.`,
+        timestamp: new Date().toISOString(),
+      });
+      console.log(`📞 Rejoin call alert sent to patient ${patientId}`);
+      return true;
+    } else {
+      console.log(`⚠️ Patient ${patientId} not online`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`❌ Failed to emit rejoin alert:`, error);
+    return false;
+  }
+};
+
+// ✅ NEW: Emit call ended event
+export const emitCallEnded = (
+  userId: string,
+  appointmentId: string,
+  callDuration?: number
+) => {
+  try {
+    const roomName = `user_${userId}`;
+    const userSocketId = connectedUsers.get(userId);
+
+    if (userSocketId) {
+      io.to(roomName).emit("call-ended", {
+        appointmentId,
+        callDuration,
+        timestamp: new Date().toISOString(),
+      });
+      console.log(`📞 Call ended notification sent to user ${userId}`);
+      return true;
+    } else {
+      console.log(`⚠️ User ${userId} not online`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`❌ Failed to emit call ended:`, error);
+    return false;
+  }
+};
+
 // ✅ Helper to check if user is online
 export const isUserOnline = (userId: string): boolean => {
   return connectedUsers.has(userId);
 };
 
-// ✅ Get all connected users (for admin dashboard)
+// ✅ Get all connected users
 export const getConnectedUsers = () => {
   return Array.from(connectedUsers.keys());
 };
 
-// Middleware - Enhanced CORS for mobile
+// ✅ Get user's socket ID
+export const getUserSocketId = (userId: string): string | undefined => {
+  return connectedUsers.get(userId);
+};
+
+// Middleware
 app.use(cors({
   origin: '*',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
 }));
 
-// Increase limits BEFORE your routes
 app.use(express.json({ limit: '25mb' })); 
 app.use(express.urlencoded({ limit: '25mb', extended: true }));
-
 app.use(morgan("dev"));
 
 // Health check
@@ -199,7 +258,7 @@ app.get("/", (req, res) => {
   });
 });
 
-// Socket.IO status endpoint (for debugging)
+// Socket.IO status endpoint
 app.get("/api/v1/socket/status", (req, res) => {
   res.json({
     activeConnections: connectedUsers.size,
@@ -236,7 +295,7 @@ mongoose
   .connect(process.env.MONGODB_URI as string)
   .then(() => {
     console.log("✅ MongoDB Connected");
-    server.listen(PORT, '0.0.0.0', () => { // ⭐ Listen on all interfaces
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`🔌 Socket.IO server ready`);
       console.log(`📱 WebSocket endpoint: ws://YOUR_IP:${PORT}`);
@@ -253,7 +312,6 @@ process.on("unhandledRejection", (err: any) => {
   server.close(() => process.exit(1));
 });
 
-// Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("👋 SIGTERM received, closing server gracefully");
   server.close(() => {
