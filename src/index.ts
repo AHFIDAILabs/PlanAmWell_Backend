@@ -1,4 +1,5 @@
-// index.ts - FIXED Socket.IO configuration
+// index.ts - FIXED Socket.IO with Appointment Rooms
+
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -10,6 +11,8 @@ import http from "http";
 import mongoose from "mongoose";
 import { errorHandler } from "./middleware/errorHandler";
 import "./cron/reminderJob";
+
+// Import routers
 import categoryRouter from "./routes/categoryRoutes";
 import productRouter from "./routes/productRoutes";
 import doctorRouter from "./routes/doctorRoutes";
@@ -40,9 +43,9 @@ export const io = new Server(server, {
     origin: "*",
     methods: ["GET", "POST"],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   },
-  transports: ['websocket', 'polling'],
+  transports: ["websocket", "polling"],
   allowEIO3: true,
   pingTimeout: 60000,
   pingInterval: 25000,
@@ -51,13 +54,16 @@ export const io = new Server(server, {
   cookie: false,
 });
 
-// ✅ Track connected users
+// ✅ Track connected users (for notifications)
 const connectedUsers = new Map<string, string>(); // userId -> socketId
+
+// ✅ Track appointment room memberships
+const appointmentRooms = new Map<string, Set<string>>(); // appointmentId -> Set of userIds
 
 // ✅ Socket.IO Authentication Middleware
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
-  
+
   if (!token) {
     console.log("❌ Socket connection rejected: No token");
     return next(new Error("Authentication error: No token provided"));
@@ -65,7 +71,7 @@ io.use((socket, next) => {
 
   try {
     const user = verifyJwtToken(token);
-    
+
     if (!user || !user.id) {
       console.log("❌ Socket connection rejected: Invalid token");
       return next(new Error("Authentication error: Invalid token"));
@@ -83,17 +89,17 @@ io.use((socket, next) => {
 // ✅ Connection Handler
 io.on("connection", (socket) => {
   const user = socket.data.user;
-  
+
   if (!user || !user.id) {
     console.log("❌ No user data, disconnecting socket");
     return socket.disconnect();
   }
 
   const userId = user.id.toString();
-  const roomName = `user_${userId}`;
+  const userRoomName = `user_${userId}`;
 
-  // Join user-specific room
-  socket.join(roomName);
+  // Join user-specific room (for notifications)
+  socket.join(userRoomName);
   connectedUsers.set(userId, socket.id);
 
   console.log(`🔌 User ${userId} connected (socket: ${socket.id})`);
@@ -106,6 +112,37 @@ io.on("connection", (socket) => {
     socketId: socket.id,
     message: "Successfully connected to notification server",
     timestamp: new Date().toISOString(),
+  });
+
+  // ✅ Join appointment room
+  socket.on("join-appointment", ({ appointmentId }: { appointmentId: string }) => {
+    const roomName = `appointment:${appointmentId}`;
+    socket.join(roomName);
+
+    // Track membership
+    if (!appointmentRooms.has(appointmentId)) {
+      appointmentRooms.set(appointmentId, new Set());
+    }
+    appointmentRooms.get(appointmentId)!.add(userId);
+
+    console.log(`📡 User ${userId} joined appointment room: ${roomName}`);
+    console.log(`👥 Room ${appointmentId} has ${appointmentRooms.get(appointmentId)!.size} members`);
+  });
+
+  // ✅ Leave appointment room
+  socket.on("leave-appointment", ({ appointmentId }: { appointmentId: string }) => {
+    const roomName = `appointment:${appointmentId}`;
+    socket.leave(roomName);
+
+    // Remove from tracking
+    if (appointmentRooms.has(appointmentId)) {
+      appointmentRooms.get(appointmentId)!.delete(userId);
+      if (appointmentRooms.get(appointmentId)!.size === 0) {
+        appointmentRooms.delete(appointmentId);
+      }
+    }
+
+    console.log(`📡 User ${userId} left appointment room: ${roomName}`);
   });
 
   // ✅ Handle manual notification read from client
@@ -125,6 +162,15 @@ io.on("connection", (socket) => {
   // ✅ Handle disconnect
   socket.on("disconnect", (reason) => {
     connectedUsers.delete(userId);
+
+    // Remove user from all appointment rooms
+    appointmentRooms.forEach((members, appointmentId) => {
+      members.delete(userId);
+      if (members.size === 0) {
+        appointmentRooms.delete(appointmentId);
+      }
+    });
+
     console.log(`🔌 User ${userId} disconnected. Reason: ${reason}`);
     console.log(`📍 Active connections: ${connectedUsers.size}`);
   });
@@ -135,17 +181,15 @@ io.on("connection", (socket) => {
   });
 });
 
-// ✅ FIXED: Emit notification with correct event name
+// ✅ Emit notification to user (for push notifications)
 export const emitNotification = (userId: string, notification: any) => {
   try {
     const roomName = `user_${userId}`;
     const userSocketId = connectedUsers.get(userId);
 
     if (userSocketId) {
-      // ✅ CRITICAL FIX: Use "notification" event name (matching frontend)
       io.to(roomName).emit("notification", notification);
       console.log(`🔔 Real-time notification sent to user ${userId} (socket: ${userSocketId})`);
-      console.log(`📨 Notification:`, JSON.stringify(notification, null, 2));
       return true;
     } else {
       console.log(`⚠️ User ${userId} not connected, notification queued for next login`);
@@ -157,27 +201,27 @@ export const emitNotification = (userId: string, notification: any) => {
   }
 };
 
-// ✅ NEW: Emit rejoin call alert to patient
+// ✅ Emit rejoin call alert to specific user
 export const emitRejoinCallAlert = (
-  patientId: string, 
-  appointmentId: string, 
-  doctorName: string
+  userId: string,
+  appointmentId: string,
+  userName: string
 ) => {
   try {
-    const roomName = `user_${patientId}`;
-    const userSocketId = connectedUsers.get(patientId);
+    const roomName = `user_${userId}`;
+    const userSocketId = connectedUsers.get(userId);
 
     if (userSocketId) {
       io.to(roomName).emit("patient-rejoin-call", {
         appointmentId,
-        doctorName,
-        message: `${doctorName} is in the call and waiting for you.`,
+        userName,
+        message: `${userName} is in the call and waiting for you.`,
         timestamp: new Date().toISOString(),
       });
-      console.log(`📞 Rejoin call alert sent to patient ${patientId}`);
+      console.log(`📞 Rejoin call alert sent to user ${userId}`);
       return true;
     } else {
-      console.log(`⚠️ Patient ${patientId} not online`);
+      console.log(`⚠️ User ${userId} not online`);
       return false;
     }
   } catch (error) {
@@ -186,30 +230,84 @@ export const emitRejoinCallAlert = (
   }
 };
 
-// ✅ NEW: Emit call ended event
+// ✅ FIXED: Emit call ended to APPOINTMENT ROOM (not individual users)
 export const emitCallEnded = (
   userId: string,
   appointmentId: string,
   callDuration?: number
 ) => {
   try {
-    const roomName = `user_${userId}`;
-    const userSocketId = connectedUsers.get(userId);
+    const roomName = `appointment:${appointmentId}`;
 
-    if (userSocketId) {
-      io.to(roomName).emit("call-ended", {
-        appointmentId,
-        callDuration,
-        timestamp: new Date().toISOString(),
-      });
-      console.log(`📞 Call ended notification sent to user ${userId}`);
-      return true;
-    } else {
-      console.log(`⚠️ User ${userId} not online`);
-      return false;
-    }
+    // Emit to appointment room (both doctor and patient will receive it)
+    io.to(roomName).emit("call-ended", {
+      appointmentId,
+      callDuration,
+      timestamp: new Date().toISOString(),
+    });
+
+    const membersCount = appointmentRooms.get(appointmentId)?.size || 0;
+    console.log(`📞 Call ended notification sent to appointment room ${appointmentId} (${membersCount} members)`);
+
+    return true;
   } catch (error) {
     console.error(`❌ Failed to emit call ended:`, error);
+    return false;
+  }
+};
+
+// ✅ NEW: Emit call started to appointment room
+export const emitCallStarted = (appointmentId: string, startedBy: string) => {
+  try {
+    const roomName = `appointment:${appointmentId}`;
+
+    io.to(roomName).emit("call-started", {
+      appointmentId,
+      startedBy,
+      timestamp: new Date().toISOString(),
+    });
+
+    console.log(`📞 Call started notification sent to appointment room ${appointmentId}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to emit call started:`, error);
+    return false;
+  }
+};
+
+// ✅ NEW: Emit call ringing to appointment room
+export const emitCallRinging = (appointmentId: string, initiatedBy: string) => {
+  try {
+    const roomName = `appointment:${appointmentId}`;
+
+    io.to(roomName).emit("call-ringing", {
+      appointmentId,
+      initiatedBy,
+      timestamp: new Date().toISOString(),
+    });
+
+    console.log(`📞 Call ringing notification sent to appointment room ${appointmentId}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to emit call ringing:`, error);
+    return false;
+  }
+};
+
+// ✅ NEW: Emit appointment updated to appointment room
+export const emitAppointmentUpdated = (appointmentId: string, appointment: any) => {
+  try {
+    const roomName = `appointment:${appointmentId}`;
+
+    io.to(roomName).emit("appointment-updated", {
+      appointment,
+      timestamp: new Date().toISOString(),
+    });
+
+    console.log(`📞 Appointment updated notification sent to room ${appointmentId}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to emit appointment updated:`, error);
     return false;
   }
 };
@@ -229,31 +327,40 @@ export const getUserSocketId = (userId: string): string | undefined => {
   return connectedUsers.get(userId);
 };
 
+// ✅ Get appointment room members
+export const getAppointmentRoomMembers = (appointmentId: string): string[] => {
+  return Array.from(appointmentRooms.get(appointmentId) || []);
+};
+
 // Middleware
-app.use(cors({
-  origin: '*',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-}));
+app.use(
+  cors({
+    origin: "*",
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  })
+);
 
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
-}));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+  })
+);
 
-app.use(express.json({ limit: '25mb' })); 
-app.use(express.urlencoded({ limit: '25mb', extended: true }));
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ limit: "25mb", extended: true }));
 app.use(morgan("dev"));
 
 // Health check
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "Server is healthy",
-    message: "AmWell Backend is operational.",
+    message: "AskAmWell Backend is operational.",
     version: "1.0.0",
     activeConnections: connectedUsers.size,
-    connectedUsers: Array.from(connectedUsers.keys()).length,
+    appointmentRooms: appointmentRooms.size,
     timestamp: new Date().toISOString(),
   });
 });
@@ -263,6 +370,10 @@ app.get("/api/v1/socket/status", (req, res) => {
   res.json({
     activeConnections: connectedUsers.size,
     connectedUserIds: Array.from(connectedUsers.keys()),
+    appointmentRooms: Array.from(appointmentRooms.keys()).map((id) => ({
+      appointmentId: id,
+      members: getAppointmentRoomMembers(id),
+    })),
     timestamp: new Date().toISOString(),
   });
 });
@@ -295,7 +406,7 @@ mongoose
   .connect(process.env.MONGODB_URI as string)
   .then(() => {
     console.log("✅ MongoDB Connected");
-    server.listen(PORT, '0.0.0.0', () => {
+    server.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`🔌 Socket.IO server ready`);
       console.log(`📱 WebSocket endpoint: ws://YOUR_IP:${PORT}`);

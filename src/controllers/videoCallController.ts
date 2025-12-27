@@ -450,35 +450,35 @@ export const handleCallDisconnect = asyncHandler(
 
     const activeCount = (appointment as any).getActiveParticipantCount();
 
-    if (activeCount === 0 && appointment.callStatus === "in-progress") {
-      const callDuration = appointment.callStartedAt
-        ? Math.floor((Date.now() - appointment.callStartedAt.getTime()) / 1000)
-        : 0;
+  // ✅ In handleCallDisconnect - when both participants disconnect
+if (activeCount === 0 && appointment.callStatus === "in-progress") {
+  const callDuration = appointment.callStartedAt
+    ? Math.floor((Date.now() - appointment.callStartedAt.getTime()) / 1000)
+    : 0;
 
-      if (callDuration > 30) {
-        console.log(`⏹️ Both participants disconnected - ending call after ${callDuration}s`);
-        appointment.callStatus = "ended";
-        appointment.callEndedAt = new Date();
-        appointment.callEndedBy = "system";
-        appointment.callDuration = callDuration;
-        appointment.status = "completed";
+  if (callDuration > 30) {
+    console.log(`⏹️ Both participants disconnected - ending call after ${callDuration}s`);
+    appointment.callStatus = "ended";
+    appointment.callEndedAt = new Date();
+    appointment.callEndedBy = "system";
+    appointment.callDuration = callDuration;
+    appointment.status = "completed";
 
-        const lastAttempt = appointment.callAttempts[appointment.callAttempts.length - 1];
-        if (lastAttempt && !lastAttempt.endedAt) {
-          lastAttempt.endedAt = new Date();
-          lastAttempt.endReason = "disconnected";
-          lastAttempt.duration = callDuration;
-        }
-
-        // ✅ CRITICAL FIX: Send "call-ended" event to BOTH participants
-        emitCallEnded(doctorId, appointmentId.toString(), callDuration);
-        emitCallEnded(patientId, appointmentId.toString(), callDuration);
-
-        console.log(`🔔 Call ended notifications sent to both participants`);
-      } else {
-        console.log(`⏳ Call too short (${callDuration}s) - allowing reconnection`);
-      }
+    const lastAttempt = appointment.callAttempts[appointment.callAttempts.length - 1];
+    if (lastAttempt && !lastAttempt.endedAt) {
+      lastAttempt.endedAt = new Date();
+      lastAttempt.endReason = "disconnected";
+      lastAttempt.duration = callDuration;
     }
+
+    // ✅ Emit to appointment room (will reach both if they reconnect)
+    emitCallEnded("system", appointmentId.toString(), callDuration);
+
+    console.log(`🔔 Call ended (system) event sent to appointment room ${appointmentId}`);
+  } else {
+    console.log(`⏳ Call too short (${callDuration}s) - allowing reconnection`);
+  }
+}
 
     await appointment.save();
 
@@ -531,9 +531,11 @@ export const endVideoCall = asyncHandler(async (req: Request, res: Response) => 
 
   console.log(`🛑 ${role} ending call for appointment ${appointmentId}`);
 
-  const finalDuration = callDuration || (appointment.callStartedAt
-    ? Math.floor((Date.now() - appointment.callStartedAt.getTime()) / 1000)
-    : 0);
+  const finalDuration =
+    callDuration ||
+    (appointment.callStartedAt
+      ? Math.floor((Date.now() - appointment.callStartedAt.getTime()) / 1000)
+      : 0);
 
   appointment.callStatus = "ended";
   appointment.callEndedAt = new Date();
@@ -555,11 +557,10 @@ export const endVideoCall = asyncHandler(async (req: Request, res: Response) => 
 
   await appointment.save();
 
-  // ✅ CRITICAL FIX: Send "call-ended" event to BOTH participants
-  emitCallEnded(doctorId, appointmentId.toString(), finalDuration);
-  emitCallEnded(patientId, appointmentId.toString(), finalDuration);
+  // ✅ CRITICAL: Emit to APPOINTMENT ROOM (will reach both participants)
+  emitCallEnded(userId!, appointmentId.toString(), finalDuration);
 
-  console.log(`🔔 Call ended events sent to both doctor and patient`);
+  console.log(`🔔 Call ended event sent to appointment room ${appointmentId}`);
 
   res.json({
     success: true,
@@ -573,6 +574,8 @@ export const endVideoCall = asyncHandler(async (req: Request, res: Response) => 
     },
   });
 });
+
+
 
 /* -------------------------------------------------------------------------- */
 /*                             Get Call Status                                */
