@@ -77,6 +77,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     try {
       await createOrderNotification(
         userId.toString(),
+        "User", // ✅ userType parameter
         (order._id as any).toString(),
         "placed",
         `Your order #${order.orderNumber.slice(0, 8)} has been placed successfully!`
@@ -189,32 +190,31 @@ export const updateOrderStatus = asyncHandler(async (req: Request, res: Response
   // ✅ Send notification based on delivery status change (only for registered users)
   if (deliveryStatus && order.userId) {
     try {
-      const statusMessages: Record<string, { type: "placed" | "confirmed" | "shipped" | "delivered" | "cancelled", message: string }> = {
-        confirmed: { 
-          type: "confirmed", 
-          message: `Order #${order.orderNumber.slice(0, 8)} confirmed and being processed` 
-        },
-        shipped: { 
-          type: "shipped", 
-          message: `Order #${order.orderNumber.slice(0, 8)} has been shipped!` 
-        },
-        delivered: { 
-          type: "delivered", 
-          message: `Order #${order.orderNumber.slice(0, 8)} has been delivered. Enjoy!` 
-        },
-        cancelled: { 
-          type: "cancelled", 
-          message: `Order #${order.orderNumber.slice(0, 8)} has been cancelled` 
-        },
+      // Map Order deliveryStatus to notification status types
+      type NotificationStatus = "placed" | "confirmed" | "shipped" | "delivered" | "cancelled";
+      
+      const statusMap: Record<string, NotificationStatus> = {
+        pending: "placed",
+        shipped: "shipped",
+        delivered: "delivered",
+        cancelled: "cancelled",
+      };
+      
+      const statusMessages: Record<string, string> = {
+        pending: `Order #${order.orderNumber.slice(0, 8)} is being processed`,
+        shipped: `Order #${order.orderNumber.slice(0, 8)} has been shipped!`,
+        delivered: `Order #${order.orderNumber.slice(0, 8)} has been delivered. Enjoy!`,
+        cancelled: `Order #${order.orderNumber.slice(0, 8)} has been cancelled`,
       };
 
-      const statusInfo = statusMessages[deliveryStatus];
-      if (statusInfo) {
+      // ✅ Check if deliveryStatus is valid and map to notification type
+      if (deliveryStatus in statusMap && deliveryStatus in statusMessages) {
         await createOrderNotification(
           order.userId.toString(),
+          "User", // ✅ userType parameter
           (order._id as any).toString(),
-          statusInfo.type,
-          statusInfo.message
+          statusMap[deliveryStatus],
+          statusMessages[deliveryStatus]
         );
       }
     } catch (notifError) {
