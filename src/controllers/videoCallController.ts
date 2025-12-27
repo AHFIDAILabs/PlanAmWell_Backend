@@ -150,8 +150,8 @@ export const generateVideoToken = asyncHandler(
         },
         { new: true }
       )
-        .populate("doctorId", "firstName lastName")
-        .populate("userId", "firstName lastName name");
+        .populate("doctorId", "firstName lastName doctorImage")
+        .populate("userId", "name userImage");
 
       if (updatedAppointment) {
         appointment = updatedAppointment;

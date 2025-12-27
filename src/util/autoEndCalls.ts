@@ -12,8 +12,6 @@ const extractId = (field: any): string => {
   return String(field);
 };
 
-
-
 /**
  * Auto-end calls that have exceeded their scheduled time + grace period
  * Run this every 5-10 minutes via cron
@@ -28,7 +26,7 @@ export const autoEndExpiredCalls = async () => {
       scheduledAt: { $lt: now }, // Appointment time has passed
     })
       .populate('doctorId', 'firstName lastName')
-      .populate('userId', 'firstName lastName');
+      .populate('userId', 'name userImage');
 
     console.log(`🔍 Checking ${activeCalls.length} active calls for auto-end...`);
 
@@ -38,12 +36,12 @@ export const autoEndExpiredCalls = async () => {
       const scheduledTime = new Date(appointment.scheduledAt);
       const duration = appointment.duration || 30; // Default 30 minutes
       
-      // Calculate expected end time (scheduled time + duration + 2 hour grace period)
-    const expectedEndTime = new Date(
-  scheduledTime.getTime() +
-    duration * 60 * 1000 +
-    CALL_GRACE_MINUTES * 60 * 1000
-);
+      // Calculate expected end time (scheduled time + duration + grace period)
+      const expectedEndTime = new Date(
+        scheduledTime.getTime() +
+          duration * 60 * 1000 +
+          CALL_GRACE_MINUTES * 60 * 1000
+      );
 
       // If current time exceeds expected end time, auto-end the call
       if (now > expectedEndTime) {
@@ -54,8 +52,8 @@ export const autoEndExpiredCalls = async () => {
         const actualDuration = Math.floor((now.getTime() - new Date(callStartTime).getTime()) / 1000);
 
         if (appointment.callStatus === "ended") {
-  continue;
-}
+          continue;
+        }
 
         // Update appointment
         appointment.callStatus = 'ended';
@@ -69,8 +67,9 @@ export const autoEndExpiredCalls = async () => {
         // Extract IDs
         const doctorId = extractId(appointment.doctorId);
         const patientId = extractId(appointment.userId);
+        const appointmentId = String(appointment._id);
 
-        // Notify both parties
+        // ✅ FIXED: Corrected notification parameters
         const notificationTitle = 'Call Automatically Ended';
         const notificationMessage = 'Your call has been automatically ended as it exceeded the scheduled time.';
 
@@ -78,11 +77,12 @@ export const autoEndExpiredCalls = async () => {
           // Notify doctor
           await createNotificationForUser(
             doctorId,
+            'Doctor', // ✅ userType parameter
             notificationTitle,
             notificationMessage,
             'appointment',
             {
-              appointmentId: appointment._id,
+              appointmentId,
               status: 'ended',
               callDuration: actualDuration,
               autoEnded: true,
@@ -92,11 +92,12 @@ export const autoEndExpiredCalls = async () => {
           // Notify patient
           await createNotificationForUser(
             patientId,
+            'User', // ✅ userType parameter
             notificationTitle,
             notificationMessage,
             'appointment',
             {
-              appointmentId: appointment._id,
+              appointmentId,
               status: 'ended',
               callDuration: actualDuration,
               autoEnded: true,
@@ -138,7 +139,7 @@ export const sendCallExpiryWarnings = async () => {
       callStatus: 'in-progress',
     })
       .populate('doctorId', 'firstName lastName')
-      .populate('userId', 'firstName lastName');
+      .populate('userId', 'name userImage');
 
     let warningCount = 0;
 
@@ -147,11 +148,11 @@ export const sendCallExpiryWarnings = async () => {
       const duration = appointment.duration || 30;
       
       // Calculate expected end time
-    const expectedEndTime = new Date(
-  scheduledTime.getTime() +
-    duration * 60 * 1000 +
-    CALL_GRACE_MINUTES * 60 * 1000
-);
+      const expectedEndTime = new Date(
+        scheduledTime.getTime() +
+          duration * 60 * 1000 +
+          CALL_GRACE_MINUTES * 60 * 1000
+      );
 
       const timeUntilExpiry = expectedEndTime.getTime() - now.getTime();
       const minutesUntilExpiry = Math.floor(timeUntilExpiry / (1000 * 60));
@@ -162,29 +163,33 @@ export const sendCallExpiryWarnings = async () => {
 
         const doctorId = extractId(appointment.doctorId);
         const patientId = extractId(appointment.userId);
+        const appointmentId = String(appointment._id);
 
+        const warningTitle = 'Call Ending Soon';
         const warningMessage = `Your call will automatically end in ${minutesUntilExpiry} minutes. Please wrap up your consultation.`;
 
         try {
-          // Notify both parties
+          // ✅ FIXED: Notify both parties with correct parameters
           await createNotificationForUser(
             doctorId,
-            'Call Ending Soon',
+            'Doctor', // ✅ userType parameter
+            warningTitle,
             warningMessage,
             'appointment',
             {
-              appointmentId: appointment._id,
+              appointmentId,
               minutesRemaining: minutesUntilExpiry,
             }
           );
 
           await createNotificationForUser(
             patientId,
-            'Call Ending Soon',
+            'User', // ✅ userType parameter
+            warningTitle,
             warningMessage,
             'appointment',
             {
-              appointmentId: appointment._id,
+              appointmentId,
               minutesRemaining: minutesUntilExpiry,
             }
           );
