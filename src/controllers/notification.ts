@@ -2,8 +2,7 @@ import { Request, Response } from "express";
 import Notification, { INotification } from "../models/notifications";
 import { Appointment } from "../models/appointment";
 import { Document } from "mongoose";
-import {  createNotificationForUser } from "../util/sendPushNotification"; // 👈 Imported
-
+import { createNotificationForUser } from "../util/sendPushNotification";
 
 /**
  * 📥 Get user notifications
@@ -79,26 +78,29 @@ export const markAllAsRead = async (req: Request, res: Response) => {
  */
 export const createNotification = async (req: Request, res: Response) => {
   try {
-    const { userId, title, message, type, metadata } = req.body;
+    const { userId, userType, title, message, type, metadata } = req.body;
 
+    // ✅ FIXED: Validate all required fields including userType
     if (!userId || !title || !message || !type) {
-      return res.status(400).json({ success: false, message: "Missing required fields (userId, title, message, type)." });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields (userId, title, message, type)." 
+      });
     }
 
-    // ✅ ALIGNMENT FIX: Use the high-level wrapper utility
+    // ✅ FIXED: Pass userType (default to "User" if not provided for backward compatibility)
     const notification = await createNotificationForUser(
       userId.toString(),
+      userType || "User", // ✅ Added missing parameter
       title,
       message,
       type,
       metadata
     );
 
-    // The utility function already created the DB entry and sent the push.
     res.status(201).json({ success: true, data: notification });
   } catch (error: any) {
     console.error("❌ Error in createNotification (Admin):", error);
-    // Ensure 500 status if the utility function threw an error
     res.status(500).json({ success: false, message: error.message });
   }
 };

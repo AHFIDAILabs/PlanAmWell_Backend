@@ -103,11 +103,19 @@ export const createNotificationForUser = async (
       createdAt: notification.createdAt,
     };
 
-    // ✅ Emit real-time notification
-    emitNotification(userId, notificationObject);
+    // ✅ CRITICAL FIX: Emit to correct user (convert to string to match socket room format)
+    const targetUserId = userId.toString();
+    console.log(`📡 Emitting notification to user: ${targetUserId}`);
+    const emitted = emitNotification(targetUserId, notificationObject);
+    
+    if (emitted) {
+      console.log(`✅ Real-time notification sent to ${userType} ${targetUserId}`);
+    } else {
+      console.log(`⚠️ ${userType} ${targetUserId} not connected - notification saved in DB`);
+    }
 
     // ✅ Send push notification (non-blocking)
-    sendPushNotification(userId, notification).catch(console.error);
+    sendPushNotification(targetUserId, notification).catch(console.error);
 
     return notification;
   } catch (error) {
@@ -133,6 +141,12 @@ export const createAppointmentNotification = async (
     cancelled: `Your appointment with Dr. ${doctorName} has been cancelled.`,
     reminder: `Your appointment with Dr. ${doctorName} starts in 15 minutes!`,
   };
+
+  console.log(`📅 Creating appointment notification for ${userType} ${userId}:`, {
+    type,
+    appointmentId,
+    doctorName,
+  });
 
   return await createNotificationForUser(
     userId,
