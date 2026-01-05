@@ -9,6 +9,7 @@ import {
   togglePartnerStatus,
   getActivePartners,
   getPartnerStats,
+  getPartnerOrders
 } from "../controllers/partnerController";
 import { verifyAdminToken } from "../middleware/auth";
 
@@ -46,5 +47,8 @@ partnerRouter.delete("/:partnerId", verifyAdminToken, deletePartner);
 
 // Toggle partner active status
 partnerRouter.patch("/:partnerId/toggle-status", verifyAdminToken, togglePartnerStatus);
+
+// Get orders for a specific partner
+partnerRouter.get("/:partnerId/orders", verifyAdminToken, getPartnerOrders);
 
 export default partnerRouter;

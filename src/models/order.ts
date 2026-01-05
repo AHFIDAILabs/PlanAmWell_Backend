@@ -12,6 +12,7 @@ export interface IOrderItem {
 }
 
 export interface IOrder extends Document {
+    partnerId?: Types.ObjectId; // optional, for API
   orderNumber: string;
   sessionId?: string;
   userId?: Types.ObjectId;
@@ -32,6 +33,7 @@ export interface IOrder extends Document {
     state?: string;
   };
   discreetPackaging?: boolean;
+  createdAt?: Date;
 }
 
 const OrderItemSchema = new Schema<IOrderItem>(
@@ -43,6 +45,7 @@ const OrderItemSchema = new Schema<IOrderItem>(
     price: { type: Number, required: true },
     dosage: String,
     specialInstructions: String,
+
   },
   { _id: false }
 );
@@ -76,7 +79,10 @@ const OrderSchema = new Schema<IOrder>(
       city: String,
       state: String,
     },
+    partnerId: { type: Schema.Types.ObjectId, ref: "Partner", required: false }, // optional for third-party orders
+
     discreetPackaging: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );

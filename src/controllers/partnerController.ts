@@ -4,6 +4,8 @@ import mongoose from "mongoose";
 import { Partner, IPartner } from "../models/partner";
 import { uploadToCloudinary, deleteFromCloudinary } from "../middleware/claudinary";
 import { Image } from "../models/image";
+import { IOrder, Order } from "../models/order";
+
 
 // Extend Request type to include auth
 interface AuthRequest extends Request {
@@ -383,5 +385,65 @@ export const getPartnerStats = async (_req: Request, res: Response): Promise<voi
       success: false,
       message: error.message || "Failed to fetch partner stats",
     });
+  }
+};
+
+/**
+ * ===============================
+ * GET ORDERS FOR A PARTNER (ADMIN)
+ * GET /api/partners/:partnerId/orders
+ * ===============================
+ */
+
+export const getPartnerOrders = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { partnerId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(partnerId)) {
+      res.status(400).json({ success: false, message: "Invalid partner ID" });
+      return;
+    }
+
+    // Populate userId and productId for first item image
+    const orders = await Order.find({ partnerId })
+      .populate("userId", "name email") // user info
+      .populate("items.productId", "name image") // populate product info (optional: image)
+      .sort({ createdAt: -1 });
+
+    // Map orders to frontend-friendly format
+   const formattedOrders = orders.map((order) => {
+  const o = order as IOrder & { _id: mongoose.Types.ObjectId; createdAt: Date }; // cast
+
+  return {
+    id: o._id.toString(),
+    orderId: o.orderNumber,
+    totalPrice: o.total,
+    status: o.deliveryStatus || "pending",
+    platform: o.platform || "PlanAmWell",
+    user: o.userId
+      ? {
+          name: (o.userId as any).name,
+          origin: (o.userId as any).email,
+        }
+      : { name: "Guest", origin: "N/A" },
+    itemCount: o.items.length,
+    frontImage:
+      o.items[0]?.productId && (o.items[0].productId as any).image
+        ? (o.items[0].productId as any).image
+        : null,
+    createdAt: o.createdAt,
+  };
+});
+
+    res.status(200).json({
+      success: true,
+      count: formattedOrders.length,
+      data: formattedOrders,
+    });
+  } catch (error: any) {
+    console.error("❌ getPartnerOrders error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: error.message || "Failed to fetch partner orders" });
   }
 };
