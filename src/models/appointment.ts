@@ -3,13 +3,17 @@ import mongoose, { Schema, Types, Document } from "mongoose";
 import { IDoctor } from "./doctor";
 
 export type AppointmentStatus =
-  | "pending"
-  | "confirmed"
-  | "cancelled"
-  | "completed"
-  | "rejected"
+  | "pending" 
+  | "confirmed" 
+  | "in-progress" 
+  | "completed" 
+  | "cancelled" 
+  | "rejected" 
   | "rescheduled"
-  | "in-progress";
+  | "expired"
+  | "call-ended"
+  | "confirmed-upcoming"
+  | "about-to-start";
 
 export type CallStatus =
   | "idle"        // no call started
