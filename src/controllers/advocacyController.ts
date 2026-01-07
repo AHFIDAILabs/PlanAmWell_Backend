@@ -453,3 +453,19 @@ export const getAdvocacyStats = asyncHandler(async (req: Request, res: Response)
     },
   });
 });
+
+// Get /api/v1/advocacy/:id/stats - Get an article's statistics
+export const getArticleStats = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const article = await AdvocacyArticle.findById(id).select("views likes");
+  if (!article) {
+    return res.status(404).json({
+      success: false,
+      message: "Article not found",
+    });
+  }
+  res.status(200).json({
+    success: true,
+    data: { article },
+  });
+});

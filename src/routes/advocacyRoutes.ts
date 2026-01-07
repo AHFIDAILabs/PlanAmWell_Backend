@@ -14,6 +14,7 @@ import {
   deleteArticle,
   getAllArticlesAdmin,
   getAdvocacyStats,
+  getArticleStats
 } from "../controllers/advocacyController";
 import { verifyToken, guestAuth, authorize } from "../middleware/auth"; // Your auth middleware
 import commentRouter from "./commentRoutes";
@@ -103,6 +104,7 @@ advocacyRouter.put("/admin/:id", guestAuth, verifyToken, authorize("Admin"), upl
 advocacyRouter.delete("/admin/:id", guestAuth, verifyToken, authorize("Admin"), deleteArticle);
 advocacyRouter.get("/admin/all", guestAuth, verifyToken, authorize("Admin"), getAllArticlesAdmin);
 advocacyRouter.get("/admin/stats",guestAuth, verifyToken, authorize("Admin"), getAdvocacyStats);
+advocacyRouter.get("/admin/stats/:id", guestAuth, verifyToken, authorize("Admin"), getArticleStats);
 // Mount comment routes
 advocacyRouter.use("/", commentRouter);
 
