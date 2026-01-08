@@ -5,32 +5,26 @@ import OpenAI from 'openai';
 import { Product } from '../models/product';
 import { ChatConversation, IMessage } from '../models/ChatConversation';
 import { Intent, ChatbotRequest } from '../types/chatbot.types';
-import {  uploadVideoToCloudinary } from '../middleware/claudinary';
+import { uploadVideoToCloudinary } from '../middleware/claudinary';
 import multer from 'multer';
 
 // --- CONFIGURATION ---
-// Increase Multer limit to 25MB to match Whisper's maximum allowed size
 const upload = multer({ 
     storage: multer.memoryStorage(),
     limits: { fileSize: 25 * 1024 * 1024 } 
 });
 
-// Instance 1: OpenRouter for Chat (Text)
 const openrouter = new OpenAI({ 
     apiKey: process.env.OPENAI_API_KEY, 
     baseURL: "https://openrouter.ai/api/v1" 
 });
 
-// Instance 2: Direct OpenAI for Whisper (Audio)
 const openaiWhisper = new OpenAI({ 
     apiKey: process.env.WHISPER_API_KEY 
 });
 
 // --- HELPER FUNCTIONS ---
 
-/**
- * Calls OpenRouter for GPT responses with conversation history
- */
 export const getGPTResponse = async (userPrompt: string, history: any[] = []): Promise<string> => {
     const systemMessage: OpenAI.Chat.ChatCompletionMessageParam = {
         role: 'system',
@@ -51,7 +45,7 @@ export const getGPTResponse = async (userPrompt: string, history: any[] = []): P
     ];
 
     const completion = await openrouter.chat.completions.create({
-        model: 'openai/gpt-4o-mini', // Cost-effective model via OpenRouter
+        model: 'openai/gpt-4o-mini',
         messages: messages,
         temperature: 0.7,
         max_tokens: 300,
@@ -60,8 +54,6 @@ export const getGPTResponse = async (userPrompt: string, history: any[] = []): P
     return completion.choices[0].message?.content || 'I am having trouble connecting right now.';
 };
 
-
-// Transcribe audio (Whisper) - Standalone Endpoint
 export const transcribeAudio = [
     upload.single('file'),
     async (req: Request, res: Response): Promise<Response> => {
@@ -70,8 +62,6 @@ export const transcribeAudio = [
                 return res.status(400).json({ success: false, message: 'No file uploaded' });
             }
 
-            // 1. Upload to Cloudinary using Video resource type
-            // This treats the audio as playable media instead of a raw document
             const { videoUrl, videoCldId } = await uploadVideoToCloudinary(
                 req.file.buffer, 
                 'whisper-audio'
@@ -79,8 +69,6 @@ export const transcribeAudio = [
 
             console.log('✅ Audio uploaded to Cloudinary as media:', videoUrl);
 
-            // 2. Transcribe audio using the dedicated native OpenAI Whisper instance
-            // We use OpenAI.toFile to properly format the buffer for the API
             const transcription = await openaiWhisper.audio.transcriptions.create({
                 file: await OpenAI.toFile(req.file.buffer, 'speech.m4a'),
                 model: 'whisper-1',
@@ -96,7 +84,6 @@ export const transcribeAudio = [
         } catch (error: any) {
             console.error('Whisper transcription error:', error);
             
-            // Specifically handle payload size errors if they slip through
             if (error.status === 413) {
                 return res.status(413).json({ 
                     success: false, 
@@ -129,11 +116,33 @@ const detectIntent = (message: string): Intent => {
 
 const extractProductKeywords = (message: string): string => {
     let cleaned = message.toLowerCase().trim();
-    const leadingPhrases = ['i want to buy', 'buy', 'order', 'purchase', 'need', 'get me'];
-    leadingPhrases.forEach(phrase => {
-        if (cleaned.startsWith(phrase)) cleaned = cleaned.replace(phrase, '').trim();
-    });
-    return cleaned.replace(/[^a-zA-Z0-9 ]/g, "").trim();
+    
+    // Remove common purchase intent phrases
+    const purchasePhrases = [
+        'i want to buy', 'i need to buy', 'i want to purchase', 'i need to purchase',
+        'i want to order', 'i need to order', 'i would like to buy', 'i would like to purchase',
+        'can i buy', 'can i get', 'can i order', 'can i purchase',
+        'i want', 'i need', 'i require', 'get me', 'buy me',
+        'buy', 'order', 'purchase', 'get'
+    ];
+    
+    // Sort by length (longest first) to match longer phrases first
+    purchasePhrases.sort((a, b) => b.length - a.length);
+    
+    for (const phrase of purchasePhrases) {
+        if (cleaned.startsWith(phrase)) {
+            cleaned = cleaned.replace(phrase, '').trim();
+            break;
+        }
+    }
+    
+    // Remove articles and common connectors
+    const fillerWords = ['a', 'an', 'the', 'some', 'any'];
+    const words = cleaned.split(' ');
+    const filteredWords = words.filter(word => !fillerWords.includes(word));
+    
+    // Clean special characters but keep spaces
+    return filteredWords.join(' ').replace(/[^a-zA-Z0-9 ]/g, "").trim();
 };
 
 const searchProducts = async (query: string, limit: number = 5): Promise<any[]> => {
@@ -146,6 +155,46 @@ const searchProducts = async (query: string, limit: number = 5): Promise<any[]> 
         ]
     }).limit(limit).lean();
 };
+
+/**
+ * NEW: Infer category from user query using common mappings
+ */
+const inferCategory = (query: string): string | null => {
+    const q = query.toLowerCase().trim();
+    
+    // Category mapping for common reproductive health products
+    const categoryMap: { [key: string]: string[] } = {
+        'contraception': ['condom', 'contraceptive', 'birth control', 'protection', 'safe sex'],
+        'emergency contraception': ['postinor', 'morning after', 'emergency pill', 'plan b'],
+        'fertility': ['ovulation', 'pregnancy test', 'fertility monitor', 'conception'],
+        'menstrual care': ['pad', 'tampon', 'menstrual cup', 'period', 'sanitary'],
+        'vitamins': ['prenatal', 'folic acid', 'supplement', 'vitamin'],
+        'intimate care': ['lubricant', 'wash', 'hygiene', 'intimate'],
+    };
+    
+    for (const [category, keywords] of Object.entries(categoryMap)) {
+        if (keywords.some(keyword => q.includes(keyword))) {
+            return category;
+        }
+    }
+    
+    return null;
+};
+
+/**
+ * NEW: Search products by category
+ */
+const searchProductsByCategory = async (category: string, limit: number = 5): Promise<any[]> => {
+    if (!category || !category.trim()) return [];
+    return await Product.find({
+        $and: [
+            { categoryName: { $regex: category, $options: 'i' } },
+            { stockQuantity: { $gt: 0 } },
+            { status: { $ne: 'inactive' } }
+        ]
+    }).limit(limit).lean();
+};
+
 // --- CONTROLLERS ---
 export const sendMessage = [
     upload.single('file'),
@@ -158,24 +207,19 @@ export const sendMessage = [
             let userText = textMessage || '';
             let audioData;
 
-            // 1. Voice handling: Using uploadVideoToCloudinary for better media handling
+            // 1. Voice handling
             if (req.file) {
-                // We use uploadVideoToCloudinary because Cloudinary treats audio as 
-                // "video without a picture," enabling streaming and media metadata.
                 const { videoUrl, videoCldId } = await uploadVideoToCloudinary(
                     req.file.buffer, 
                     'whisper-audio'
                 );
                 
-                // Transcribe using Direct OpenAI Key (Whisper)
                 const transcription = await openaiWhisper.audio.transcriptions.create({
                     file: await OpenAI.toFile(req.file.buffer, 'speech.m4a'),
                     model: 'whisper-1',
                 });
 
                 userText = transcription.text || '';
-                
-                // Note: using videoUrl/videoCldId from the helper response
                 audioData = { 
                     cloudinaryId: videoCldId, 
                     cloudinaryUrl: videoUrl 
@@ -198,16 +242,45 @@ export const sendMessage = [
             if (intent === 'buy') {
                 const query = extractProductKeywords(userText);
                 products = await searchProducts(query);
-                botResponseText = products.length > 0 
-                    ? `I found some options for you. 🛒` 
-                    : `I couldn't find "${query}" in our shop.`;
+                
+                // ENHANCED: Category fallback when exact product not found
+                if (products.length === 0) {
+                    const inferredCategory = inferCategory(query);
+                    
+                    if (inferredCategory) {
+                        products = await searchProductsByCategory(inferredCategory);
+                        
+                        if (products.length > 0) {
+                            botResponseText = `We currently don't have "${query}" in stock, but here are some ${inferredCategory} products available. 🛒`;
+                        } else {
+                            botResponseText = `Sorry, we don't have "${query}" available at the moment. Please check back later or contact support for assistance.`;
+                        }
+                    } else {
+                        // Try a broader search if no category inferred
+                        const broadProducts = await Product.find({
+                            $and: [
+                                { stockQuantity: { $gt: 0 } },
+                                { status: { $ne: 'inactive' } }
+                            ]
+                        }).limit(5).lean();
+                        
+                        if (broadProducts.length > 0) {
+                            products = broadProducts;
+                            botResponseText = `We currently don't have "${query}" in our store. Here are some popular health products you might be interested in. 🛒`;
+                        } else {
+                            botResponseText = `We don't have "${query}" available at the moment. Please check back later or ask me about other reproductive health topics.`;
+                        }
+                    }
+                } else {
+                    botResponseText = `Great! I found some options for you. 🛒`;
+                }
             } else if (intent === 'greeting') {
-                botResponseText = "Hello 👋 I’m Ask AmWell. How can I help you today?";
+                botResponseText = "Hello 👋 I'm Ask AmWell. How can I help you today?";
             } else {
-                // OpenAI (via OpenRouter) handles health/info/general
+                // OpenAI handles health/info/general
                 botResponseText = await getGPTResponse(userText, conversation.messages);
                 
-                // Smart search: Attach products if they were mentioned in the chat
+                // Smart search: Attach products if mentioned
                 const possibleKeywords = extractProductKeywords(userText);
                 const suggestedProducts = await searchProducts(possibleKeywords, 2); 
                 if (suggestedProducts.length > 0) products = suggestedProducts;
