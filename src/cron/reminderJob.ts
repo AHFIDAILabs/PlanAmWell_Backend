@@ -1,84 +1,86 @@
+// jobs/appointmentReminders.ts - UPGRADED WITH DEDUPLICATION
 import cron from "node-cron";
 import { Appointment } from "../models/appointment";
-import { createNotificationForUser } from "../util/sendPushNotification";
+import { NotificationService } from "../services/NotificationService";
 
+/**
+ * ✅ CRON JOB: Send 15-minute appointment reminders
+ * Runs every minute to check for upcoming appointments
+ */
 cron.schedule("* * * * *", async () => {
   try {
     const now = new Date();
     const reminderTimeStart = new Date(now.getTime() + 15 * 60 * 1000);
     const reminderTimeEnd = new Date(reminderTimeStart.getTime() + 60 * 1000);
 
+    // ✅ CRITICAL: Only fetch appointments that haven't been reminded yet
     const upcomingAppointments = await Appointment.find({
       status: "confirmed",
       scheduledAt: { $gte: reminderTimeStart, $lt: reminderTimeEnd },
-      "notificationsSent.reminder": { $ne: true }, // ✅ Prevent duplicate reminders
+      "notificationsSent.reminder": { $ne: true }, // ✅ Prevent duplicates
     })
       .populate("doctorId", "firstName lastName")
       .populate("userId", "name firstName lastName");
 
+    if (upcomingAppointments.length === 0) {
+      // No appointments to remind - exit silently
+      return;
+    }
+
+    console.log(`⏰ [ReminderJob] Found ${upcomingAppointments.length} appointments needing reminders`);
+
     for (const appointment of upcomingAppointments) {
-      if (!appointment.userId) continue;
+      if (!appointment.userId) {
+        console.warn(`⚠️ [ReminderJob] Skipping appointment ${appointment._id} - missing userId`);
+        continue;
+      }
 
       const doctor = appointment.doctorId as any;
       const patient = appointment.userId as any;
+      
       const doctorName = `Dr. ${doctor?.lastName || doctor?.firstName || "Doctor"}`;
-      const patientName = patient?.name || `${patient?.firstName || ""} ${patient?.lastName || ""}`.trim() || "Patient";
+      const patientName = patient?.name || 
+                         `${patient?.firstName || ""} ${patient?.lastName || ""}`.trim() || 
+                         "Patient";
 
       try {
-        // ✅ Notify patient
-        await createNotificationForUser(
+        // ✅ Send reminder to PATIENT
+        await NotificationService.notifyAppointmentReminder(
           appointment.userId.toString(),
-          "User", // ✅ userType parameter
-          "Appointment Reminder",
-          `Your appointment with ${doctorName} starts in 15 minutes!`,
-          "appointment",
-          {
-            appointmentId: (appointment._id as any).toString(),
-            doctorId: appointment.doctorId?.toString(),
-            doctorName,
-            status: "reminder",
-          }
+          "User",
+          (appointment._id as any).toString(),
+          doctorName,
+          appointment.scheduledAt
         );
 
-        // ✅ Notify doctor
+        // ✅ Send reminder to DOCTOR
         if (appointment.doctorId) {
-          await createNotificationForUser(
+          await NotificationService.notifyAppointmentReminder(
             appointment.doctorId.toString(),
-            "Doctor", // ✅ userType parameter
-            "Appointment Reminder",
-            `Your appointment with ${patientName} starts in 15 minutes!`,
-            "appointment",
-            {
-              appointmentId: (appointment._id as any).toString(),
-              userId: appointment.userId.toString(),
-              patientName,
-              status: "reminder",
-            }
+            "Doctor",
+            (appointment._id as any).toString(),
+            patientName,
+            appointment.scheduledAt
           );
         }
 
-        // ✅ Mark reminder as sent
-        if (!appointment.notificationsSent) {
-          appointment.notificationsSent = {
-            reminder: false,
-            expiryWarning: false,
-            callStarted: false,
-            callEnded: false,
-          };
-        }
-        appointment.notificationsSent.reminder = true;
-        appointment.reminderSent = true; // Legacy field
-        await appointment.save();
+        // ✅ CRITICAL: Mark reminder as sent (prevents duplicates)
+        await NotificationService.markNotificationSent(
+          (appointment._id as any).toString(),
+          "reminder"
+        );
 
+        console.log(`✅ [ReminderJob] Sent reminders for appointment ${appointment._id}`);
       } catch (notifError) {
-        console.error(`[ReminderJob] Failed to send reminder for appointment ${appointment._id}:`, notifError);
+        console.error(`❌ [ReminderJob] Failed to send reminder for appointment ${appointment._id}:`, notifError);
+        // Continue to next appointment - don't let one failure stop the entire batch
       }
     }
 
-    if (upcomingAppointments.length > 0) {
-      console.log(`[ReminderJob] Sent ${upcomingAppointments.length * 2} reminders (${upcomingAppointments.length} appointments)`);
-    }
+    console.log(`✅ [ReminderJob] Sent ${upcomingAppointments.length * 2} reminders (${upcomingAppointments.length} appointments)`);
   } catch (error) {
-    console.error("[ReminderJob] Error:", error);
+    console.error("❌ [ReminderJob] Error:", error);
   }
 });
+
+console.log("✅ Appointment reminder cron job started (runs every minute)");

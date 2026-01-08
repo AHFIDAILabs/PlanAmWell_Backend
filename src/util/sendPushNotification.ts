@@ -7,7 +7,8 @@ import { emitNotification } from "../index";
 const expo = new Expo();
 
 /**
- * 📲 Send push notification to ANY user (User or Doctor)
+ * ✅ Send push notification to ANY user (User or Doctor)
+ * This is called by NotificationService - don't use directly
  */
 export async function sendPushNotification(
   userId: string,
@@ -43,9 +44,7 @@ export async function sendPushNotification(
     for (const chunk of expo.chunkPushNotifications(messages)) {
       try {
         const tickets = await expo.sendPushNotificationsAsync(chunk);
-        console.log(
-          `[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`
-        );
+        console.log(`[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`);
       } catch (err) {
         console.error("[PushNotification] Error sending push notifications:", err);
       }

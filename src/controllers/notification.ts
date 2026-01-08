@@ -1,8 +1,8 @@
+// controllers/notificationController.ts - UPGRADED
 import { Request, Response } from "express";
 import Notification, { INotification } from "../models/notifications";
 import { Appointment } from "../models/appointment";
-import { Document } from "mongoose";
-import { createNotificationForUser } from "../util/sendPushNotification";
+import { NotificationService } from "../services/NotificationService";
 
 /**
  * 📥 Get user notifications
@@ -80,7 +80,6 @@ export const createNotification = async (req: Request, res: Response) => {
   try {
     const { userId, userType, title, message, type, metadata } = req.body;
 
-    // ✅ FIXED: Validate all required fields including userType
     if (!userId || !title || !message || !type) {
       return res.status(400).json({ 
         success: false, 
@@ -88,15 +87,15 @@ export const createNotification = async (req: Request, res: Response) => {
       });
     }
 
-    // ✅ FIXED: Pass userType (default to "User" if not provided for backward compatibility)
-    const notification = await createNotificationForUser(
-      userId.toString(),
-      userType || "User", // ✅ Added missing parameter
+    // ✅ Use NotificationService for consistency
+    const notification = await NotificationService.create({
+      userId: userId.toString(),
+      userType: userType || "User",
       title,
       message,
       type,
-      metadata
-    );
+      metadata,
+    });
 
     res.status(201).json({ success: true, data: notification });
   } catch (error: any) {
