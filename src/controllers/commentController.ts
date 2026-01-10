@@ -3,7 +3,8 @@ import { Request, Response } from "express";
 import { Comment } from "../models/comment";
 import { AdvocacyArticle } from "../models/advocacy";
 import asyncHandler from "../middleware/asyncHandler";
-import mongoose from "mongoose";
+import { notifyAdmins } from "../util/adminNotifications";
+import mongoose, { Types } from "mongoose";
 
 // =====================================================
 // PUBLIC/USER ROUTES
@@ -318,11 +319,25 @@ export const flagComment = asyncHandler(async (req: Request, res: Response) => {
   const { commentId } = req.params;
   const { reason } = req.body;
 
-  const comment = await Comment.findByIdAndUpdate(
-    commentId,
-    { status: "flagged" },
-    { new: true }
-  );
+ const comment = await Comment.findByIdAndUpdate(
+  commentId,
+  { 
+    status: "flagged",
+    flagReason: reason,
+    flaggedAt: new Date(),
+  },
+  { new: true }
+)
+.populate('author.userId', 'name email')
+.lean<{
+  _id: Types.ObjectId;
+  content: string;
+  author?: {
+    name?: string;
+    email?: string;
+    userId?: Types.ObjectId;
+  };
+}>();
 
   if (!comment) {
     return res.status(404).json({
@@ -331,14 +346,30 @@ export const flagComment = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
-  // TODO: Send notification to admin about flagged comment
-  console.log(`Comment ${commentId} flagged. Reason: ${reason}`);
+  // ✅ Convert to plain object with explicit type conversions
+  const commentData = {
+    _id: comment._id.toString(), // ✅ Convert to string
+    content: comment.content,
+    author: comment.author ? {
+      name: comment.author.name,
+      email: comment.author.email,
+      userId: comment.author.userId?.toString(), // ✅ Convert to string
+    } : undefined,
+  };
+
+  // ✅ Send notifications to admins (non-blocking)
+  notifyAdmins(commentId, reason, commentData).catch((error) => {
+    console.error("Failed to notify admins:", error);
+    // Don't fail the request if notification fails
+  });
 
   res.status(200).json({
     success: true,
     message: "Comment flagged for review",
   });
 });
+
+
 
 // =====================================================
 // ADMIN ROUTES

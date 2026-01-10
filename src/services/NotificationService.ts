@@ -25,11 +25,11 @@ export class NotificationService {
       const isDuplicate = await this.isDuplicateNotification(userId, title, message, metadata);
       
       if (isDuplicate) {
-        console.log(`⚠️ [NotificationService] Duplicate notification prevented:`, {
-          userId,
-          title,
-          appointmentId: metadata?.appointmentId,
-        });
+        // console.log(`⚠️ [NotificationService] Duplicate notification prevented:`, {
+        //   userId,
+        //   title,
+        //   appointmentId: metadata?.appointmentId,
+        // });
         return null;
       }
 
@@ -44,12 +44,12 @@ export class NotificationService {
         isRead: false,
       });
 
-      console.log(`✅ [NotificationService] Created notification:`, {
-        _id: notification._id,
-        userId,
-        title,
-        type,
-      });
+      // console.log(`✅ [NotificationService] Created notification:`, {
+      //   _id: notification._id,
+      //   userId,
+      //   title,
+      //   type,
+      // });
 
       // ✅ Emit via Socket.IO (real-time)
       const notificationObject = {
@@ -66,11 +66,11 @@ export class NotificationService {
 
       const emitted = emitNotification(userId.toString(), notificationObject);
       
-      if (emitted) {
-        console.log(`📡 [NotificationService] Real-time notification sent to ${userType} ${userId}`);
-      } else {
-        console.log(`⚠️ [NotificationService] User ${userId} not connected - saved in DB only`);
-      }
+      // if (emitted) {
+      //   console.log(`📡 [NotificationService] Real-time notification sent to ${userType} ${userId}`);
+      // } else {
+      //   console.log(`⚠️ [NotificationService] User ${userId} not connected - saved in DB only`);
+      // }
 
       // ✅ Send push notification (non-blocking)
       this.sendPushAsync(userId, notification);
@@ -397,7 +397,7 @@ export class NotificationService {
       await Appointment.findByIdAndUpdate(appointmentId, {
         $set: { [`notificationsSent.${flagName}`]: true },
       });
-      console.log(`✅ [NotificationService] Marked ${flagName} as sent for ${appointmentId}`);
+      // console.log(`✅ [NotificationService] Marked ${flagName} as sent for ${appointmentId}`);
     } catch (error) {
       console.error(`❌ [NotificationService] Failed to mark notification flag:`, error);
     }

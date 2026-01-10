@@ -22,14 +22,14 @@ async function getPartnerUserId(email: string): Promise<string | null> {
     );
     
     if (response.data?.user?.id) {
-      console.log(`✅ Found existing partner user for ${email}:`, response.data.user.id);
+      // console.log(`✅ Found existing partner user for ${email}:`, response.data.user.id);
       return response.data.user.id;
     }
     
     return null;
   } catch (err: any) {
     if (err.response?.status === 404) {
-      console.log(`ℹ️ No existing partner user found for ${email}`);
+      // console.log(`ℹ️ No existing partner user found for ${email}`);
       return null;
     }
     
@@ -98,8 +98,8 @@ async function syncUserWithPartner(user: any, password: string) {
 
 /** ------------------ CHECKOUT ------------------ */
 export const checkout = asyncHandler(async (req: Request, res: Response) => {
-  console.log("--- CHECKOUT REQUEST RECEIVED ---");
-  console.log("Request body:", JSON.stringify(req.body, null, 2));
+  // console.log("--- CHECKOUT REQUEST RECEIVED ---");
+  // console.log("Request body:", JSON.stringify(req.body, null, 2));
 
   let authUserId = req.auth?.id;
   let sessionGuestId = req.auth?.sessionId || req.body.sessionId;
@@ -120,21 +120,21 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   } = req.body;
 
   // ✅ Log what we received
-  console.log("📥 Checkout data received:", {
-    name,
-    phone,
-    email,
-    hasPassword: !!password,
-    gender,
-    dateOfBirth,
-    homeAddress,
-    city,
-    state,
-    lga,
-    hasPreferences: !!preferences,
-    authUserId,
-    sessionGuestId,
-  });
+  // console.log("📥 Checkout data received:", {
+  //   name,
+  //   phone,
+  //   email,
+  //   hasPassword: !!password,
+  //   gender,
+  //   dateOfBirth,
+  //   homeAddress,
+  //   city,
+  //   state,
+  //   lga,
+  //   hasPreferences: !!preferences,
+  //   authUserId,
+  //   sessionGuestId,
+  // });
 
   const safePassword =
     password && password.length <= 25 ? password : Math.random().toString(36).slice(-10);
@@ -199,7 +199,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     
     if (needsUpdate) {
       await user.save();
-      console.log('✅ Updated user with checkout details');
+      // console.log('✅ Updated user with checkout details');
     }
   } else {
     // Guest checkout - create new user
@@ -209,7 +209,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
     if (existingUser) {
       user = existingUser;
-      console.log('✅ Found existing local user:', user._id);
+      // console.log('✅ Found existing local user:', user._id);
       
       // Update existing user's details
       user.name = name.trim();
@@ -232,7 +232,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       user.isAnonymous = false;
       
       await user.save();
-      console.log('✅ Updated existing user with checkout details');
+      // console.log('✅ Updated existing user with checkout details');
     } else {
       // Check partner DB first
       let existingPartnerId: string | null = null;
@@ -266,19 +266,19 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         partnerId: existingPartnerId || undefined,
       });
 
-      console.log('✅ Created new local user with full details:', {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        homeAddress: user.homeAddress,
-        city: user.city,
-        state: user.state,
-        lga: user.lga,
-        gender: user.gender,
-        dateOfBirth: user.dateOfBirth,
-        hasPreferences: !!user.preferences,
-        partnerId: user.partnerId,
-      });
+      // console.log('✅ Created new local user with full details:', {
+      //   id: user._id,
+      //   name: user.name,
+      //   email: user.email,
+      //   homeAddress: user.homeAddress,
+      //   city: user.city,
+      //   state: user.state,
+      //   lga: user.lga,
+      //   gender: user.gender,
+      //   dateOfBirth: user.dateOfBirth,
+      //   hasPreferences: !!user.preferences,
+      //   partnerId: user.partnerId,
+      // });
     }
 
     authUserId = user.id.toString();
@@ -294,7 +294,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
   /** ------------------ 3. Merge Guest Cart (if any) ------------------ */
   if (cart.sessionId && authUserId) {
-    console.log("🛒 Merging guest cart to authenticated user ID:", authUserId);
+    // console.log("🛒 Merging guest cart to authenticated user ID:", authUserId);
     cart.userId = new Types.ObjectId(authUserId);
     cart.sessionId = undefined;
     cart.isAbandoned = false;
@@ -343,7 +343,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       items: partnerItems,
     };
 
-    console.log("[Checkout] Partner order payload:", payload);
+    // console.log("[Checkout] Partner order payload:", payload);
     const orderRes = await axios.post(`${PARTNER_API_URL}${PARTNER_PREFIX}/orders`, payload);
     partnerOrder = orderRes.data.data;
   } catch (err: any) {

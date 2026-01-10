@@ -31,12 +31,12 @@ export const createAppointment = asyncHandler(
       consultationType,
     } = req.body;
 
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    console.log("📅 NEW APPOINTMENT REQUEST");
-    console.log("Patient ID:", req.auth?.id);
-    console.log("Doctor ID:", doctorId);
-    console.log("Scheduled At:", scheduledAt);
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    // console.log("📅 NEW APPOINTMENT REQUEST");
+    // console.log("Patient ID:", req.auth?.id);
+    // console.log("Doctor ID:", doctorId);
+    // console.log("Scheduled At:", scheduledAt);
+    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     if (!doctorId || !scheduledAt) {
       res.status(400);
@@ -50,11 +50,11 @@ export const createAppointment = asyncHandler(
       throw new Error("Doctor not found or not approved.");
     }
 
-    console.log("✅ Doctor found:", {
-      id: doctor._id,
-      name: `${doctor.firstName} ${doctor.lastName}`,
-      status: doctor.status,
-    });
+    // console.log("✅ Doctor found:", {
+    //   id: doctor._id,
+    //   name: `${doctor.firstName} ${doctor.lastName}`,
+    //   status: doctor.status,
+    // });
 
     // Get user info
     const user = await User.findById(req.auth?.id).select(
@@ -109,7 +109,7 @@ export const createAppointment = asyncHandler(
       },
     });
 
-    console.log("✅ Appointment created:", appointment._id);
+    // console.log("✅ Appointment created:", appointment._id);
 
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = user?.name || "A patient";
@@ -122,7 +122,7 @@ export const createAppointment = asyncHandler(
         doctorName,
         scheduledDate
       );
-      console.log("✅ Patient notification sent successfully");
+      // console.log("✅ Patient notification sent successfully");
     } catch (error) {
       console.error("❌ Failed to send patient notification:", error);
     }
@@ -136,12 +136,12 @@ export const createAppointment = asyncHandler(
         scheduledDate,
         reason
       );
-      console.log("✅ Doctor notification sent successfully");
+      // console.log("✅ Doctor notification sent successfully");
     } catch (error) {
       console.error("❌ Failed to send doctor notification:", error);
     }
 
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+   
 
     res.status(201).json({
       success: true,
@@ -175,13 +175,13 @@ export const getDoctorAppointments = asyncHandler(
   async (req: Request, res: Response) => {
     const doctorId = req.auth?.id;
 
-    console.log("🔍 Fetching appointments for doctor:", doctorId);
+    // console.log("🔍 Fetching appointments for doctor:", doctorId);
 
     const appointments = await Appointment.find({ doctorId })
       .populate("userId")
       .sort({ scheduledAt: 1 });
 
-    console.log("✅ Found appointments:", appointments.length);
+    // console.log("✅ Found appointments:", appointments.length);
 
     res.status(200).json({ success: true, data: appointments });
   }
@@ -208,13 +208,13 @@ export const updateAppointment = asyncHandler(
       throw new Error("Unauthorized");
     }
 
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    console.log("🔍 APPOINTMENT UPDATE");
-    console.log("User ID:", userId, "Role:", role);
-    console.log("Appointment UserID:", appointment.userId.toString());
-    console.log("Appointment DoctorID:", appointment.doctorId.toString());
-    console.log("Requested Status:", req.body.status);
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    // console.log("🔍 APPOINTMENT UPDATE");
+    // console.log("User ID:", userId, "Role:", role);
+    // console.log("Appointment UserID:", appointment.userId.toString());
+    // console.log("Appointment DoctorID:", appointment.doctorId.toString());
+    // console.log("Requested Status:", req.body.status);
+    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     // Permission checks
     if (role === "User" && appointment.userId.toString() !== userId) {
@@ -297,7 +297,7 @@ export const updateAppointment = asyncHandler(
       if (req.body.notes) updates.notes = req.body.notes;
     }
 
-    console.log("📝 Applying updates:", updates);
+    // console.log("📝 Applying updates:", updates);
 
     // Apply updates
     const updatedAppointment = (await Appointment.findByIdAndUpdate(
@@ -313,7 +313,7 @@ export const updateAppointment = asyncHandler(
       throw new Error("Failed to update appointment.");
     }
 
-    console.log("✅ Appointment updated successfully!");
+    // console.log("✅ Appointment updated successfully!");
 
     // Extract clean IDs
     const patientId = extractId(updatedAppointment.userId);
@@ -327,7 +327,7 @@ export const updateAppointment = asyncHandler(
 
     // ✅ NOTIFICATIONS: Doctor → Patient status changes
     if (role === "Doctor" && updates.status && updates.status !== oldStatus) {
-      console.log(`📤 Sending status update notification to PATIENT: ${patientId}`);
+      // console.log(`📤 Sending status update notification to PATIENT: ${patientId}`);
 
       try {
         switch (updates.status) {
@@ -367,7 +367,7 @@ export const updateAppointment = asyncHandler(
             break;
         }
 
-        console.log("✅ Patient notification sent successfully");
+        // console.log("✅ Patient notification sent successfully");
       } catch (error) {
         console.error("❌ Failed to send patient notification:", error);
       }
@@ -375,7 +375,7 @@ export const updateAppointment = asyncHandler(
 
     // ✅ NOTIFICATION: Patient cancels → Notify doctor
     if (role === "User" && updates.status === "cancelled") {
-      console.log(`📤 Sending cancellation notification to DOCTOR: ${doctorId}`);
+      // console.log(`📤 Sending cancellation notification to DOCTOR: ${doctorId}`);
 
       try {
         await NotificationService.notifyAppointmentCancelledByPatient(
@@ -384,7 +384,7 @@ export const updateAppointment = asyncHandler(
           patientName,
           updatedAppointment.scheduledAt
         );
-        console.log("✅ Doctor notification sent successfully");
+        // console.log("✅ Doctor notification sent successfully");
       } catch (error) {
         console.error("❌ Failed to send doctor notification:", error);
       }
@@ -399,7 +399,7 @@ export const updateAppointment = asyncHandler(
       const reminderTime = new Date(updatedAppointment.scheduledAt).getTime() - 15 * 60 * 1000;
       const delay = reminderTime - Date.now();
 
-      console.log(`⏰ Scheduling 15-min reminder in ${Math.floor(delay / 60000)} minutes`);
+      // console.log(`⏰ Scheduling 15-min reminder in ${Math.floor(delay / 60000)} minutes`);
 
       if (delay > 0 && delay < 7 * 24 * 60 * 60 * 1000) {
         setTimeout(async () => {
@@ -427,7 +427,7 @@ export const updateAppointment = asyncHandler(
               // Mark as sent
               await NotificationService.markNotificationSent(String(appt._id), "reminder");
 
-              console.log(`✅ Sent 15-min reminder for appointment ${appt._id}`);
+              // console.log(`✅ Sent 15-min reminder for appointment ${appt._id}`);
             }
           } catch (err) {
             console.error("❌ Failed to send reminder:", err);
@@ -436,7 +436,7 @@ export const updateAppointment = asyncHandler(
       }
     }
 
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
     res.status(200).json({ success: true, data: updatedAppointment });
   }
@@ -597,7 +597,7 @@ export const sendAppointmentReminders = async () => {
     }
 
     if (sentCount > 0) {
-      console.log(`✅ Sent ${sentCount * 2} appointment reminders`);
+      // console.log(`✅ Sent ${sentCount * 2} appointment reminders`);
     }
 
     return { success: true, count: sentCount };

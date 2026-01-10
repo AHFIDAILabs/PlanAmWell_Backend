@@ -59,7 +59,7 @@ export const registerPushToken = asyncHandler(async (req: Request, res: Response
   // Use the helper method from your User model
   await user.addExpoPushToken(token);
 
-  console.log(`[PushToken] Registered token for user ${userId}`);
+  // console.log(`[PushToken] Registered token for user ${userId}`);
   
   res.status(200).json({ 
     success: true, 
@@ -94,7 +94,7 @@ export const removePushToken = asyncHandler(async (req: Request, res: Response) 
   // Use the helper method from your User model
   await user.removeExpoPushToken(token);
 
-  console.log(`[PushToken] Removed token for user ${userId}`);
+  // console.log(`[PushToken] Removed token for user ${userId}`);
   
   res.status(200).json({ 
     success: true, 
@@ -234,7 +234,7 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
   const token = signJwt(user);
   const { token: refreshToken } = await signRefreshToken(user); // ← Generate refresh token
 
-  console.log("[Auth] User logged in:", user.email);
+  // console.log("[Auth] User logged in:", user.email);
 
   res.status(200).json({
     success: true,
@@ -292,7 +292,7 @@ export const doctorLogin = asyncHandler(async (req: Request, res: Response) => {
   const token = signJwt(doctor);
   const { token: refreshToken } = await signRefreshToken(doctor); // ← Generate refresh token
 
-  console.log("[Auth] Doctor logged in:", doctor.email);
+  // console.log("[Auth] Doctor logged in:", doctor.email);
 
   res.status(200).json({
     success: true,

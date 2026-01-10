@@ -27,7 +27,7 @@ cron.schedule("* * * * *", async () => {
       return;
     }
 
-    console.log(`⏰ [ReminderJob] Found ${upcomingAppointments.length} appointments needing reminders`);
+    // console.log(`⏰ [ReminderJob] Found ${upcomingAppointments.length} appointments needing reminders`);
 
     for (const appointment of upcomingAppointments) {
       if (!appointment.userId) {
@@ -70,17 +70,17 @@ cron.schedule("* * * * *", async () => {
           "reminder"
         );
 
-        console.log(`✅ [ReminderJob] Sent reminders for appointment ${appointment._id}`);
+        // console.log(`✅ [ReminderJob] Sent reminders for appointment ${appointment._id}`);
       } catch (notifError) {
         console.error(`❌ [ReminderJob] Failed to send reminder for appointment ${appointment._id}:`, notifError);
         // Continue to next appointment - don't let one failure stop the entire batch
       }
     }
 
-    console.log(`✅ [ReminderJob] Sent ${upcomingAppointments.length * 2} reminders (${upcomingAppointments.length} appointments)`);
+    // console.log(`✅ [ReminderJob] Sent ${upcomingAppointments.length * 2} reminders (${upcomingAppointments.length} appointments)`);
   } catch (error) {
     console.error("❌ [ReminderJob] Error:", error);
   }
 });
 
-console.log("✅ Appointment reminder cron job started (runs every minute)");
+// console.log("✅ Appointment reminder cron job started (runs every minute)");

@@ -146,7 +146,7 @@ export const updateDoctorAvailability = asyncHandler(async (req: Request, res: R
   if (!req.auth || req.auth.role !== "Doctor") {
     return res.status(403).json({ message: "Unauthorized" });
   }
-  console.log('[DoctorService] req.auth:', req.auth);
+  // console.log('[DoctorService] req.auth:', req.auth);
 
 
   const doctor = await Doctor.findById(req.auth.id);

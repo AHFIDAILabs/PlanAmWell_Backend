@@ -67,7 +67,7 @@ export const transcribeAudio = [
                 'whisper-audio'
             );
 
-            console.log('✅ Audio uploaded to Cloudinary as media:', videoUrl);
+            // console.log('✅ Audio uploaded to Cloudinary as media:', videoUrl);
 
             const transcription = await openaiWhisper.audio.transcriptions.create({
                 file: await OpenAI.toFile(req.file.buffer, 'speech.m4a'),
@@ -225,7 +225,7 @@ export const sendMessage = [
                     cloudinaryUrl: videoUrl 
                 };
 
-                console.log('✅ Voice Uploaded as Media & Transcribed:', userText);
+                // console.log('✅ Voice Uploaded as Media & Transcribed:', userText);
             }
 
             // 2. Fetch/Create Conversation

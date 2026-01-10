@@ -57,7 +57,7 @@ export const signJwt = (entity: any) => {
   if (entity.constructor?.modelName === "Admin" || 
       (entity.roles && Array.isArray(entity.roles) && entity.roles.includes("Admin"))) {
     role = "Admin";
-    console.log("🔐 [signJwt] Detected Admin user");
+    // console.log("🔐 [signJwt] Detected Admin user");
   } 
   // Check if entity has explicit role
   else if (entity.role) {
@@ -81,7 +81,7 @@ export const signJwt = (entity: any) => {
       "User",
   };
 
-  console.log("🔐 [signJwt] Generated token with payload:", payload);
+  // console.log("🔐 [signJwt] Generated token with payload:", payload);
 
   return jwt.sign(payload, process.env.JWT_SECRET!, { expiresIn: "7d" });
 };
@@ -97,7 +97,7 @@ export const signAdminJwt = (admin: any) => {
     name: `${admin.firstName || ""} ${admin.lastName || ""}`.trim() || "Admin",
   };
 
-  console.log("🔐 [signAdminJwt] Generated ADMIN token with payload:", payload);
+  // console.log("🔐 [signAdminJwt] Generated ADMIN token with payload:", payload);
 
   return jwt.sign(payload, process.env.JWT_SECRET!, { expiresIn: "7d" });
 };
@@ -163,7 +163,7 @@ export const guestAuth = async (
     
     // If no token, continue as guest
     if (!authHeader?.startsWith("Bearer ")) {
-      console.log("🔓 [guestAuth] No token provided, continuing as guest");
+      // console.log("🔓 [guestAuth] No token provided, continuing as guest");
       return next();
     }
 
@@ -172,20 +172,20 @@ export const guestAuth = async (
 
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
-      console.log("✅ [guestAuth] Token decoded:", {
-        id: decoded.id,
-        role: decoded.role,
-        isAnonymous: decoded.isAnonymous,
-      });
+      // console.log("✅ [guestAuth] Token decoded:", {
+      //   id: decoded.id,
+      //   role: decoded.role,
+      //   isAnonymous: decoded.isAnonymous,
+      // });
     } catch (err) {
-      console.log("⚠️ [guestAuth] Token verification failed, continuing as guest");
+       console.log("⚠️ [guestAuth] Token verification failed, continuing as guest");
       return next();
     }
 
     // Handle anonymous sessions
     if (decoded.isAnonymous && decoded.sessionId) {
       req.auth = { sessionId: decoded.sessionId, isAnonymous: true };
-      console.log("👤 [guestAuth] Anonymous session set");
+      // console.log("👤 [guestAuth] Anonymous session set");
       return next();
     }
 
@@ -198,7 +198,7 @@ export const guestAuth = async (
         (await Admin.findById(decoded.id).select("-password"));
 
       if (!user) {
-        console.log("⚠️ [guestAuth] User not found for ID:", decoded.id);
+        // console.log("⚠️ [guestAuth] User not found for ID:", decoded.id);
         return next();
       }
 
@@ -211,10 +211,10 @@ export const guestAuth = async (
         isAnonymous: false,
       };
 
-      console.log("✅ [guestAuth] User authenticated:", {
-        id: req.auth.id,
-        role: req.auth.role,
-      });
+      // console.log("✅ [guestAuth] User authenticated:", {
+      //   id: req.auth.id,
+      //   role: req.auth.role,
+      // });
     }
 
     next();
@@ -233,12 +233,12 @@ export const verifyToken = (
   res: Response,
   next: NextFunction
 ) => {
-  console.log("🔑 [verifyToken] Checking authentication...");
+  // console.log("🔑 [verifyToken] Checking authentication...");
 
   // Check if guestAuth already populated req.auth
   if (req.auth?.id && !req.auth.isAnonymous) {
-    console.log("✅ [verifyToken] Already authenticated via guestAuth");
-    console.log("✅ [verifyToken] req.auth:", req.auth);
+    // console.log("✅ [verifyToken] Already authenticated via guestAuth");
+    // console.log("✅ [verifyToken] req.auth:", req.auth);
     return next();
   }
 
@@ -246,7 +246,7 @@ export const verifyToken = (
   const authHeader = req.headers.authorization;
   
   if (!authHeader?.startsWith("Bearer ")) {
-    console.log("❌ [verifyToken] No Bearer token found");
+    // console.log("❌ [verifyToken] No Bearer token found");
     return res
       .status(401)
       .json({ message: "Unauthorized - No token provided" });
@@ -257,10 +257,10 @@ export const verifyToken = (
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
     
-    console.log("✅ [verifyToken] Token decoded successfully:", {
-      id: decoded.id,
-      role: decoded.role,
-    });
+    // console.log("✅ [verifyToken] Token decoded successfully:", {
+    //   id: decoded.id,
+    //   role: decoded.role,
+    // });
 
     req.auth = {
       id: decoded.id,
@@ -269,7 +269,7 @@ export const verifyToken = (
       isAnonymous: decoded.isAnonymous || false,
     };
 
-    console.log("✅ [verifyToken] req.auth set:", req.auth);
+    // console.log("✅ [verifyToken] req.auth set:", req.auth);
     next();
   } catch (err: any) {
     console.log("❌ [verifyToken] Token verification failed:", err.message);
@@ -288,12 +288,12 @@ export const verifyAdminToken = (
   res: Response,
   next: NextFunction
 ) => {
-  console.log("👑 [verifyAdminToken] Checking admin authentication...");
+  // console.log("👑 [verifyAdminToken] Checking admin authentication...");
 
   const authHeader = req.headers.authorization;
   
   if (!authHeader?.startsWith("Bearer ")) {
-    console.log("❌ [verifyAdminToken] No Bearer token found");
+    // console.log("❌ [verifyAdminToken] No Bearer token found");
     return res
       .status(401)
       .json({ message: "Unauthorized - No token provided" });
@@ -304,14 +304,14 @@ export const verifyAdminToken = (
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
     
-    console.log("✅ [verifyAdminToken] Token decoded:", {
-      id: decoded.id,
-      role: decoded.role,
-    });
+    // console.log("✅ [verifyAdminToken] Token decoded:", {
+    //   id: decoded.id,
+    //   role: decoded.role,
+    // });
 
     // ✅ Explicitly check for Admin role
     if (decoded.role !== "Admin") {
-      console.log("❌ [verifyAdminToken] User is not an Admin:", decoded.role);
+      // console.log("❌ [verifyAdminToken] User is not an Admin:", decoded.role);
       return res
         .status(403)
         .json({ message: "Forbidden - Admin access required" });
@@ -324,7 +324,7 @@ export const verifyAdminToken = (
       isAnonymous: false,
     };
 
-    console.log("✅ [verifyAdminToken] Admin authenticated:", req.auth);
+    // console.log("✅ [verifyAdminToken] Admin authenticated:", req.auth);
     next();
   } catch (err: any) {
     console.log("❌ [verifyAdminToken] Token verification failed:", err.message);
@@ -340,9 +340,9 @@ export const verifyAdminToken = (
 
 export const authorize = (...allowedRoles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
-    console.log("🎭 [authorize] Checking role authorization...");
-    console.log("🎭 [authorize] req.auth:", req.auth);
-    console.log("🎭 [authorize] allowedRoles:", allowedRoles);
+    // console.log("🎭 [authorize] Checking role authorization...");
+    // console.log("🎭 [authorize] req.auth:", req.auth);
+    // console.log("🎭 [authorize] allowedRoles:", allowedRoles);
 
     if (!req.auth || !req.auth.role) {
       console.warn("❌ [authorize] No auth or role found");
@@ -361,7 +361,7 @@ export const authorize = (...allowedRoles: string[]) => {
         .json({ message: "Forbidden - Insufficient permissions" });
     }
 
-    console.log("✅ [authorize] Role authorized, proceeding...");
+    // console.log("✅ [authorize] Role authorized, proceeding...");
     next();
   };
 };
@@ -397,11 +397,11 @@ export const hydrateUser = async (
   next: NextFunction
 ) => {
   try {
-    console.log("🧬 [hydrateUser] Hydrating user...");
-    console.log("🧬 [hydrateUser] req.auth:", req.auth);
+    // console.log("🧬 [hydrateUser] Hydrating user...");
+    // console.log("🧬 [hydrateUser] req.auth:", req.auth);
 
     if (!req.auth?.id) {
-      console.log("❌ [hydrateUser] No auth ID found");
+      // console.log("❌ [hydrateUser] No auth ID found");
       return res
         .status(401)
         .json({ message: "Unauthorized - Not authenticated" });
@@ -414,13 +414,13 @@ export const hydrateUser = async (
       (await Admin.findById(req.auth.id).select("-password").lean());
 
     if (!entity) {
-      console.log("❌ [hydrateUser] Entity not found for ID:", req.auth.id);
+      // console.log("❌ [hydrateUser] Entity not found for ID:", req.auth.id);
       return res
         .status(404)
         .json({ message: "User/Doctor/Admin not found" });
     }
 
-    console.log("✅ [hydrateUser] Entity found");
+    // console.log("✅ [hydrateUser] Entity found");
 
     req.user = entity;
     next();

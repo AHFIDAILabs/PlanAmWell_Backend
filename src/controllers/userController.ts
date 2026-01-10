@@ -62,8 +62,8 @@ export const syncUserWithPartner = async (localUser: IUser) => {
 
 // ------------------ UPDATE User ------------------
 export const updateUser = asyncHandler(async (req: Request, res: Response) => {
-  console.log("--- UPDATE PROFILE REQUEST RECEIVED ---");
-  console.log("[Update] Starting update for User ID:", req.params.id, ". File present:", !!req.file);
+  // console.log("--- UPDATE PROFILE REQUEST RECEIVED ---");
+  // console.log("[Update] Starting update for User ID:", req.params.id, ". File present:", !!req.file);
 
   const user = await User.findById(req.params.id).populate("userImage");
   
@@ -87,7 +87,7 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
         "user-profiles"
       );
       
-      console.log("[Image] Uploaded new image. URL:", secure_url);
+      // console.log("[Image] Uploaded new image. URL:", secure_url);
 
       // Delete old image from Cloudinary if exists
       if (user.userImage) {
@@ -106,11 +106,11 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
 
         if (oldImageCldId) {
           await deleteFromCloudinary(oldImageCldId);
-          console.log("[Image] Deleted old Cloudinary image:", oldImageCldId);
+          // console.log("[Image] Deleted old Cloudinary image:", oldImageCldId);
         }
         
         await Image.findByIdAndDelete(oldImageId);
-        console.log("[Image] Deleted old image document:", oldImageId);
+        // console.log("[Image] Deleted old image document:", oldImageId);
       }
 
       // Create new image document
@@ -120,7 +120,7 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
         uploadedBy: user._id,
       });
 
-      console.log("[Image] Created new Image document ID:", newImage._id);
+      // console.log("[Image] Created new Image document ID:", newImage._id);
 
       // Update user with new image reference
       user.userImage = newImage._id as mongoose.Types.ObjectId;
@@ -151,18 +151,18 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
     }
   });
 
-  console.log("[Update] Saving user document...");
+  // console.log("[Update] Saving user document...");
   await user.save();
-  console.log("[Update] User document saved.");
+  // console.log("[Update] User document saved.");
 
   // ✅ CRITICAL: Populate userImage before sending response
   await user.populate("userImage");
 
-  console.log("[Response] Final Image URL sent:", 
-    user.userImage && typeof user.userImage === 'object' 
-      ? (user.userImage as any).imageUrl 
-      : 'Not populated'
-  );
+  // console.log("[Response] Final Image URL sent:", 
+  //   user.userImage && typeof user.userImage === 'object' 
+  //     ? (user.userImage as any).imageUrl 
+  //     : 'Not populated'
+  // );
 
   res.status(200).json({ 
     success: true, 
@@ -226,7 +226,7 @@ export const deleteUserImage = asyncHandler(async (req: Request, res: Response) 
 
 /** ------------------ GET USER PROFILE ------------------ */
 export const getUserProfile = asyncHandler(async (req: Request, res: Response) => {
-  console.log("📋 Fetching user profile for:", req.auth?.id);
+  // console.log("📋 Fetching user profile for:", req.auth?.id);
   
   const user = await User.findById(req.auth?.id)
     .populate("userImage") // ✅ POPULATE userImage
@@ -237,12 +237,12 @@ export const getUserProfile = asyncHandler(async (req: Request, res: Response) =
     throw new Error("User not found");
   }
 
-  console.log("✅ User profile found");
-  console.log("🖼️ UserImage populated:", {
-    exists: !!user.userImage,
-    type: typeof user.userImage,
-    isPopulated: user.userImage && typeof user.userImage === 'object' && '_id' in user.userImage
-  });
+  // console.log("✅ User profile found");
+  // console.log("🖼️ UserImage populated:", {
+  //   exists: !!user.userImage,
+  //   type: typeof user.userImage,
+  //   isPopulated: user.userImage && typeof user.userImage === 'object' && '_id' in user.userImage
+  // });
 
   res.status(200).json({
     success: true,

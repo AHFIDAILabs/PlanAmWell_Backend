@@ -70,7 +70,7 @@ const extractProductKeywords = (message: string): string => {
     
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
     
-    console.log(`📝 WhatsApp - Original: "${message}" → Extracted: "${cleaned}"`);
+    // console.log(`📝 WhatsApp - Original: "${message}" → Extracted: "${cleaned}"`);
     
     return cleaned;
 };
@@ -110,7 +110,7 @@ const detectIntent = (message: string): Intent => {
 const searchProducts = async (query: string, limit: number = 5): Promise<any[]> => {
     try {
         if (!query || query.trim() === '') {
-            console.log('⚠️ Empty search query');
+            // console.log('⚠️ Empty search query');
             return [];
         }
 
@@ -122,11 +122,11 @@ const searchProducts = async (query: string, limit: number = 5): Promise<any[]> 
         
         const searchTerms = cleanedQuery.split(' ').filter(term => term.length > 2);
         
-        console.log(`🔍 WhatsApp - Searching for: "${cleanedQuery}"`);
-        console.log(`📋 Search terms: [${searchTerms.join(', ')}]`);
+        // console.log(`🔍 WhatsApp - Searching for: "${cleanedQuery}"`);
+        // console.log(`📋 Search terms: [${searchTerms.join(', ')}]`);
         
         if (searchTerms.length === 0) {
-            console.log('⚠️ No valid search terms');
+            // console.log('⚠️ No valid search terms');
             return [];
         }
 
@@ -159,9 +159,9 @@ const searchProducts = async (query: string, limit: number = 5): Promise<any[]> 
         .limit(limit)
         .lean();
         
-        console.log(`✅ WhatsApp - Found ${products.length} products`);
+        // console.log(`✅ WhatsApp - Found ${products.length} products`);
         if (products.length > 0) {
-            console.log(`📦 Products: ${products.map(p => p.name).join(', ')}`);
+            // console.log(`📦 Products: ${products.map(p => p.name).join(', ')}`);
         }
         
         return products;
@@ -333,7 +333,7 @@ const saveConversation = async (
         conversation.messages.push(botMsg);
         
         await conversation.save();
-        console.log(`✅ Conversation saved for ${phoneNumber}`);
+        // console.log(`✅ Conversation saved for ${phoneNumber}`);
     } catch (error) {
         console.error('❌ Error saving conversation:', error);
     }
@@ -498,7 +498,7 @@ export const verifyWebhook = (req: Request, res: Response): void => {
     // console.log('🔍 Webhook verification attempt:', { mode, token: token?.substring(0, 10) + '...' });
 
     if (mode === 'subscribe' && token === WEBHOOK_VERIFY_TOKEN) {
-        console.log('✅ Webhook verified successfully');
+        // console.log('✅ Webhook verified successfully');
         res.status(200).send(challenge);
     } else {
         console.error('❌ Webhook verification failed');
@@ -525,7 +525,7 @@ const verifySignature = (payload: string, signature: string): boolean => {
             Buffer.from(expectedSignature)
         );
 
-        console.log('🔐 Signature verification:', isValid ? '✅ Valid' : '❌ Invalid');
+        // console.log('🔐 Signature verification:', isValid ? '✅ Valid' : '❌ Invalid');
         return isValid;
     } catch (error) {
         console.error('❌ Signature verification error:', error);
@@ -538,7 +538,7 @@ export const handleMetaWebhook = async (req: Request, res: Response): Promise<vo
     try {
         const body = req.body;
 
-        console.log('📨 Received webhook:', JSON.stringify(body, null, 2));
+        // console.log('📨 Received webhook:', JSON.stringify(body, null, 2));
 
         // Verify webhook signature for security
         const signature = req.headers['x-hub-signature-256'] as string;
@@ -568,15 +568,15 @@ export const handleMetaWebhook = async (req: Request, res: Response): Promise<vo
                 const messageType = message.type;
                 const messageId = message.id;
 
-                console.log(`📱 WhatsApp message received:`);
-                console.log(`   From: ${from}`);
-                console.log(`   Type: ${messageType}`);
-                console.log(`   Body: ${messageBody}`);
-                console.log(`   ID: ${messageId}`);
+                // console.log(`📱 WhatsApp message received:`);
+                // console.log(`   From: ${from}`);
+                // console.log(`   Type: ${messageType}`);
+                // console.log(`   Body: ${messageBody}`);
+                // console.log(`   ID: ${messageId}`);
 
                 // Only process text messages
                 if (messageType !== 'text') {
-                    console.log(`⚠️ Unsupported message type: ${messageType}`);
+                    // console.log(`⚠️ Unsupported message type: ${messageType}`);
                     res.sendStatus(200);
                     return;
                 }
@@ -611,15 +611,16 @@ export const handleMetaWebhook = async (req: Request, res: Response): Promise<vo
                 // Send response back via Meta API
                 await sendMetaWhatsAppMessage(from, responseText);
 
-                console.log(`✅ Response sent to ${from}`);
+                // console.log(`✅ Response sent to ${from}`);
             }
 
             // Check for message status updates
             const statuses = value?.statuses;
             if (statuses && statuses[0]) {
                 const status = statuses[0];
-                console.log(`📊 Message status update:`, status);
+                // console.log(`📊 Message status update:`, status);
                 // You can track delivery, read receipts, etc.
+
             }
         }
 
@@ -667,7 +668,7 @@ const sendMetaWhatsAppMessage = async (to: string, message: string): Promise<any
             }
         );
 
-        console.log('✅ Meta message sent successfully:', response.data);
+        // console.log('✅ Meta message sent successfully:', response.data);
         return response.data;
     } catch (error: any) {
         console.error('❌ Meta send error:', error.response?.data || error.message);
@@ -704,7 +705,7 @@ export const sendMetaWhatsAppImage = async (
             }
         );
 
-        console.log('✅ Image sent successfully');
+        // console.log('✅ Image sent successfully');
     } catch (error: any) {
         console.error('❌ Error sending image:', error.response?.data || error.message);
         throw error;
@@ -749,7 +750,7 @@ export const sendMetaInteractiveButtons = async (
             }
         );
 
-        console.log('✅ Interactive buttons sent successfully');
+        // console.log('✅ Interactive buttons sent successfully');
     } catch (error: any) {
         console.error('❌ Error sending buttons:', error.response?.data || error.message);
         throw error;
@@ -797,7 +798,7 @@ export const sendMetaListMessage = async (
             }
         );
 
-        console.log('✅ List message sent successfully');
+        // console.log('✅ List message sent successfully');
     } catch (error: any) {
         console.error('❌ Error sending list:', error.response?.data || error.message);
         throw error;

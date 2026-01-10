@@ -30,12 +30,12 @@ const notificationSchema = new Schema<INotification>(
     },
     userType: {
       type: String,
-      enum: ["User", "Doctor"],
+      enum: ["User", "Doctor", "Admin"],
       required: true,
     },
     type: {
       type: String,
-      enum: ["supplement", "order", "appointment", "article", "system"],
+      enum: ["supplement", "order", "appointment", "article", "system", "call_ended", "comment_flagged"],
       required: true,
     },
     title: { type: String, required: true },
@@ -46,6 +46,11 @@ const notificationSchema = new Schema<INotification>(
       appointmentId: String,
       articleId: String,
       time: String,
+      commentId: String,
+      reason: String,
+      authorId: String,
+      authorUsername: String,
+      contentPreview: String,
     },
   },
   { timestamps: true }

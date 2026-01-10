@@ -22,7 +22,7 @@ export async function sendPushNotification(
     }
 
     if (!user || !user.expoPushTokens?.length) {
-      console.log(`[PushNotification] No tokens found for user ${userId}`);
+      // console.log(`[PushNotification] No tokens found for user ${userId}`);
       return;
     }
 
@@ -37,14 +37,14 @@ export async function sendPushNotification(
       }));
 
     if (!messages.length) {
-      console.log(`[PushNotification] No valid Expo tokens for user ${userId}`);
+      // console.log(`[PushNotification] No valid Expo tokens for user ${userId}`);
       return;
     }
 
     for (const chunk of expo.chunkPushNotifications(messages)) {
       try {
         const tickets = await expo.sendPushNotificationsAsync(chunk);
-        console.log(`[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`);
+        // console.log(`[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`);
       } catch (err) {
         console.error("[PushNotification] Error sending push notifications:", err);
       }
@@ -83,11 +83,11 @@ export const createNotificationForUser = async (
       isRead: false,
     });
 
-    console.log(`💾 Notification created in DB for ${userType} ${userId}:`, {
-      _id: notification._id,
-      title: notification.title,
-      type: notification.type,
-    });
+    // console.log(`💾 Notification created in DB for ${userType} ${userId}:`, {
+    //   _id: notification._id,
+    //   title: notification.title,
+    //   type: notification.type,
+    // });
 
     // ✅ Convert to plain object for Socket.IO emission
     const notificationObject = {
@@ -104,14 +104,14 @@ export const createNotificationForUser = async (
 
     // ✅ CRITICAL FIX: Emit to correct user (convert to string to match socket room format)
     const targetUserId = userId.toString();
-    console.log(`📡 Emitting notification to user: ${targetUserId}`);
+    // console.log(`📡 Emitting notification to user: ${targetUserId}`);
     const emitted = emitNotification(targetUserId, notificationObject);
     
-    if (emitted) {
-      console.log(`✅ Real-time notification sent to ${userType} ${targetUserId}`);
-    } else {
-      console.log(`⚠️ ${userType} ${targetUserId} not connected - notification saved in DB`);
-    }
+    // if (emitted) {
+    //   console.log(`✅ Real-time notification sent to ${userType} ${targetUserId}`);
+    // } else {
+    //   console.log(`⚠️ ${userType} ${targetUserId} not connected - notification saved in DB`);
+    // }
 
     // ✅ Send push notification (non-blocking)
     sendPushNotification(targetUserId, notification).catch(console.error);

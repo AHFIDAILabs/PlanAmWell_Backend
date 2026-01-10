@@ -54,51 +54,53 @@ advocacyRouter.get("/:slug", getArticleBySlug);
 advocacyRouter.post("/:id/like", likeArticle);
 
 // --------- Logging wrapper ---------
-const createArticleWithLogging = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  try {
-    console.log("\n[createArticleWithLogging] ---- START ----");
+// const createArticleWithLogging = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+//   try {
+//     console.log("\n[createArticleWithLogging] ---- START ----");
 
-    // Log headers
-    console.log("[createArticleWithLogging] Headers:", req.headers);
+//     // Log headers
+//     console.log("[createArticleWithLogging] Headers:", req.headers);
 
-    // Log auth
-    console.log("[createArticleWithLogging] req.auth:", req.auth);
-    console.log("[createArticleWithLogging] req.user:", req.user);
+//     // Log auth
+//     console.log("[createArticleWithLogging] req.auth:", req.auth);
+//     console.log("[createArticleWithLogging] req.user:", req.user);
 
-    // Log body fields
-    console.log("[createArticleWithLogging] req.body:", req.body);
+//     // Log body fields
+//     console.log("[createArticleWithLogging] req.body:", req.body);
 
-    // Log file info
-    if (req.file) {
-      console.log("[createArticleWithLogging] Uploaded file:", {
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-      });
-    } else {
-      console.log("[createArticleWithLogging] No file uploaded");
-    }
+//     // Log file info
+//     if (req.file) {
+//       console.log("[createArticleWithLogging] Uploaded file:", {
+//         originalname: req.file.originalname,
+//         mimetype: req.file.mimetype,
+//         size: req.file.size,
+//       });
+//     } else {
+//       console.log("[createArticleWithLogging] No file uploaded");
+//     }
 
-    // Call original controller
-    await createArticle(req, res, next);
+//     // Call original controller
+//     await createArticle(req, res, next);
 
-    console.log("[createArticleWithLogging] ---- END ----\n");
-  } catch (err) {
-    console.error("[createArticleWithLogging] Error:", err);
-    next(err);
-  }
-};
+//     console.log("[createArticleWithLogging] ---- END ----\n");
+//   } catch (err) {
+//     console.error("[createArticleWithLogging] Error:", err);
+//     next(err);
+//   }
+// };
 
 // =====================================================
 // ADMIN ROUTES (Protected)
 // =====================================================
+
+advocacyRouter.post("",)
 advocacyRouter.post(
   "/admin",
   guestAuth,
   verifyToken,
   authorize("Admin"),
   upload.single("featuredImage"),
-  createArticleWithLogging
+  createArticle
 );
 advocacyRouter.put("/admin/:id", guestAuth, verifyToken, authorize("Admin"), upload.single("featuredImage"), updateArticle);
 advocacyRouter.delete("/admin/:id", guestAuth, verifyToken, authorize("Admin"), deleteArticle);

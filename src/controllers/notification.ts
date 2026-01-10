@@ -12,7 +12,7 @@ export const getNotifications = async (req: Request, res: Response) => {
     const filter = (req.query.filter as string) || "all";
     const userId = req.auth!.id;
 
-    console.log("🔍 Fetching notifications for:", userId, "filter:", filter);
+    // console.log("🔍 Fetching notifications for:", userId, "filter:", filter);
 
     const query: any = { userId };
     if (filter === "unread") query.isRead = false;
@@ -21,7 +21,7 @@ export const getNotifications = async (req: Request, res: Response) => {
       .sort({ createdAt: -1 })
       .limit(50);
 
-    console.log("✅ Found notifications:", notifications.length);
+    // console.log("✅ Found notifications:", notifications.length);
 
     res.json({ success: true, data: notifications });
   } catch (error: any) {

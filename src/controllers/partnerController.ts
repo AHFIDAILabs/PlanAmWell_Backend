@@ -24,14 +24,14 @@ interface AuthRequest extends Request {
  */
 export const createPartner = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    console.log("📥 Received request body:", req.body);
-    console.log("📥 Received file:", req.file);
-    console.log("🔐 req.auth:", req.auth);
+    // console.log("📥 Received request body:", req.body);
+    // console.log("📥 Received file:", req.file);
+    // console.log("🔐 req.auth:", req.auth);
     
     // ✅ Get admin ID from req.auth (set by verifyAdminToken middleware)
     const adminId = req.auth?.id;
     
-    console.log("🆔 Admin ID resolved to:", adminId);
+    // console.log("🆔 Admin ID resolved to:", adminId);
     
     if (!adminId) {
       res.status(401).json({
@@ -76,7 +76,7 @@ export const createPartner = async (req: AuthRequest, res: Response): Promise<vo
       createdBy: adminId,
     });
 
-    console.log("✅ Partner created successfully:", partner._id);
+    // console.log("✅ Partner created successfully:", partner._id);
 
     res.status(201).json({
       success: true,

@@ -42,8 +42,11 @@ const UserSchema = new Schema<IUser>(
     state: String,
     lga: String,
     userImage: { type: Schema.Types.ObjectId, ref: "Image" },
-    roles: { type: [String], default: ["User"] },
-    isAnonymous: { type: Boolean, default: false },
+     roles: { 
+      type: [String], // ✅ Changed to array
+      enum: ["User", "Admin", "Doctor"], 
+      default: ["User"] // ✅ Changed to array
+    },
     verified: { type: Boolean, default: false },
     preferences: { type: Object, default: {} },
     partnerId: { type: String },

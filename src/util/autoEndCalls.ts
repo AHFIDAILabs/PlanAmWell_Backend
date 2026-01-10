@@ -25,7 +25,7 @@ export const autoEndExpiredCalls = async () => {
       .populate('doctorId', 'firstName lastName')
       .populate('userId', 'name userImage');
 
-    console.log(`🔍 [AutoEnd] Checking ${activeCalls.length} active calls for auto-end...`);
+    // console.log(`🔍 [AutoEnd] Checking ${activeCalls.length} active calls for auto-end...`);
 
     let endedCount = 0;
 
@@ -40,7 +40,7 @@ export const autoEndExpiredCalls = async () => {
       );
 
       if (now > expectedEndTime) {
-        console.log(`⏰ [AutoEnd] Auto-ending expired call for appointment ${appointment._id}`);
+        // console.log(`⏰ [AutoEnd] Auto-ending expired call for appointment ${appointment._id}`);
 
         const callStartTime = appointment.callStartedAt || appointment.scheduledAt;
         const actualDuration = Math.floor((now.getTime() - new Date(callStartTime).getTime()) / 1000);
@@ -78,7 +78,7 @@ export const autoEndExpiredCalls = async () => {
             actualDuration
           );
 
-          console.log(`✅ [AutoEnd] Auto-ended call and notified both parties`);
+          // console.log(`✅ [AutoEnd] Auto-ended call and notified both parties`);
         } catch (notifError) {
           console.error('[AutoEnd] Failed to send auto-end notifications:', notifError);
         }
@@ -132,7 +132,7 @@ export const sendCallExpiryWarnings = async () => {
 
       // Send warning if 10 minutes or less remaining
       if (minutesUntilExpiry > 0 && minutesUntilExpiry <= 10) {
-        console.log(`⚠️ [ExpiryWarning] Sending expiry warning for appointment ${appointment._id}`);
+        // console.log(`⚠️ [ExpiryWarning] Sending expiry warning for appointment ${appointment._id}`);
 
         const doctorId = extractId(appointment.doctorId);
         const patientId = extractId(appointment.userId);

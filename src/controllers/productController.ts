@@ -16,7 +16,7 @@ export const fetchProductsFromAPI = async (): Promise<IProduct[]> => {
 try {
   const response = await axios.get(url);
   const apiProducts = response.data.data;
-  console.log("[Products] Fetched from API:", apiProducts.length);
+  // console.log("[Products] Fetched from API:", apiProducts.length);
   return apiProducts.map((p: any) => ({
     partnerId: p.id,
     partnerProductId: p.id,
@@ -49,12 +49,12 @@ export const getProducts = asyncHandler(async (req: Request, res: Response) => {
   let products = await Product.find({ partnerProductId: { $exists: true } })
   .skip(skip)
   .limit(limit);
-  console.log(`[Products] Products in DB: ${products.length}`);
+  // console.log(`[Products] Products in DB: ${products.length}`);
 
 if (!products.length) {
-  console.log("[Products] DB empty. Fetching from partner API...");
+  // console.log("[Products] DB empty. Fetching from partner API...");
   const apiProducts = await fetchProductsFromAPI();
-  console.log("[Products] Fetched from API:", apiProducts.length);
+  // console.log("[Products] Fetched from API:", apiProducts.length);
 
   if (apiProducts.length > 0) {
     const bulkOps = apiProducts.map((p) => ({
@@ -66,14 +66,14 @@ if (!products.length) {
     }));
 
     await Product.bulkWrite(bulkOps);
-    console.log(`[Products] Upserted ${apiProducts.length} products.`);
+    // console.log(`[Products] Upserted ${apiProducts.length} products.`);
 
     // ✅ Re-query DB
     products = await Product.find({ partnerId: { $exists: true } })
       .skip(skip)
       .limit(limit);
 
-    console.log(`[Products] Products after fetch: ${products.length}`);
+    // console.log(`[Products] Products after fetch: ${products.length}`);
   }
 }
   res.status(200).json({ success: true, data: products, page, limit });
@@ -139,7 +139,7 @@ export const syncProducts = asyncHandler(async (req: Request, res: Response) => 
     }));
 
     await Product.bulkWrite(bulkOps);
-    console.log(`[Products] Synced ${products.length} products from partner API.`);
+    // console.log(`[Products] Synced ${products.length} products from partner API.`);
 
     res.status(200).json({
       success: true,
