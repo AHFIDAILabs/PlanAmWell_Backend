@@ -457,15 +457,51 @@ export const getAdvocacyStats = asyncHandler(async (req: Request, res: Response)
 // Get /api/v1/advocacy/:id/stats - Get an article's statistics
 export const getArticleStats = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const article = await AdvocacyArticle.findById(id).select("views likes");
+
+  const article = await AdvocacyArticle.findById(id)
+    .select(
+      "title views likes shares partner category tags referrers dailyViews topCountries topDevices"
+    )
+    .lean();
+
   if (!article) {
     return res.status(404).json({
       success: false,
       message: "Article not found",
     });
   }
+
+  // 👉 Fetch comments
+ const comments = await Comment.find({
+  articleId: id,
+  parentCommentId: null,
+})
+  .sort({ createdAt: -1 })
+  .populate("author.userId", "name email")
+  .lean();
+
+const formattedComments = comments.map((c) => ({
+  _id: c._id.toString(),
+  content: c.content,
+  likes: c.likes,
+  status: c.status,               // ✅ Include status
+  flagReason: c.status === "flagged" ? c.flagReason : undefined, // ✅ optional
+  createdAt: c.createdAt,
+  author: {
+    name: c.author?.name,
+    email: c.author?.email,
+    userId: c.author?.userId?.toString(),
+  },
+}));
+
   res.status(200).json({
     success: true,
-    data: { article },
+    data: {
+      article: {
+        ...article,
+        comments: formattedComments,
+        commentCount: formattedComments.length,
+      },
+    },
   });
 });

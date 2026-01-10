@@ -12,12 +12,15 @@ export interface IComment extends Document {
   content: string;
   parentCommentId?: Types.ObjectId; // For replies
   status: "pending" | "approved" | "rejected" | "flagged";
+  flagReason?: string;
   likes: number;
   likedBy: Types.ObjectId[]; // Track who liked
   isEdited: boolean;
   editedAt?: Date;
   replies: Types.ObjectId[]; // Reference to child comments
   depth: number; // 0 for top-level, 1 for first reply, etc.
+    createdAt: Date;
+  updatedAt: Date;
 }
 
 const CommentSchema = new Schema<IComment>(
@@ -66,6 +69,11 @@ const CommentSchema = new Schema<IComment>(
       default: "approved", // Auto-approve for registered users, can be changed
       index: true,
     },
+    flagReason: {
+  type: String,
+  trim: true,
+  default: null,
+},
     likes: {
       type: Number,
       default: 0,
