@@ -119,7 +119,7 @@ const extractProductKeywords = (message: string): string => {
     
     // Remove common purchase intent phrases
     const purchasePhrases = [
-        'i want to buy', 'i need to buy', 'i want to purchase', 'i need to purchase',
+        'i want to buy', 'i need to buy', 'i want to purchase', 'i need to purchase', 'i would like to order', 
         'i want to order', 'i need to order', 'i would like to buy', 'i would like to purchase',
         'can i buy', 'can i get', 'can i order', 'can i purchase',
         'i want', 'i need', 'i require', 'get me', 'buy me',
@@ -164,8 +164,8 @@ const inferCategory = (query: string): string | null => {
     
     // Category mapping for common reproductive health products
     const categoryMap: { [key: string]: string[] } = {
-        'contraception': ['condom', 'contraceptive', 'birth control', 'protection', 'safe sex'],
-        'emergency contraception': ['postinor', 'morning after', 'emergency pill', 'plan b'],
+        'contraceptive': ['condom', 'contraceptive', 'birth control', 'protection', 'safe sex'],
+        'emergency contraceptive': ['postinor', 'morning after', 'emergency pill', 'plan b'],
         'fertility': ['ovulation', 'pregnancy test', 'fertility monitor', 'conception'],
         'menstrual care': ['pad', 'tampon', 'menstrual cup', 'period', 'sanitary'],
         'vitamins': ['prenatal', 'folic acid', 'supplement', 'vitamin'],
