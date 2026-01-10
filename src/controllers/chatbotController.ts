@@ -303,6 +303,10 @@ export const sendMessage = [
             };
             
             conversation.messages.push(userMsg, botMsg);
+            conversation.lastActivity = new Date();
+            if (conversation.messages.length > 50) {
+                conversation.messages = conversation.messages.slice(-50);
+            }
             await conversation.save();
 
             // 5. Final JSON Response
@@ -328,15 +332,63 @@ export const sendMessage = [
 export const getConversationHistory = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { sessionId } = req.params;
-    if(!sessionId) return res.status(400).json({ success:false, message:'SessionId is required' });
+    const userId = req.query.userId as string | undefined; // Type assertion
 
-    const conversation = await ChatConversation.findOne({ sessionId }).populate('messages.products');
-    if(!conversation) return res.status(404).json({ success:false, message:'Conversation not found' });
+    if (!sessionId && !userId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'SessionId or UserId is required' 
+      });
+    }
 
-    return res.status(200).json({ success:true, conversation });
-  } catch (error:any){
-    console.error(error);
-    return res.status(500).json({ success:false, message:'Error fetching conversation history', error:error.message });
+    // Build query based on what's available
+    let query: any = {};
+    
+    if (userId) {
+      // For registered users: prioritize userId
+      // Validate userId is a valid ObjectId before converting
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Invalid userId format' 
+        });
+      }
+      
+      query = { 
+        userId: new mongoose.Types.ObjectId(userId),
+        isActive: true 
+      };
+    } else if (sessionId) {
+      // For guest users: use sessionId
+      query = { 
+        sessionId,
+        isActive: true 
+      };
+    }
+
+    const conversation = await ChatConversation.findOne(query)
+      .sort({ lastActivity: -1 }) // Get most recent conversation
+      .populate('messages.products')
+      .lean();
+    
+    if (!conversation) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Conversation not found' 
+      });
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      conversation 
+    });
+  } catch (error: any) {
+    console.error('Error fetching conversation history:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching conversation history', 
+      error: error.message 
+    });
   }
 };
 
