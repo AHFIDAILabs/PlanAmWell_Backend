@@ -1,11 +1,12 @@
-// controllers/videoCallController.ts - UPGRADED WITH ATOMIC OPERATIONS
+// controllers/videoCallController.ts - UPDATED WITH PUSH NOTIFICATION RINGTONE
 import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import mongoose from "mongoose";
 import { RtcTokenBuilder, RtcRole } from "agora-access-token";
 import { Appointment } from "../models/appointment";
 import { NotificationService } from "../services/NotificationService";
-import { emitRejoinCallAlert, emitCallEnded } from "../index";
+import { emitRejoinCallAlert, emitCallEnded, emitCallRinging } from "../index";
+import { sendIncomingCallPushNotification } from "../util/sendPushNotification";
 
 const AGORA_APP_ID = process.env.AGORA_APP_ID!;
 const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE!;
@@ -27,7 +28,7 @@ const generateUid = (id: string): number => {
 };
 
 /**
- * ✅ Generate / Join Video Call Token (ATOMIC OPERATIONS)
+ * ✅ Generate / Join Video Call Token (WITH PUSH NOTIFICATION RINGTONE)
  */
 export const generateVideoToken = asyncHandler(
   async (req: Request, res: Response) => {
@@ -52,7 +53,7 @@ export const generateVideoToken = asyncHandler(
 
     let appointment = await Appointment.findById(appointmentId)
       .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
-      .populate("userId", "name userImage email phone");
+      .populate("userId", "name userImage email phone firstName lastName");
 
     if (!appointment) {
       return res.status(404).json({
@@ -103,14 +104,14 @@ export const generateVideoToken = asyncHandler(
     const participantObjectId = new mongoose.Types.ObjectId(userId);
     const uid = generateUid(userId);
 
-    const notifyingUserId = isDoctor ? patientId : doctorId;
-    const currentUserName = isDoctor
+    const recipientUserId = isDoctor ? patientId : doctorId;
+    const callerName = isDoctor
       ? `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`
       : ((appointment.userId as any).firstName || (appointment.userId as any).name);
 
     // ✅ ATOMIC OPERATION: Try to initiate call (prevents race condition)
     if (!appointment.callStatus || appointment.callStatus === "idle") {
-      // console.log(`📞 ${role} attempting to initiate call for appointment ${appointmentId}`);
+      console.log(`📞 ${role} attempting to initiate call for appointment ${appointmentId}`);
 
       const updatedAppointment = await Appointment.findOneAndUpdate(
         {
@@ -132,34 +133,54 @@ export const generateVideoToken = asyncHandler(
         { new: true }
       )
         .populate("doctorId", "firstName lastName doctorImage")
-        .populate("userId", "name userImage");
+        .populate("userId", "name userImage firstName lastName");
 
       if (updatedAppointment) {
         appointment = updatedAppointment;
-        // console.log(`✅ ${role} successfully initiated call`);
+        console.log(`✅ ${role} successfully initiated call`);
 
-        // ✅ NOTIFICATION: Call starting
+        // ✅ CRITICAL: Send push notification to make recipient's phone ring
         try {
           const recipientType = isDoctor ? "User" : "Doctor";
+          const recipientData = isDoctor ? appointment.userId : appointment.doctorId;
+          
+          const callerImage = isDoctor 
+            ? (appointment.doctorId as any).doctorImage 
+            : (appointment.userId as any).userImage;
 
-          await NotificationService.notifyCallStarted(
-            notifyingUserId,
-            recipientType,
-            appointmentId.toString(),
-            currentUserName
+          // Send push notification that will trigger native ringtone
+          await sendIncomingCallPushNotification(
+            recipientUserId,
+            {
+              appointmentId: appointmentId.toString(),
+              callerName,
+              callerImage,
+              callerType: role,
+              channelName: appointment.callChannelName || `appt_${appointmentId}`,
+            }
           );
 
-          emitRejoinCallAlert(notifyingUserId, appointmentId.toString(), currentUserName);
+          console.log(`🔔 Push notification sent to ${recipientType} ${recipientUserId} - phone should ring`);
 
-          // console.log(`📨 Notification sent to ${isDoctor ? "PATIENT" : "DOCTOR"} (${notifyingUserId})`);
+          // Also emit socket event for in-app notification
+          emitCallRinging(appointmentId.toString(), role);
+
+          // Send in-app notification
+          await NotificationService.notifyCallStarted(
+            recipientUserId,
+            recipientType,
+            appointmentId.toString(),
+            callerName
+          );
+
         } catch (notifError) {
-          console.error("⚠️ Failed to send notification:", notifError);
+          console.error("⚠️ Failed to send call notification:", notifError);
         }
       } else {
         // Someone else initiated - reload appointment
         appointment = await Appointment.findById(appointmentId)
-          .populate("doctorId", "firstName lastName")
-          .populate("userId", "name");
+          .populate("doctorId", "firstName lastName doctorImage")
+          .populate("userId", "name userImage firstName lastName");
 
         if (!appointment) {
           return res.status(404).json({
@@ -168,7 +189,7 @@ export const generateVideoToken = asyncHandler(
           });
         }
 
-        // console.log(`🔄 ${role} joining call initiated by ${appointment.callInitiatedBy}`);
+        console.log(`🔄 ${role} joining call initiated by ${appointment.callInitiatedBy}`);
       }
     }
 
@@ -177,7 +198,7 @@ export const generateVideoToken = asyncHandler(
       appointment.callStatus === "ringing" &&
       !appointment.callParticipants.some((id) => id.equals(participantObjectId))
     ) {
-      // console.log(`✅ ${role} is second participant - transitioning to in-progress`);
+      console.log(`✅ ${role} is second participant - transitioning to in-progress`);
 
       if (!appointment.agoraUidMap) appointment.agoraUidMap = {};
       
@@ -188,13 +209,16 @@ export const generateVideoToken = asyncHandler(
       }
 
       appointment.callParticipants.push(participantObjectId);
+      appointment.callStatus = "in-progress"; // Stop ringing when second person joins
+      appointment.callStartedAt = new Date();
+      
       await appointment.save();
 
       const initiatorId = isDoctor ? patientId : doctorId;
 
       try {
-        emitRejoinCallAlert(initiatorId, appointmentId.toString(), currentUserName);
-        // console.log(`📨 Rejoin alert sent to initiator (${initiatorId})`);
+        emitRejoinCallAlert(initiatorId, appointmentId.toString(), callerName);
+        console.log(`📨 Rejoin alert sent to initiator (${initiatorId})`);
       } catch (notifError) {
         console.error("⚠️ Failed to send rejoin alert:", notifError);
       }
@@ -202,7 +226,7 @@ export const generateVideoToken = asyncHandler(
 
     // ✅ REJOIN IN-PROGRESS CALL
     if (appointment.callStatus === "in-progress") {
-      // console.log(`🔄 ${role} rejoining in-progress call`);
+      console.log(`🔄 ${role} rejoining in-progress call`);
 
       if (!appointment.agoraUidMap) appointment.agoraUidMap = {};
       
@@ -221,8 +245,8 @@ export const generateVideoToken = asyncHandler(
       const otherPartyId = isDoctor ? patientId : doctorId;
 
       try {
-        emitRejoinCallAlert(otherPartyId, appointmentId.toString(), currentUserName);
-        // console.log(`📨 Rejoin alert sent to other party (${otherPartyId})`);
+        emitRejoinCallAlert(otherPartyId, appointmentId.toString(), callerName);
+        console.log(`📨 Rejoin alert sent to other party (${otherPartyId})`);
       } catch (notifError) {
         console.error("⚠️ Failed to send rejoin alert:", notifError);
       }
@@ -301,7 +325,7 @@ export const confirmCallJoin = asyncHandler(
     const activeCount = (appointment as any).getActiveParticipantCount();
 
     if (appointment.callStatus === "ringing" && activeCount === 2) {
-      // console.log(`✅ Both participants active - transitioning to in-progress`);
+      console.log(`✅ Both participants active - transitioning to in-progress`);
 
       appointment.callStatus = "in-progress";
       appointment.callStartedAt = new Date();
@@ -458,7 +482,7 @@ export const endVideoCall = asyncHandler(async (req: Request, res: Response) => 
     });
   }
 
-  // console.log(`🛑 ${role} ending call for appointment ${appointmentId}`);
+  console.log(`🛑 ${role} ending call for appointment ${appointmentId}`);
 
   const finalDuration =
     callDuration ||
@@ -486,7 +510,7 @@ export const endVideoCall = asyncHandler(async (req: Request, res: Response) => 
 
   emitCallEnded(userId!, appointmentId.toString(), finalDuration);
 
-  // console.log(`🔔 Call ended event sent to appointment room ${appointmentId}`);
+  console.log(`🔔 Call ended event sent to appointment room ${appointmentId}`);
 
   res.json({
     success: true,
@@ -567,13 +591,13 @@ export const reportCallIssue = asyncHandler(async (req: Request, res: Response) 
     return res.status(404).json({ success: false, message: "Appointment not found" });
   }
 
-  // console.log(`⚠️ Call issue reported for appointment ${appointmentId}:`, {
-  //   userId,
-  //   issueType,
-  //   description,
-  //   timestamp: new Date(),
-  //   callStatus: appointment.callStatus,
-  // });
+  console.log(`⚠️ Call issue reported for appointment ${appointmentId}:`, {
+    userId,
+    issueType,
+    description,
+    timestamp: new Date(),
+    callStatus: appointment.callStatus,
+  });
 
   res.status(200).json({ success: true, message: "Issue reported successfully." });
 });

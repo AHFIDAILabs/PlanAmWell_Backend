@@ -1,14 +1,224 @@
+// util/sendPushNotification.ts - UPDATED WITH INCOMING CALL RINGTONE SUPPORT
 import Expo from "expo-server-sdk";
 import { User } from "../models/user";
 import { Doctor } from "../models/doctor";
 import Notification, { NotificationDocument } from "../models/notifications";
-import { emitNotification } from "../index";
 
 const expo = new Expo();
 
 /**
- * ✅ Send push notification to ANY user (User or Doctor)
- * This is called by NotificationService - don't use directly
+ * ✅ Send INCOMING CALL push notification (triggers native ringtone on user's phone)
+ */
+export async function sendIncomingCallPushNotification(
+  recipientUserId: string,
+  callData: {
+    appointmentId: string;
+    callerName: string;
+    callerImage?: string;
+    callerType: "Doctor" | "User" | string;
+    channelName: string;
+  }
+) {
+  try {
+    // Find recipient user (could be User or Doctor)
+    let recipient = await User.findById(recipientUserId).select("expoPushTokens");
+
+    if (!recipient) {
+      recipient = await Doctor.findById(recipientUserId).select("expoPushTokens");
+    }
+
+    if (!recipient || !recipient.expoPushTokens?.length) {
+      console.log(`[IncomingCall] No push tokens found for user ${recipientUserId}`);
+      return;
+    }
+
+    // Filter valid Expo push tokens
+    const validTokens = recipient.expoPushTokens.filter((token: string) => 
+      Expo.isExpoPushToken(token)
+    );
+
+    if (!validTokens.length) {
+      console.log(`[IncomingCall] No valid Expo tokens for user ${recipientUserId}`);
+      return;
+    }
+
+    // ✅ CRITICAL: Configure push notification for INCOMING CALL
+    // This will trigger the phone's native ringtone and show full-screen call UI
+    const messages = validTokens.map((token: string) => ({
+      to: token,
+      sound: "default", // Use system default ringtone
+      title: "📞 Incoming Call",
+      body: `${callData.callerName} is calling you`,
+      data: {
+        type: "incoming_call",
+        appointmentId: callData.appointmentId,
+        callerName: callData.callerName,
+        callerImage: callData.callerImage,
+        callerType: callData.callerType,
+        channelName: callData.channelName,
+        timestamp: new Date().toISOString(),
+      },
+      priority: "high" as const, // High priority for immediate delivery
+      channelId: "incoming-calls", // Android notification channel
+      categoryIdentifier: "INCOMING_CALL", // iOS category for call UI
+      
+      // ✅ iOS specific settings for call-like behavior
+      badge: 1,
+      ttl: 60, // Time to live: 60 seconds
+      
+      // ✅ Android specific settings
+      ...(process.env.NODE_ENV === "production" && {
+        android: {
+          priority: "high",
+          sound: "default",
+          channelId: "incoming-calls",
+          vibrate: [0, 250, 250, 250],
+        },
+      }),
+    }));
+
+    // Send push notifications in chunks
+    for (const chunk of expo.chunkPushNotifications(messages)) {
+      try {
+        const tickets = await expo.sendPushNotificationsAsync(chunk);
+        console.log(`[IncomingCall] ✅ Sent ${tickets.length} call notifications to user ${recipientUserId}`);
+        
+        // Log any errors
+        tickets.forEach((ticket, index) => {
+          if (ticket.status === 'error') {
+            console.error(`[IncomingCall] Error sending to token ${index}:`, ticket.message);
+          }
+        });
+      } catch (err) {
+        console.error("[IncomingCall] Error sending push notification chunk:", err);
+      }
+    }
+
+    console.log(`🔔 Incoming call push notification sent - ${callData.callerName} → User ${recipientUserId}`);
+    console.log(`   Device should now be ringing with native ringtone`);
+    
+  } catch (error) {
+    console.error("[IncomingCall] Failed to send push notification:", error);
+    throw error;
+  }
+}
+
+/**
+ * ✅ Send CALL MISSED push notification
+ */
+export async function sendMissedCallPushNotification(
+  recipientUserId: string,
+  callData: {
+    appointmentId: string;
+    callerName: string;
+    callerImage?: string;
+    timestamp: Date;
+  }
+) {
+  try {
+    let recipient = await User.findById(recipientUserId).select("expoPushTokens");
+
+    if (!recipient) {
+      recipient = await Doctor.findById(recipientUserId).select("expoPushTokens");
+    }
+
+    if (!recipient || !recipient.expoPushTokens?.length) {
+      return;
+    }
+
+    const messages = recipient.expoPushTokens
+      .filter((token: string) => Expo.isExpoPushToken(token))
+      .map((token: string) => ({
+        to: token,
+        sound: "default" as const,
+        title: "📵 Missed Call",
+        body: `You missed a call from ${callData.callerName}`,
+        data: {
+          type: "missed_call",
+          appointmentId: callData.appointmentId,
+          callerName: callData.callerName,
+          callerImage: callData.callerImage,
+          timestamp: callData.timestamp.toISOString(),
+        },
+        priority: "high" as const,
+        badge: 1,
+      }));
+
+    if (!messages.length) return;
+
+    for (const chunk of expo.chunkPushNotifications(messages)) {
+      try {
+        await expo.sendPushNotificationsAsync(chunk);
+      } catch (err) {
+        console.error("[MissedCall] Error sending push notification:", err);
+      }
+    }
+
+    console.log(`📵 Missed call notification sent to user ${recipientUserId}`);
+  } catch (error) {
+    console.error("[MissedCall] Failed:", error);
+  }
+}
+
+/**
+ * ✅ Send CALL ENDED push notification
+ */
+export async function sendCallEndedPushNotification(
+  recipientUserId: string,
+  callData: {
+    appointmentId: string;
+    duration: number;
+    endedBy: string;
+  }
+) {
+  try {
+    let recipient = await User.findById(recipientUserId).select("expoPushTokens");
+
+    if (!recipient) {
+      recipient = await Doctor.findById(recipientUserId).select("expoPushTokens");
+    }
+
+    if (!recipient || !recipient.expoPushTokens?.length) {
+      return;
+    }
+
+    const durationMin = Math.floor(callData.duration / 60);
+    const durationSec = callData.duration % 60;
+
+    const messages = recipient.expoPushTokens
+      .filter((token: string) => Expo.isExpoPushToken(token))
+      .map((token: string) => ({
+        to: token,
+        sound: "default" as const,
+        title: "Call Ended",
+        body: `Call duration: ${durationMin}m ${durationSec}s`,
+        data: {
+          type: "call_ended",
+          appointmentId: callData.appointmentId,
+          duration: callData.duration,
+          endedBy: callData.endedBy,
+        },
+        priority: "normal" as const,
+      }));
+
+    if (!messages.length) return;
+
+    for (const chunk of expo.chunkPushNotifications(messages)) {
+      try {
+        await expo.sendPushNotificationsAsync(chunk);
+      } catch (err) {
+        console.error("[CallEnded] Error sending push notification:", err);
+      }
+    }
+
+    console.log(`✅ Call ended notification sent to user ${recipientUserId}`);
+  } catch (error) {
+    console.error("[CallEnded] Failed:", error);
+  }
+}
+
+/**
+ * ✅ Send regular push notification (existing functionality)
  */
 export async function sendPushNotification(
   userId: string,
@@ -22,7 +232,6 @@ export async function sendPushNotification(
     }
 
     if (!user || !user.expoPushTokens?.length) {
-      // console.log(`[PushNotification] No tokens found for user ${userId}`);
       return;
     }
 
@@ -37,14 +246,12 @@ export async function sendPushNotification(
       }));
 
     if (!messages.length) {
-      // console.log(`[PushNotification] No valid Expo tokens for user ${userId}`);
       return;
     }
 
     for (const chunk of expo.chunkPushNotifications(messages)) {
       try {
         const tickets = await expo.sendPushNotificationsAsync(chunk);
-        // console.log(`[PushNotification] ✅ Sent ${tickets.length} notifications to user ${userId}`);
       } catch (err) {
         console.error("[PushNotification] Error sending push notifications:", err);
       }
@@ -72,7 +279,6 @@ export const createNotificationForUser = async (
   metadata?: any
 ) => {
   try {
-    // ✅ Create notification in DB
     const notification = await Notification.create({
       userId,
       userType,
@@ -83,13 +289,6 @@ export const createNotificationForUser = async (
       isRead: false,
     });
 
-    // console.log(`💾 Notification created in DB for ${userType} ${userId}:`, {
-    //   _id: notification._id,
-    //   title: notification.title,
-    //   type: notification.type,
-    // });
-
-    // ✅ Convert to plain object for Socket.IO emission
     const notificationObject = {
       _id: notification._id.toString(),
       userId: notification.userId.toString(),
@@ -102,19 +301,8 @@ export const createNotificationForUser = async (
       createdAt: notification.createdAt,
     };
 
-    // ✅ CRITICAL FIX: Emit to correct user (convert to string to match socket room format)
-    const targetUserId = userId.toString();
-    // console.log(`📡 Emitting notification to user: ${targetUserId}`);
-    const emitted = emitNotification(targetUserId, notificationObject);
-    
-    // if (emitted) {
-    //   console.log(`✅ Real-time notification sent to ${userType} ${targetUserId}`);
-    // } else {
-    //   console.log(`⚠️ ${userType} ${targetUserId} not connected - notification saved in DB`);
-    // }
-
-    // ✅ Send push notification (non-blocking)
-    sendPushNotification(targetUserId, notification).catch(console.error);
+    // Send push notification (non-blocking)
+    sendPushNotification(userId.toString(), notification).catch(console.error);
 
     return notification;
   } catch (error) {
@@ -140,12 +328,6 @@ export const createAppointmentNotification = async (
     cancelled: `Your appointment with Dr. ${doctorName} has been cancelled.`,
     reminder: `Your appointment with Dr. ${doctorName} starts in 15 minutes!`,
   };
-
-  console.log(`📅 Creating appointment notification for ${userType} ${userId}:`, {
-    type,
-    appointmentId,
-    doctorName,
-  });
 
   return await createNotificationForUser(
     userId,

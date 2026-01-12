@@ -66,11 +66,11 @@ export class NotificationService {
 
       const emitted = emitNotification(userId.toString(), notificationObject);
       
-      // if (emitted) {
-      //   console.log(`📡 [NotificationService] Real-time notification sent to ${userType} ${userId}`);
-      // } else {
-      //   console.log(`⚠️ [NotificationService] User ${userId} not connected - saved in DB only`);
-      // }
+      if (emitted) {
+        console.log(`📡 [NotificationService] Real-time notification sent to ${userType} ${userId}`);
+      } else {
+        console.log(`⚠️ [NotificationService] User ${userId} not connected - saved in DB only`);
+      }
 
       // ✅ Send push notification (non-blocking)
       this.sendPushAsync(userId, notification);
