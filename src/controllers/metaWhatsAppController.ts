@@ -8,19 +8,32 @@ import { ChatConversation, IMessage } from '../models/ChatConversation';
 import { Intent } from '../types/chatbot.types';
 
 // Environment variables
-const WEBHOOK_VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN || 'your_verify_token';
+const WEBHOOK_VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN;
 const META_ACCESS_TOKEN = process.env.META_WHATSAPP_ACCESS_TOKEN;
 const PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
 const META_APP_SECRET = process.env.META_APP_SECRET;
-const META_API_VERSION = 'v21.0'; // Updated to latest version
-const APP_URL = process.env.APP_URL || 'https://amwell.com';
-const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+234-XXX-XXXX';
+const META_API_VERSION = 'v21.0';
+const APP_URL = process.env.APP_URL;
+const DEEP_LINK_SCHEME = process.env.DEEP_LINK_SCHEME || 'AskAmWell://'; 
+const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+2349168767784';
 
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
 
+// ✅ Generate deep link (opens app if installed, web otherwise)
+const generateDeepLink = (path: string, params?: Record<string, string>): string => {
+    const queryString = params ? '?' + new URLSearchParams(params).toString() : '';
+    
+    // Universal link format that works for both app and web
+    // Format: https://amwell.com/path?params&app=true
+    const webUrl = `${APP_URL}${path}${queryString}${queryString ? '&' : '?'}app=true`;
+    
+    return webUrl;
+};
+
 // ✅ Extract product keywords from message
+
 const extractProductKeywords = (message: string): string => {
     let cleaned = message.toLowerCase().trim();
     
@@ -43,7 +56,12 @@ const extractProductKeywords = (message: string): string => {
         'order',
         'purchase',
         'get',
-        'find'
+        'find',
+        'information about',
+        'info about',
+        'tell me about',
+        'what is',
+        'what are'
     ];
     
     for (const phrase of leadingPhrases) {
@@ -70,12 +88,10 @@ const extractProductKeywords = (message: string): string => {
     
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
     
-    // console.log(`📝 WhatsApp - Original: "${message}" → Extracted: "${cleaned}"`);
-    
     return cleaned;
 };
 
-// ✅ Detect user intent
+// ✅ Enhanced intent detection
 const detectIntent = (message: string): Intent => {
     const lowerMessage = message.toLowerCase();
     
@@ -88,7 +104,13 @@ const detectIntent = (message: string): Intent => {
     // Buy intent
     const buyKeywords = ['buy', 'order', 'purchase', 'get', 'need', 'want', 'looking for', 'shop', 'cart', 'add'];
     if (buyKeywords.some(keyword => lowerMessage.includes(keyword))) {
-        return 'buy';
+        // Check if it's asking for information rather than buying
+        const infoIndicators = ['what is', 'what are', 'tell me', 'information', 'explain', 'about'];
+        const hasInfoIntent = infoIndicators.some(indicator => lowerMessage.includes(indicator));
+        
+        if (!hasInfoIntent) {
+            return 'buy';
+        }
     }
     
     // Appointment intent
@@ -97,20 +119,197 @@ const detectIntent = (message: string): Intent => {
         return 'appointment';
     }
     
-    // Info/question intent
-    const infoKeywords = ['what is', 'how', 'why', 'tell me', 'explain', 'information', 'about'];
-    if (infoKeywords.some(keyword => lowerMessage.includes(keyword))) {
+    // Health info intent - EXPANDED
+    const healthInfoKeywords = [
+        'what is', 'what are', 'how', 'why', 'tell me', 'explain', 'information', 'about',
+        'std', 'sti', 'sexually transmitted', 'reproductive health', 'sexual health',
+        'contraceptive', 'birth control', 'pregnancy', 'menstrual', 'fertility',
+        'infection', 'disease', 'symptom', 'treatment', 'prevention', 'cure',
+        'hiv', 'aids', 'gonorrhea', 'syphilis', 'chlamydia', 'herpes', 'hpv'
+    ];
+    if (healthInfoKeywords.some(keyword => lowerMessage.includes(keyword))) {
         return 'info';
     }
     
     return 'general';
 };
 
+// ✅ NEW: Provide health information
+const getHealthInformation = (query: string): string => {
+    const lowerQuery = query.toLowerCase();
+    
+    // STD/STI Information
+    if (lowerQuery.includes('std') || lowerQuery.includes('sti') || 
+        lowerQuery.includes('sexually transmitted')) {
+        return `🏥 *Sexually Transmitted Diseases (STDs)*
+
+*Common STDs include:*
+• Chlamydia
+• Gonorrhea  
+• Syphilis
+• HIV/AIDS
+• Herpes (HSV)
+• HPV (Human Papillomavirus)
+• Trichomoniasis
+
+*Prevention:*
+✓ Use condoms consistently
+✓ Get regular screenings
+✓ Limit sexual partners
+✓ Get vaccinated (HPV, Hepatitis B)
+
+*Symptoms to watch for:*
+• Unusual discharge
+• Pain during urination
+• Sores or bumps
+• Itching or irritation
+
+⚠️ *Important:* Many STDs have no symptoms. Regular testing is crucial!
+
+*Get Tested or Consult:*
+📱 ${generateDeepLink('/appointments', { type: 'std-screening' })}
+
+*Need Treatment?*
+Search for medications: Reply "antibiotics" or specific medicine names
+
+*Emergency?* Call ${SUPPORT_PHONE}`;
+    }
+    
+    // HIV/AIDS Information
+    if (lowerQuery.includes('hiv') || lowerQuery.includes('aids')) {
+        return `🏥 *HIV/AIDS Information*
+
+*What is HIV?*
+Human Immunodeficiency Virus attacks the immune system. Without treatment, it can lead to AIDS.
+
+*Prevention:*
+✓ Use condoms correctly every time
+✓ PrEP (Pre-Exposure Prophylaxis) for high-risk individuals
+✓ Never share needles
+✓ Get tested regularly
+
+*Treatment:*
+Modern antiretroviral therapy (ART) allows people with HIV to live long, healthy lives.
+
+*Testing:*
+• Get tested every 3-6 months if sexually active
+• Results confidential
+• Early detection = better outcomes
+
+*Book HIV Test/Consultation:*
+📱 ${generateDeepLink('/appointments', { type: 'hiv-testing' })}
+
+*PrEP/PEP Medications:*
+📱 ${generateDeepLink('/products', { category: 'hiv-prevention' })}
+
+*24/7 Support:* ${SUPPORT_PHONE}`;
+    }
+    
+    // Reproductive Health
+    if (lowerQuery.includes('reproductive') || lowerQuery.includes('sexual health')) {
+        return `🏥 *Reproductive Health*
+
+*We can help with:*
+
+*Contraception:*
+• Birth control pills
+• Condoms
+• Emergency contraception
+• IUDs & implants (consultation required)
+
+*Fertility:*
+• Ovulation tracking
+• Fertility supplements
+• Prenatal vitamins
+
+*Menstrual Health:*
+• Period pain relief
+• Irregular cycles
+• PMS management
+
+*Infections:*
+• UTI treatment
+• Yeast infections
+• STI screening & treatment
+
+*Book Consultation:*
+📱 ${generateDeepLink('/appointments', { specialty: 'reproductive-health' })}
+
+*Shop Products:*
+📱 ${generateDeepLink('/products', { category: 'reproductive-health' })}
+
+*Questions?* Reply with specific concern or call ${SUPPORT_PHONE}`;
+    }
+    
+    // Birth Control/Contraceptives
+    if (lowerQuery.includes('birth control') || lowerQuery.includes('contraceptive') || 
+        lowerQuery.includes('emergency contraception')) {
+        return `💊 *Birth Control & Contraceptives*
+
+*Available Options:*
+
+*Hormonal Methods:*
+• Birth control pills
+• Patches
+• Injections
+• Implants (requires consultation)
+
+*Barrier Methods:*
+• Condoms (male & female)
+• Diaphragms
+
+*Emergency Contraception:*
+• Morning-after pill (Plan B)
+• Effective up to 72 hours after intercourse
+
+*Permanent Methods:*
+• Consultation required
+
+*Shop Contraceptives:*
+📱 ${generateDeepLink('/products', { category: 'contraceptives' })}
+
+*Consult a Doctor:*
+📱 ${generateDeepLink('/appointments', { type: 'contraception-consultation' })}
+
+*Need emergency contraception?*
+Reply: "emergency pill" or "plan b"`;
+    }
+    
+    // Generic health info
+    return `🏥 *Health Information*
+
+I can provide information about:
+
+*Sexual Health:*
+• STDs/STIs
+• HIV/AIDS  
+• Contraception
+• Reproductive health
+
+*Common Conditions:*
+• Infections
+• Pain management
+• Skin conditions
+• Digestive health
+
+*Medications:*
+• Antibiotics
+• Pain relievers
+• Supplements
+• Prescriptions
+
+*What would you like to know about?*
+
+Or get personalized advice:
+📱 ${generateDeepLink('/appointments')}
+
+*Call us:* ${SUPPORT_PHONE}`;
+};
+
 // ✅ Search products
 const searchProducts = async (query: string, limit: number = 5): Promise<any[]> => {
     try {
         if (!query || query.trim() === '') {
-            // console.log('⚠️ Empty search query');
             return [];
         }
 
@@ -122,11 +321,7 @@ const searchProducts = async (query: string, limit: number = 5): Promise<any[]> 
         
         const searchTerms = cleanedQuery.split(' ').filter(term => term.length > 2);
         
-        // console.log(`🔍 WhatsApp - Searching for: "${cleanedQuery}"`);
-        // console.log(`📋 Search terms: [${searchTerms.join(', ')}]`);
-        
         if (searchTerms.length === 0) {
-            // console.log('⚠️ No valid search terms');
             return [];
         }
 
@@ -159,11 +354,6 @@ const searchProducts = async (query: string, limit: number = 5): Promise<any[]> 
         .limit(limit)
         .lean();
         
-        // console.log(`✅ WhatsApp - Found ${products.length} products`);
-        if (products.length > 0) {
-            // console.log(`📦 Products: ${products.map(p => p.name).join(', ')}`);
-        }
-        
         return products;
     } catch (error) {
         console.error('❌ WhatsApp - Error searching products:', error);
@@ -175,17 +365,19 @@ const searchProducts = async (query: string, limit: number = 5): Promise<any[]> 
 const generateWhatsAppResponse = (intent: Intent, products: any[], userMessage: string): string => {
     switch (intent) {
         case 'greeting':
-            return `👋 *Welcome to AmWell Health!*
+            return `👋 *Welcome to AskAmWell Health!*
 
 I'm your AI health assistant. I can help you:
 
 💊 *Find medicines & health products*
+🏥 *Get health information (STDs, contraception, etc.)*
 📅 *Book doctor appointments*
 🛒 *Order directly via WhatsApp*
 📍 *Track your orders*
 
 *Quick Commands:*
 - Type a product name to search
+- Ask health questions (e.g., "What are STDs?")
 - Reply *HELP* for assistance
 - Reply *ORDERS* to track orders
 
@@ -209,7 +401,7 @@ What can I help you with today?`;
                 response += `\n📝 *To Order:*\n`;
                 response += `Reply: *ORDER <number>*\n`;
                 response += `Example: *ORDER 1*\n\n`;
-                response += `🌐 Or order via app:\n${APP_URL}/products`;
+                response += `📱 Or order via app:\n${generateDeepLink('/products')}`;
                 
                 return response;
             } else {
@@ -223,7 +415,7 @@ Please tell me what you're looking for:
 - "I need Paracetamol"
 - "Show me antibiotics"
 - "Pain relief medicine"
-- "Amoxicillin"
+- "Emergency contraception"
 
 I'll find the best matches for you! 💊`;
                 }
@@ -235,6 +427,9 @@ I'll find the best matches for you! 💊`;
 ✓ Search by category (e.g., "antibiotics", "pain relief")
 ✓ Try brand names
 
+*Browse all products:*
+📱 ${generateDeepLink('/products')}
+
 *Need Help?*
 Reply *HELP* or call ${SUPPORT_PHONE}`;
             }
@@ -242,44 +437,46 @@ Reply *HELP* or call ${SUPPORT_PHONE}`;
         case 'appointment':
             return `📅 *Book a Doctor Appointment*
 
-*How to Book:*
-1. Visit our app: ${APP_URL}/appointments
-2. Call us: ${SUPPORT_PHONE}
-3. Or continue here - tell me:
-   • Type of doctor needed
-   • Preferred date/time
+*Quick Booking:*
+📱 ${generateDeepLink('/appointments')}
+
+*Or call us:*
+📞 ${SUPPORT_PHONE}
 
 *Available Specialties:*
 - General Practitioner
+- Sexual Health / STD Screening
+- Reproductive Health
 - Specialist Consultation
 - Emergency Care
+
+*To continue here, tell me:*
+• Type of doctor needed
+• Preferred date/time
+• Reason for visit
 
 What works best for you?`;
         
         case 'info':
-            return `ℹ️ *Health Information*
-
-I can provide general health information, but for medical advice specific to your condition, please consult our healthcare professionals.
-
-*What would you like to know about?*
-- Medications
-- Conditions
-- Treatments
-- Health tips
-
-Or visit: ${APP_URL}/health-info`;
+            const query = extractProductKeywords(userMessage);
+            return getHealthInformation(query);
         
         default:
-            return `👋 *AmWell Health Assistant*
+            return `👋 *AskAmWell Health Assistant*
 
 *Quick Commands:*
-🔍 Search products - Just type what you need
+🔍 Search products - Type what you need
+🏥 *HEALTH INFO* - Ask health questions
 📦 *ORDERS* - Track your orders
 📅 *APPOINTMENT* - Book a doctor
 ❓ *HELP* - Get assistance
 📞 *CONTACT* - Reach support
 
-Example: "I need amoxicillin"
+*Examples:*
+• "I need amoxicillin"
+• "What are STDs?"
+• "Birth control options"
+• "Book STD screening"
 
 How can I help you today?`;
     }
@@ -294,7 +491,7 @@ const saveConversation = async (
     products: any[]
 ): Promise<void> => {
     try {
-        const sessionId = phoneNumber; // Use phone number as session ID
+        const sessionId = phoneNumber;
         
         let conversation = await ChatConversation.findOne({ 
             sessionId,
@@ -303,13 +500,12 @@ const saveConversation = async (
         
         if (!conversation) {
             conversation = new ChatConversation({
-                userId: null, // WhatsApp users are guests unless they register
+                userId: null,
                 sessionId,
                 messages: []
             });
         }
         
-        // Add user message
         const userMsg: IMessage = {
             sender: 'user',
             text: userMessage,
@@ -318,7 +514,6 @@ const saveConversation = async (
         };
         conversation.messages.push(userMsg);
         
-        // Add bot message with products
         const productIds = products.map(p => 
             typeof p._id === 'string' ? new mongoose.Types.ObjectId(p._id) : p._id
         );
@@ -333,7 +528,6 @@ const saveConversation = async (
         conversation.messages.push(botMsg);
         
         await conversation.save();
-        // console.log(`✅ Conversation saved for ${phoneNumber}`);
     } catch (error) {
         console.error('❌ Error saving conversation:', error);
     }
@@ -342,7 +536,6 @@ const saveConversation = async (
 // ✅ Handle ORDER command
 const handleOrderCommand = async (phoneNumber: string, orderText: string): Promise<string> => {
     try {
-        // Extract product number from "ORDER 1", "order 2", etc.
         const match = orderText.match(/order\s+(\d+)/i);
         
         if (!match) {
@@ -358,7 +551,6 @@ Please try again!`;
         
         const productIndex = parseInt(match[1]) - 1;
         
-        // Get last bot message with products
         const conversation = await ChatConversation.findOne({ 
             sessionId: phoneNumber 
         });
@@ -385,7 +577,6 @@ Please search for a product first.
 *Try:* "I need amoxicillin"`;
         }
         
-        // Fetch product details
         const products = await Product.find({
             _id: { $in: lastBotMessage.products }
         }).lean();
@@ -400,8 +591,11 @@ Reply with: ORDER <number>`;
         
         const selectedProduct = products[productIndex];
         
-        // Generate order link
-        const orderLink = `${APP_URL}/checkout?product=${selectedProduct._id}&phone=${phoneNumber}&source=whatsapp`;
+        const orderLink = generateDeepLink('/checkout', {
+            product: selectedProduct._id.toString(),
+            phone: phoneNumber,
+            source: 'whatsapp'
+        });
         
         return `✅ *Order Initiated!*
 
@@ -410,7 +604,7 @@ Reply with: ORDER <number>`;
 *Brand:* ${selectedProduct.manufacturerName}
 
 *Complete Your Order:*
-🔗 ${orderLink}
+📱 ${orderLink}
 
 *Or Call Us:*
 📞 ${SUPPORT_PHONE}
@@ -435,13 +629,17 @@ Please try again or contact support:
 
 // ✅ Handle HELP command
 const handleHelpCommand = (): string => {
-    return `❓ *AmWell Help Center*
+    return `❓ *AskAmWell Help Center*
 
 *Available Commands:*
 
 🔍 *Search Products*
 Just type what you need
 Example: "I need paracetamol"
+
+🏥 *Health Information*
+Ask about conditions, STDs, etc.
+Example: "What are STDs?"
 
 🛒 *Order*
 ORDER <number>
@@ -457,28 +655,31 @@ Reply: APPOINTMENT
 Phone: ${SUPPORT_PHONE}
 Email: support@amwell.com
 
-🌐 *Visit Website*
-${APP_URL}
+📱 *Open App*
+${generateDeepLink('/home')}
 
 *Tips:*
 - Search by product name, brand, or category
-- Orders are delivered in 24-48 hours
-- We accept all payment methods
+- Ask health questions anytime
+- Orders delivered in 24-48 hours
+- All payment methods accepted
 
 Need more help? Just ask! 😊`;
 };
 
 // ✅ Handle ORDERS command
 const handleOrdersCommand = async (phoneNumber: string): Promise<string> => {
+    const trackLink = generateDeepLink('/orders', { phone: phoneNumber });
+    
     return `📦 *Track Your Orders*
 
-To track your orders:
+*Open in App:*
+📱 ${trackLink}
 
-1. Visit: ${APP_URL}/orders
-2. Enter your phone: ${phoneNumber}
-3. View all order details
+*Or visit web:*
+🌐 ${APP_URL}/orders?phone=${phoneNumber}
 
-Or call us:
+*Or call us:*
 📞 ${SUPPORT_PHONE}
 
 *Need Help?*
@@ -489,16 +690,12 @@ Reply *HELP* anytime!`;
 // WEBHOOK HANDLERS
 // ============================================
 
-// ✅ Verify webhook (required by Meta)
 export const verifyWebhook = (req: Request, res: Response): void => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    // console.log('🔍 Webhook verification attempt:', { mode, token: token?.substring(0, 10) + '...' });
-
     if (mode === 'subscribe' && token === WEBHOOK_VERIFY_TOKEN) {
-        // console.log('✅ Webhook verified successfully');
         res.status(200).send(challenge);
     } else {
         console.error('❌ Webhook verification failed');
@@ -506,7 +703,6 @@ export const verifyWebhook = (req: Request, res: Response): void => {
     }
 };
 
-// ✅ Verify Meta signature
 const verifySignature = (payload: string, signature: string): boolean => {
     try {
         if (!META_APP_SECRET) {
@@ -525,7 +721,6 @@ const verifySignature = (payload: string, signature: string): boolean => {
             Buffer.from(expectedSignature)
         );
 
-        // console.log('🔐 Signature verification:', isValid ? '✅ Valid' : '❌ Invalid');
         return isValid;
     } catch (error) {
         console.error('❌ Signature verification error:', error);
@@ -533,14 +728,10 @@ const verifySignature = (payload: string, signature: string): boolean => {
     }
 };
 
-// ✅ Handle incoming messages
 export const handleMetaWebhook = async (req: Request, res: Response): Promise<void> => {
     try {
         const body = req.body;
 
-        // console.log('📨 Received webhook:', JSON.stringify(body, null, 2));
-
-        // Verify webhook signature for security
         const signature = req.headers['x-hub-signature-256'] as string;
         
         if (signature) {
@@ -554,7 +745,6 @@ export const handleMetaWebhook = async (req: Request, res: Response): Promise<vo
             }
         }
 
-        // Check if it's a WhatsApp message
         if (body.object === 'whatsapp_business_account') {
             const entry = body.entry?.[0];
             const changes = entry?.changes?.[0];
@@ -563,27 +753,17 @@ export const handleMetaWebhook = async (req: Request, res: Response): Promise<vo
 
             if (messages && messages[0]) {
                 const message = messages[0];
-                const from = message.from; // Phone number
+                const from = message.from;
                 const messageBody = message.text?.body;
                 const messageType = message.type;
-                const messageId = message.id;
 
-                // console.log(`📱 WhatsApp message received:`);
-                // console.log(`   From: ${from}`);
-                // console.log(`   Type: ${messageType}`);
-                // console.log(`   Body: ${messageBody}`);
-                // console.log(`   ID: ${messageId}`);
-
-                // Only process text messages
                 if (messageType !== 'text') {
-                    // console.log(`⚠️ Unsupported message type: ${messageType}`);
                     res.sendStatus(200);
                     return;
                 }
 
                 let responseText = '';
 
-                // Check for special commands
                 const lowerMessage = messageBody.toLowerCase().trim();
 
                 if (lowerMessage === 'help') {
@@ -593,7 +773,6 @@ export const handleMetaWebhook = async (req: Request, res: Response): Promise<vo
                 } else if (lowerMessage.startsWith('order')) {
                     responseText = await handleOrderCommand(from, lowerMessage);
                 } else {
-                    // Regular message processing
                     const intent = detectIntent(messageBody);
                     let products: any[] = [];
                     
@@ -604,33 +783,24 @@ export const handleMetaWebhook = async (req: Request, res: Response): Promise<vo
 
                     responseText = generateWhatsAppResponse(intent, products, messageBody);
 
-                    // Save conversation
                     await saveConversation(from, messageBody, responseText, intent, products);
                 }
 
-                // Send response back via Meta API
                 await sendMetaWhatsAppMessage(from, responseText);
-
-                // console.log(`✅ Response sent to ${from}`);
             }
 
-            // Check for message status updates
             const statuses = value?.statuses;
             if (statuses && statuses[0]) {
                 const status = statuses[0];
-                // console.log(`📊 Message status update:`, status);
-                // You can track delivery, read receipts, etc.
-
+                // Track delivery status if needed
             }
         }
 
-        // Always respond with 200 to acknowledge receipt
         res.sendStatus(200);
         
     } catch (error: any) {
         console.error('❌ Meta webhook error:', error);
         console.error('Stack trace:', error.stack);
-        // Still return 200 to prevent Meta from disabling the webhook
         res.sendStatus(200);
     }
 };
@@ -639,7 +809,6 @@ export const handleMetaWebhook = async (req: Request, res: Response): Promise<vo
 // MESSAGE SENDING FUNCTIONS
 // ============================================
 
-// ✅ Send text message via Meta API
 const sendMetaWhatsAppMessage = async (to: string, message: string): Promise<any> => {
     try {
         if (!META_ACCESS_TOKEN || !PHONE_NUMBER_ID) {
@@ -656,7 +825,7 @@ const sendMetaWhatsAppMessage = async (to: string, message: string): Promise<any
                 to: to,
                 type: 'text',
                 text: { 
-                    preview_url: true, // Enable URL previews
+                    preview_url: true,
                     body: message 
                 }
             },
@@ -668,7 +837,6 @@ const sendMetaWhatsAppMessage = async (to: string, message: string): Promise<any
             }
         );
 
-        // console.log('✅ Meta message sent successfully:', response.data);
         return response.data;
     } catch (error: any) {
         console.error('❌ Meta send error:', error.response?.data || error.message);
@@ -676,7 +844,6 @@ const sendMetaWhatsAppMessage = async (to: string, message: string): Promise<any
     }
 };
 
-// ✅ Send message with image
 export const sendMetaWhatsAppImage = async (
     to: string, 
     imageUrl: string, 
@@ -704,15 +871,12 @@ export const sendMetaWhatsAppImage = async (
                 }
             }
         );
-
-        // console.log('✅ Image sent successfully');
     } catch (error: any) {
         console.error('❌ Error sending image:', error.response?.data || error.message);
         throw error;
     }
 };
 
-// ✅ Send interactive buttons (Meta WhatsApp feature!)
 export const sendMetaInteractiveButtons = async (
     to: string, 
     bodyText: string, 
@@ -732,11 +896,11 @@ export const sendMetaInteractiveButtons = async (
                     type: 'button',
                     body: { text: bodyText },
                     action: {
-                        buttons: buttons.slice(0, 3).map(btn => ({ // Max 3 buttons
+                        buttons: buttons.slice(0, 3).map(btn => ({
                             type: 'reply',
                             reply: {
                                 id: btn.id,
-                                title: btn.title.substring(0, 20) // Max 20 chars
+                                title: btn.title.substring(0, 20)
                             }
                         }))
                     }
@@ -749,15 +913,12 @@ export const sendMetaInteractiveButtons = async (
                 }
             }
         );
-
-        // console.log('✅ Interactive buttons sent successfully');
     } catch (error: any) {
         console.error('❌ Error sending buttons:', error.response?.data || error.message);
         throw error;
     }
 };
 
-// ✅ Send list message (for product catalogs)
 export const sendMetaListMessage = async (
     to: string,
     headerText: string,
@@ -797,8 +958,6 @@ export const sendMetaListMessage = async (
                 }
             }
         );
-
-        // console.log('✅ List message sent successfully');
     } catch (error: any) {
         console.error('❌ Error sending list:', error.response?.data || error.message);
         throw error;
@@ -806,10 +965,9 @@ export const sendMetaListMessage = async (
 };
 
 // ============================================
-// PROACTIVE MESSAGING (For order updates, etc.)
+// PROACTIVE MESSAGING
 // ============================================
 
-// ✅ Send order confirmation
 export const sendOrderConfirmation = async (
     phoneNumber: string,
     orderDetails: {
@@ -820,6 +978,8 @@ export const sendOrderConfirmation = async (
         estimatedDelivery: string;
     }
 ): Promise<void> => {
+    const trackLink = generateDeepLink('/orders', { orderId: orderDetails.orderId });
+    
     const message = `🎉 *Order Confirmed!*
 
 *Order ID:* #${orderDetails.orderId}
@@ -836,7 +996,7 @@ ${orderDetails.address}
 *Estimated Delivery:* ${orderDetails.estimatedDelivery}
 
 *Track Order:*
-${APP_URL}/orders/${orderDetails.orderId}
+📱 ${trackLink}
 
 *Need Help?*
 📞 ${SUPPORT_PHONE}
@@ -847,13 +1007,13 @@ Thank you for choosing AmWell! 💙`;
     await sendMetaWhatsAppMessage(phoneNumber, message);
 };
 
-// ✅ Send order status update
 export const sendOrderStatusUpdate = async (
     phoneNumber: string,
     orderId: string,
     status: 'processing' | 'shipped' | 'out_for_delivery' | 'delivered' | 'cancelled',
     trackingInfo?: string
 ): Promise<void> => {
+    const trackLink = generateDeepLink('/orders', { orderId });
     let message = '';
     
     switch (status) {
@@ -878,7 +1038,7 @@ Your order is on its way to you!
 *Estimated Delivery:* 24-48 hours
 
 *Track Order:*
-${APP_URL}/orders/${orderId}`;
+📱 ${trackLink}`;
             break;
             
         case 'out_for_delivery':
@@ -890,7 +1050,7 @@ Your order will arrive today!
 Please ensure someone is available to receive it.
 
 *Track in Real-Time:*
-${APP_URL}/orders/${orderId}`;
+📱 ${trackLink}`;
             break;
             
         case 'delivered':
@@ -901,7 +1061,7 @@ ${APP_URL}/orders/${orderId}`;
 Thank you for shopping with AmWell! 💙
 
 *Rate Your Experience:*
-${APP_URL}/rate/${orderId}
+📱 ${generateDeepLink('/rate', { orderId })}
 
 *Need to Reorder?*
 Just reply with the product name!`;
@@ -926,13 +1086,12 @@ Reply *HELP*`;
 *Status:* ${status}
 
 *Track Order:*
-${APP_URL}/orders/${orderId}`;
+📱 ${trackLink}`;
     }
     
     await sendMetaWhatsAppMessage(phoneNumber, message);
 };
 
-// ✅ Send promotional message (use sparingly - WhatsApp has strict policies!)
 export const sendPromotionalMessage = async (
     phoneNumber: string,
     promotion: {
@@ -942,6 +1101,8 @@ export const sendPromotionalMessage = async (
         validUntil: string;
     }
 ): Promise<void> => {
+    const shopLink = generateDeepLink('/products', { promo: promotion.code });
+    
     const message = `🎁 *Special Offer for You!*
 
 *${promotion.title}*
@@ -952,7 +1113,7 @@ ${promotion.description}
 *Valid Until:* ${promotion.validUntil}
 
 *Shop Now:*
-${APP_URL}/products
+📱 ${shopLink}
 
 *Reply STOP to unsubscribe from promotions*`;
 
