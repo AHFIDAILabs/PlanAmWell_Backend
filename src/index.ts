@@ -31,6 +31,7 @@ import adminRouter from "./routes/adminRoutes";
 import appointmentRouter from "./routes/appointmentRoutes";
 import videoRouter from "./routes/videoRoutes";
 import partnerRouter from "./routes/partnerRoutes";
+import cronRouter from "./routes/cron";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
@@ -397,6 +398,7 @@ app.use("/api/v1/comment", commentRouter);
 app.use("/api/v1/appointments", appointmentRouter);
 app.use("/api/v1/video", videoRouter);
 app.use("/api/v1/partners", partnerRouter);
+app.use("/api/v1/cron", cronRouter);
 
 app.use(errorHandler);
 
