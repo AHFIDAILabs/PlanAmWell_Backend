@@ -324,42 +324,57 @@ export const getCurrentUser = asyncHandler(async (req: Request & { user?: any },
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
-  
+
   if (!refreshToken) {
     res.status(400);
     throw new Error("Refresh token is required");
-  } 
+  }
 
   try {
-    // ✅ FIX 1: Use REFRESH_TOKEN_SECRET to verify
-    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!) as any;
-    
-    const userId = decoded.id; 
+    // 1️⃣ Decode JWT
+    const decoded: any = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!);
+    const userId = decoded.id;
 
-    // ✅ FIX 2: Check for the user in all collections (User, Doctor, Admin)
-    const user = await User.findById(userId) || 
-                 await Doctor.findById(userId) || 
-                 await Admin.findById(userId);
+    // 2️⃣ Find user in any collection
+    const user =
+      (await User.findById(userId)) ||
+      (await Doctor.findById(userId)) ||
+      (await Admin.findById(userId));
 
     if (!user) {
       res.status(401);
       throw new Error("User not found");
-    } 
+    }
 
-    // ✅ FIX 3: Optional but recommended - Verify the token exists in your DB
-    // This allows you to "revoke" tokens if a user logs out or is banned.
-    const storedToken = await RefreshToken.findOne({ userId: user._id });
-    if (!storedToken) throw new Error("Token revoked");
+    // 3️⃣ Find all refresh tokens for this user
+    const storedTokens = await RefreshToken.find({ userId: user._id });
 
-    // Generate a new short-lived access token
-    const newToken = signJwt(user);
+    // 4️⃣ Compare incoming token to hashed tokens
+    let matchedToken = null;
+    for (const t of storedTokens) {
+      if (await bcrypt.compare(refreshToken, t.token)) {
+        matchedToken = t;
+        break;
+      }
+    }
 
-    res.status(200).json({ 
-      success: true, 
-      token: newToken 
-      // Note: Do NOT send a new refresh token here unless you want to "rotate" it
+    if (!matchedToken) {
+      res.status(401);
+      throw new Error("Refresh token invalid or revoked");
+    }
+
+    // 5️⃣ Rotate refresh token (optional but recommended)
+    await RefreshToken.deleteOne({ _id: matchedToken._id });
+    const { token: newRefreshToken } = await signRefreshToken(user);
+
+    // 6️⃣ Generate new access token
+    const newAccessToken = signJwt(user);
+
+    res.status(200).json({
+      success: true,
+      token: newAccessToken,
+      refreshToken: newRefreshToken, // send rotated refresh token
     });
-
   } catch (err: any) {
     console.error("Refresh Token Error:", err.message);
     res.status(401);

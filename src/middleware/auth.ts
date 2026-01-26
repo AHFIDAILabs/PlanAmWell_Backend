@@ -370,11 +370,21 @@ export const authorize = (...allowedRoles: string[]) => {
 //                🔁 REFRESH TOKEN CHECKS
 // =======================================================
 
-export const verifyRefreshToken = (token: string) =>
-  jwt.verify(token, process.env.REFRESH_TOKEN_SECRET!);
+export const verifyRefreshToken = async (token: string) => {
+  const decoded: any = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET!);
+
+  const tokens = await RefreshToken.find({ userId: decoded.id });
+
+  for (const t of tokens) {
+    const match = await bcrypt.compare(token, t.token);
+    if (match) return { decoded, dbToken: t };
+  }
+
+  throw new Error("Refresh token not found");
+};
 
 export const revokeToken = async (token: string) => {
-  const decoded: any = verifyRefreshToken(token);
+  const decoded: any = await verifyRefreshToken(token);
   const savedTokens = await RefreshToken.find({ userId: decoded.id });
 
   for (const saved of savedTokens) {
