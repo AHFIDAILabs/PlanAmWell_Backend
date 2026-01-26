@@ -46,7 +46,7 @@ export const signJwt = (entity: any) => {
     return jwt.sign(
       { sessionId: entity._id.toString(), isAnonymous: true },
       process.env.JWT_SECRET!,
-      { expiresIn: "7d" }
+      { expiresIn: "3d" }
     );
   }
 
@@ -99,7 +99,7 @@ export const signAdminJwt = (admin: any) => {
 
   // console.log("🔐 [signAdminJwt] Generated ADMIN token with payload:", payload);
 
-  return jwt.sign(payload, process.env.JWT_SECRET!, { expiresIn: "7d" });
+  return jwt.sign(payload, process.env.JWT_SECRET!, { expiresIn: "3d" });
 };
 
 // =======================================================
@@ -122,7 +122,7 @@ export const signRefreshToken = async (entity: any) => {
   const payload = { id: entity._id.toString(), role };
   
   const token = jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET!, {
-    expiresIn: "7d",
+    expiresIn: "30d",
   });
 
   const salt = await bcrypt.genSalt(10);
