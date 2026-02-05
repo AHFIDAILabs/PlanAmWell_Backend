@@ -331,7 +331,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
   }
 
   try {
-    // 1️⃣ Decode JWT
+    // 1️⃣ Decode JWT - check expiry FIRST
     const decoded: any = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!);
     const userId = decoded.id;
 
@@ -347,7 +347,15 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
     }
 
     // 3️⃣ Find all refresh tokens for this user
-    const storedTokens = await RefreshToken.find({ userId: user._id });
+    const storedTokens = await RefreshToken.find({ 
+      userId: user._id,
+      expiresAt: { $gt: new Date() } // ✅ Only get non-expired tokens
+    });
+
+    if (storedTokens.length === 0) {
+      res.status(401);
+      throw new Error("No valid refresh tokens found");
+    }
 
     // 4️⃣ Compare incoming token to hashed tokens
     let matchedToken = null;
@@ -363,12 +371,14 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
       throw new Error("Refresh token invalid or revoked");
     }
 
-    // 5️⃣ Rotate refresh token (optional but recommended)
-    await RefreshToken.deleteOne({ _id: matchedToken._id });
-    const { token: newRefreshToken } = await signRefreshToken(user);
-
-    // 6️⃣ Generate new access token
+    // ✅ 5️⃣ Generate NEW tokens BEFORE deleting old one
     const newAccessToken = signJwt(user);
+    const { token: newRefreshToken, hashedToken } = await signRefreshToken(user);
+
+    // ✅ 6️⃣ NOW delete the old refresh token
+    await RefreshToken.deleteOne({ _id: matchedToken._id });
+
+    console.log("✅ Token refreshed successfully for user:", userId);
 
     res.status(200).json({
       success: true,
@@ -377,6 +387,13 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
     });
   } catch (err: any) {
     console.error("Refresh Token Error:", err.message);
+    
+    // ✅ Better error messages
+    if (err.name === 'TokenExpiredError') {
+      res.status(401);
+      throw new Error("Refresh token has expired. Please login again.");
+    }
+    
     res.status(401);
     throw new Error("Invalid or expired refresh token");
   }

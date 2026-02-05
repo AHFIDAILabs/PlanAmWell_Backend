@@ -121,8 +121,9 @@ export const signRefreshToken = async (entity: any) => {
   
   const payload = { id: entity._id.toString(), role };
   
+  // ✅ INCREASED: 90 days instead of 30
   const token = jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET!, {
-    expiresIn: "30d",
+    expiresIn: "90d",
   });
 
   const salt = await bcrypt.genSalt(10);
@@ -132,10 +133,10 @@ export const signRefreshToken = async (entity: any) => {
     token: hashedToken,
     userId: entity._id,
     userType: role,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // ✅ 90 days
   });
 
-  return { token, hashedToken };
+  return { token, hashedToken }; // ✅ Return both
 };
 
 export const verifyJwtToken = (token: string) => {
