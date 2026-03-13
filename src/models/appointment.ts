@@ -47,6 +47,7 @@ export interface IActiveParticipant {
 export interface IAppointment extends Document {
   userId: Types.ObjectId;
   doctorId: Types.ObjectId | IDoctor;
+  conversationId?: Types.ObjectId;
 
   scheduledAt: Date;
   proposedAt?: Date;
@@ -153,7 +154,10 @@ const AppointmentSchema = new Schema<IAppointment>(
       enum: ["video", "in-person", "chat", "audio"],
       default: "video",
     },
-
+   conversationId: { 
+      type: Schema.Types.ObjectId, 
+      ref: "Conversation" 
+    },
     status: {
       type: String,
       enum: [

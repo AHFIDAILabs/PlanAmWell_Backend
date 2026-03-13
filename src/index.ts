@@ -32,6 +32,7 @@ import appointmentRouter from "./routes/appointmentRoutes";
 import videoRouter from "./routes/videoRoutes";
 import partnerRouter from "./routes/partnerRoutes";
 import cronRouter from "./routes/cron";
+import chatRouter from "./routes/chatRoutes";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
@@ -313,6 +314,122 @@ export const emitAppointmentUpdated = (appointmentId: string, appointment: any) 
   }
 };
 
+export const emitNewMessage = (
+  conversationId: string,
+  message: any,
+  recipientId: string
+) => {
+  try {
+    const roomName = `user_${recipientId}`;
+    
+    io.to(roomName).emit("new-message", {
+      conversationId,
+      message,
+      timestamp: new Date().toISOString(),
+    });
+    
+    console.log(`💬 New message sent to user ${recipientId}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to emit new message:`, error);
+    return false;
+  }
+};
+
+// ✅ NEW: Emit typing indicator
+export const emitTypingIndicator = (
+  conversationId: string,
+  recipientId: string,
+  isTyping: boolean,
+  senderRole: string
+) => {
+  try {
+    const roomName = `user_${recipientId}`;
+    
+    io.to(roomName).emit("typing-indicator", {
+      conversationId,
+      isTyping,
+      senderRole,
+      timestamp: new Date().toISOString(),
+    });
+    
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to emit typing indicator:`, error);
+    return false;
+  }
+};
+
+// ✅ NEW: Emit message read receipt
+export const emitMessageRead = (
+  conversationId: string,
+  recipientId: string
+) => {
+  try {
+    const roomName = `user_${recipientId}`;
+    
+    io.to(roomName).emit("messages-read", {
+      conversationId,
+      timestamp: new Date().toISOString(),
+    });
+    
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to emit message read:`, error);
+    return false;
+  }
+};
+
+// ✅ NEW: Emit video call request
+export const emitVideoCallRequest = (
+  conversationId: string,
+  recipientId: string,
+  requesterName: string,
+  requestId: string
+) => {
+  try {
+    const roomName = `user_${recipientId}`;
+    
+    io.to(roomName).emit("video-call-request", {
+      conversationId,
+      requesterName,
+      requestId,
+      timestamp: new Date().toISOString(),
+    });
+    
+    console.log(`📞 Video call request sent to user ${recipientId}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to emit video call request:`, error);
+    return false;
+  }
+};
+
+// ✅ NEW: Emit video call response
+export const emitVideoCallResponse = (
+  conversationId: string,
+  requesterId: string,
+  status: "accepted" | "declined" | "expired" | "cancelled",
+  requestId: string
+) => {
+  try {
+    const roomName = `user_${requesterId}`;
+    
+    io.to(roomName).emit("video-call-response", {
+      conversationId,
+      status,
+      requestId,
+      timestamp: new Date().toISOString(),
+    });
+    
+    console.log(`📞 Video call response (${status}) sent to user ${requesterId}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to emit video call response:`, error);
+    return false;
+  }
+};
+
 // ✅ Helper to check if user is online
 export const isUserOnline = (userId: string): boolean => {
   return connectedUsers.has(userId);
@@ -332,6 +449,7 @@ export const getUserSocketId = (userId: string): string | undefined => {
 export const getAppointmentRoomMembers = (appointmentId: string): string[] => {
   return Array.from(appointmentRooms.get(appointmentId) || []);
 };
+
 
 // Middleware
 app.use(
@@ -399,6 +517,7 @@ app.use("/api/v1/appointments", appointmentRouter);
 app.use("/api/v1/video", videoRouter);
 app.use("/api/v1/partners", partnerRouter);
 app.use("/api/v1/cron", cronRouter);
+app.use("/api/v1/chat", chatRouter);
 
 app.use(errorHandler);
 

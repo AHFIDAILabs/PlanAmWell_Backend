@@ -6,6 +6,7 @@ import { Doctor } from "../models/doctor";
 import { User } from "../models/user";
 import { NotificationService } from "../services/NotificationService";
 import { createNotificationForUser } from "../util/sendPushNotification";
+import { Conversation } from "../models/conversation";
 
 const extractId = (field: any): string => {
   if (!field) return "";
@@ -208,14 +209,6 @@ export const updateAppointment = asyncHandler(
       throw new Error("Unauthorized");
     }
 
-    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    // console.log("🔍 APPOINTMENT UPDATE");
-    // console.log("User ID:", userId, "Role:", role);
-    // console.log("Appointment UserID:", appointment.userId.toString());
-    // console.log("Appointment DoctorID:", appointment.doctorId.toString());
-    // console.log("Requested Status:", req.body.status);
-    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
     // Permission checks
     if (role === "User" && appointment.userId.toString() !== userId) {
       return res.status(403).json({ message: "You can only update your own appointments." });
@@ -297,8 +290,6 @@ export const updateAppointment = asyncHandler(
       if (req.body.notes) updates.notes = req.body.notes;
     }
 
-    // console.log("📝 Applying updates:", updates);
-
     // Apply updates
     const updatedAppointment = (await Appointment.findByIdAndUpdate(
       req.params.id,
@@ -313,8 +304,6 @@ export const updateAppointment = asyncHandler(
       throw new Error("Failed to update appointment.");
     }
 
-    // console.log("✅ Appointment updated successfully!");
-
     // Extract clean IDs
     const patientId = extractId(updatedAppointment.userId);
     const doctorId = extractId(updatedAppointment.doctorId);
@@ -325,10 +314,48 @@ export const updateAppointment = asyncHandler(
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = patient?.name || "Patient";
 
+    // ✅ NEW: AUTO-CREATE CONVERSATION when appointment is CONFIRMED
+    if (
+      role === "Doctor" && 
+      updates.status === "confirmed" && 
+      oldStatus !== "confirmed" &&
+      !updatedAppointment.conversationId
+    ) {
+      try {
+        console.log(`💬 Creating conversation for appointment ${updatedAppointment._id}`);
+        
+        const conversation = await Conversation.create({
+          appointmentId: updatedAppointment._id,
+          participants: {
+            userId: patientId,
+            doctorId: doctorId,
+          },
+          messages: [
+            {
+              _id: new mongoose.Types.ObjectId(),
+              senderId: new mongoose.Types.ObjectId(doctorId),
+              senderType: "Doctor",
+              messageType: "system",
+              content: `${doctorName} confirmed your appointment. You can now chat before your consultation on ${updatedAppointment.scheduledAt.toLocaleString()}.`,
+              status: "sent",
+              createdAt: new Date(),
+            },
+          ],
+        });
+
+        // Link conversation to appointment
+        updatedAppointment.conversationId = conversation._id;
+        await updatedAppointment.save();
+
+        console.log(`✅ Conversation ${conversation._id} created and linked to appointment`);
+      } catch (convError) {
+        console.error("❌ Failed to create conversation:", convError);
+        // Don't fail the appointment update if conversation creation fails
+      }
+    }
+
     // ✅ NOTIFICATIONS: Doctor → Patient status changes
     if (role === "Doctor" && updates.status && updates.status !== oldStatus) {
-      // console.log(`📤 Sending status update notification to PATIENT: ${patientId}`);
-
       try {
         switch (updates.status) {
           case "confirmed":
@@ -366,8 +393,6 @@ export const updateAppointment = asyncHandler(
             );
             break;
         }
-
-        // console.log("✅ Patient notification sent successfully");
       } catch (error) {
         console.error("❌ Failed to send patient notification:", error);
       }
@@ -375,8 +400,6 @@ export const updateAppointment = asyncHandler(
 
     // ✅ NOTIFICATION: Patient cancels → Notify doctor
     if (role === "User" && updates.status === "cancelled") {
-      // console.log(`📤 Sending cancellation notification to DOCTOR: ${doctorId}`);
-
       try {
         await NotificationService.notifyAppointmentCancelledByPatient(
           doctorId,
@@ -384,7 +407,6 @@ export const updateAppointment = asyncHandler(
           patientName,
           updatedAppointment.scheduledAt
         );
-        // console.log("✅ Doctor notification sent successfully");
       } catch (error) {
         console.error("❌ Failed to send doctor notification:", error);
       }
@@ -398,8 +420,6 @@ export const updateAppointment = asyncHandler(
     ) {
       const reminderTime = new Date(updatedAppointment.scheduledAt).getTime() - 15 * 60 * 1000;
       const delay = reminderTime - Date.now();
-
-      // console.log(`⏰ Scheduling 15-min reminder in ${Math.floor(delay / 60000)} minutes`);
 
       if (delay > 0 && delay < 7 * 24 * 60 * 60 * 1000) {
         setTimeout(async () => {
@@ -426,8 +446,6 @@ export const updateAppointment = asyncHandler(
 
               // Mark as sent
               await NotificationService.markNotificationSent(String(appt._id), "reminder");
-
-              // console.log(`✅ Sent 15-min reminder for appointment ${appt._id}`);
             }
           } catch (err) {
             console.error("❌ Failed to send reminder:", err);
@@ -435,8 +453,6 @@ export const updateAppointment = asyncHandler(
         }, delay);
       }
     }
-
-    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
     res.status(200).json({ success: true, data: updatedAppointment });
   }

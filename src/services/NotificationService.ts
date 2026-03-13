@@ -402,4 +402,50 @@ export class NotificationService {
       console.error(`❌ [NotificationService] Failed to mark notification flag:`, error);
     }
   }
+
+  static async notifyNewMessage(
+  userId: string,
+  userType: "User" | "Doctor",
+  senderName: string,
+  messageContent: string,
+  conversationId: string
+) {
+  return this.create({
+    userId,
+    userType,
+    title: `New message from ${senderName}`,
+    message: messageContent.length > 100 
+      ? messageContent.substring(0, 100) + "..." 
+      : messageContent,
+    type: "system",
+    metadata: {
+      conversationId,
+      senderName,
+      type: "new_message",
+    },
+  });
+}
+
+/**
+ * ✅ NEW: Notify video call request
+ */
+static async notifyVideoCallRequest(
+  userId: string,
+  userType: "User" | "Doctor",
+  requesterName: string,
+  conversationId: string
+) {
+  return this.create({
+    userId,
+    userType,
+    title: "Video Call Request",
+    message: `${requesterName} wants to start a video call`,
+    type: "system",
+    metadata: {
+      conversationId,
+      requesterName,
+      type: "video_call_request",
+    },
+  });
+}
 }
