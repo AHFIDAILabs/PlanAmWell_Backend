@@ -101,7 +101,6 @@ const ConversationSchema = new Schema<IConversation>(
       type: Schema.Types.ObjectId,
       ref: "Appointment",
       required: true,
-      unique: true,
     },
     participants: {
       userId: { type: Schema.Types.ObjectId, ref: "User", required: true },

@@ -1,4 +1,5 @@
 // controllers/appointmentController.ts - UPGRADED WITH NOTIFICATION SERVICE
+import mongoose from "mongoose";
 import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import { Appointment, IAppointment } from "../models/appointment";
