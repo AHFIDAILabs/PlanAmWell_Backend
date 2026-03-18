@@ -14,7 +14,8 @@ const PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
 const META_APP_SECRET = process.env.META_APP_SECRET;
 const META_API_VERSION = 'v21.0';
 const APP_URL = process.env.APP_URL;
-const DEEP_LINK_SCHEME = process.env.DEEP_LINK_SCHEME || 'AskAmWell://'; 
+const DEEP_LINK_SCHEME = process.env.DEEP_LINK_SCHEME || 'planamwell://';
+const APP_DOMAIN = process.env.APP_DOMAIN || 'planamwell.com';
 const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+2349168767784';
 
 // ============================================
@@ -23,15 +24,16 @@ const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+2349168767784';
 
 // ✅ Generate deep link (opens app if installed, web otherwise)
 const generateDeepLink = (path: string, params?: Record<string, string>): string => {
-    const queryString = params ? '?' + new URLSearchParams(params).toString() : '';
-    
-    // Universal link format that works for both app and web
-    // Format: https://amwell.com/path?params&app=true
-    const webUrl = `${APP_URL}${path}${queryString}${queryString ? '&' : '?'}app=true`;
-    
-    return webUrl;
-};
+  const queryString = params
+    ? '?' + new URLSearchParams(params).toString()
+    : '';
 
+  const cleanPath = path.replace(/^\//, ''); // remove leading slash
+
+  // Primary: custom scheme (works immediately, no server needed)
+  // Format: planamwell://appointments?type=std-screening
+  return `${DEEP_LINK_SCHEME}${cleanPath}${queryString}`;
+};
 // ✅ Extract product keywords from message
 
 const extractProductKeywords = (message: string): string => {
@@ -675,9 +677,6 @@ const handleOrdersCommand = async (phoneNumber: string): Promise<string> => {
 
 *Open in App:*
 📱 ${trackLink}
-
-*Or visit web:*
-🌐 ${APP_URL}/orders?phone=${phoneNumber}
 
 *Or call us:*
 📞 ${SUPPORT_PHONE}
