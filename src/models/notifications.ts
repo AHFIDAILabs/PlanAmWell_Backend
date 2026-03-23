@@ -5,13 +5,14 @@ export type NotificationOwnerType = "User" | "Doctor" | "Admin";
 export interface INotification {
   userId: Types.ObjectId;
   userType: NotificationOwnerType; // dynamic reference
-  type: "supplement" | "order" | "appointment" | "article" | "system";
+  type: "supplement" | "order" | "appointment" | "article" | "system" | "new_message" | "chat" | "call_ended" | "comment_flagged";
   title: string;
   message: string;
   isRead: boolean;
   metadata?: {
     orderId?: string;
     appointmentId?: string;
+    conversationId?: String;
     articleId?: string;
     time?: string;
   };
@@ -35,7 +36,7 @@ const notificationSchema = new Schema<INotification>(
     },
     type: {
       type: String,
-      enum: ["supplement", "order", "appointment", "article", "system", "call_ended", "comment_flagged"],
+      enum: ["supplement", "order", "appointment", "article", "system", "call_ended", "comment_flagged", "chat", "new_message"],
       required: true,
     },
     title: { type: String, required: true },
@@ -44,6 +45,7 @@ const notificationSchema = new Schema<INotification>(
     metadata: {
       orderId: String,
       appointmentId: String,
+      conversationId: String,
       articleId: String,
       time: String,
       commentId: String,
