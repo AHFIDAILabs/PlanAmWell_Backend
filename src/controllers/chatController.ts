@@ -188,21 +188,25 @@ export const sendMessage = asyncHandler(
     emitNewMessage(conversationId, newMessage, recipientId);
 
     // Send push notification
-    try {
-      const senderName = role === "Doctor"
-        ? `Dr. ${(conversation.participants.doctorId as any).firstName}`
-        : (conversation.participants.userId as any).name;
+  try {
+  const senderName = role === "Doctor"
+    ? `Dr. ${(conversation.participants.doctorId as any).firstName}`
+    : (conversation.participants.userId as any).name;
 
-      await NotificationService.notifyNewMessage(
-        recipientId,
-        role === "Doctor" ? "User" : "Doctor",
-        senderName,
-        content,
-        conversationId
-      );
-    } catch (error) {
-      console.error("Failed to send message notification:", error);
-    }
+  // appointmentId comes from the conversation document, not from params
+  const apptId = String(conversation.appointmentId);
+
+  await NotificationService.notifyNewMessage(
+    recipientId,
+    role === "Doctor" ? "User" : "Doctor",  
+    senderName,
+    content,
+    conversationId,
+    apptId  
+  );
+} catch (error) {
+  console.error("Failed to send message notification:", error);
+}
 
     res.status(201).json({
       success: true,

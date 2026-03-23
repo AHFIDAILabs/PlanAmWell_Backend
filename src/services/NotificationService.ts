@@ -9,7 +9,7 @@ export interface NotificationPayload {
   userType: "User" | "Doctor";
   title: string;
   message: string;
-  type: "appointment" | "order" | "article" | "supplement" | "system" | "call_ended";
+  type: "appointment" | "order" | "article" | "supplement" | "system" | "call_ended" | "new_message" | "chat";
   metadata?: any;
 }
 
@@ -403,25 +403,26 @@ export class NotificationService {
     }
   }
 
-  static async notifyNewMessage(
+static async notifyNewMessage(
   userId: string,
   userType: "User" | "Doctor",
   senderName: string,
   messageContent: string,
-  conversationId: string
+  conversationId: string,
+  appointmentId: string   // ← add param
 ) {
   return this.create({
     userId,
     userType,
     title: `New message from ${senderName}`,
-    message: messageContent.length > 100 
-      ? messageContent.substring(0, 100) + "..." 
+    message: messageContent.length > 100
+      ? messageContent.substring(0, 100) + "..."
       : messageContent,
-    type: "system",
+    type: "new_message",   // ← was "system", frontend never matched it
     metadata: {
       conversationId,
+      appointmentId,       // ← frontend needs this to navigate
       senderName,
-      type: "new_message",
     },
   });
 }
