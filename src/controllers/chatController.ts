@@ -595,7 +595,7 @@ export const getUserConversations = asyncHandler(
         : { "participants.userId": userId, isActive: true };
 
     const conversations = await Conversation.find(query)
-      .populate("appointmentId", "scheduledAt status callStatus")
+      .populate("appointmentId", "_id scheduledAt status callStatus")
       .populate("participants.userId", "name userImage")
       .populate("participants.doctorId", "firstName lastName doctorImage")
       .sort({ lastActivityAt: -1 });
