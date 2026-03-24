@@ -195,6 +195,7 @@ export const sendMessage = asyncHandler(
 
   // appointmentId comes from the conversation document, not from params
   const apptId = String(conversation.appointmentId);
+  console.log('[Chat] appointmentId for notification:', apptId);
 
   await NotificationService.notifyNewMessage(
     recipientId,
