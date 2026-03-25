@@ -10,6 +10,8 @@ import {
   respondToVideoCall,
   cancelVideoCallRequest,
   getUserConversations,
+  uploadChatMedia,
+  uploadMiddleware
 } from "../controllers/chatController";
 import { verifyToken } from "../middleware/auth";
 
@@ -17,6 +19,7 @@ const chatRouter = Router();
 
 // All routes require authentication
 chatRouter.use(verifyToken);
+chatRouter.post("/upload", uploadMiddleware, uploadChatMedia);
 
 // Get user's conversations
 chatRouter.get("/conversations", getUserConversations);

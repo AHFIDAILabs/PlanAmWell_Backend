@@ -14,6 +14,15 @@ import {
   emitVideoCallResponse,
 } from "../index";
 import { NotificationService } from "../services/NotificationService";
+import multer from "multer";
+import { uploadToCloudinary, uploadDocumentToCloudinary } from "../middleware/claudinary";
+
+const storage = multer.memoryStorage();
+export const uploadMiddleware = multer({
+  storage,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB limit
+}).single("file");
+ 
 
 /**
  * ✅ Get or Create Conversation (Auto-created when appointment is confirmed)
@@ -263,6 +272,56 @@ export const getMessages = asyncHandler(
         hasMore: skip + Number(limit) < totalMessages,
       },
     });
+  }
+);
+
+
+export const uploadChatMedia = asyncHandler(
+  async (req: Request, res: Response) => {
+    const userId = req.auth?.id;
+ 
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+ 
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file provided" });
+    }
+ 
+    const { buffer, mimetype, originalname } = req.file;
+    const isImage = mimetype.startsWith("image/");
+    const isDocument = !isImage; // pdf, docx, etc.
+ 
+    try {
+      let url = "";
+      let fileType: "image" | "document" = "image";
+ 
+      if (isImage) {
+        const result = await uploadToCloudinary(buffer, "chat/images");
+        url = result.secure_url;
+        fileType = "image";
+      } else {
+        const result = await uploadDocumentToCloudinary(buffer, "chat/documents", mimetype);
+        url = result.fileUrl;
+        fileType = "document";
+      }
+ 
+      return res.status(200).json({
+        success: true,
+        data: {
+          url,
+          fileType,
+          fileName: originalname,
+          mimeType: mimetype,
+        },
+      });
+    } catch (error: any) {
+      console.error("[Chat Upload] Failed:", error.message);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to upload file",
+      });
+    }
   }
 );
 

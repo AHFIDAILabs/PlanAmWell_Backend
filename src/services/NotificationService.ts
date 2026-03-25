@@ -166,26 +166,28 @@ export class NotificationService {
   /**
    * ✅ APPOINTMENT: Confirmed by doctor
    */
-  static async notifyAppointmentConfirmed(
-    userId: string,
-    appointmentId: string,
-    doctorName: string,
-    scheduledAt: Date
-  ) {
-    return this.create({
-      userId,
-      userType: "User",
-      title: "Appointment Confirmed ✅",
-      message: `${doctorName} has confirmed your appointment for ${scheduledAt.toLocaleString()}`,
-      type: "appointment",
-      metadata: {
-        appointmentId,
-        doctorName,
-        scheduledAt: scheduledAt.toISOString(),
-        status: "confirmed",
-      },
-    });
-  }
+static async notifyAppointmentConfirmed(
+  userId: string,
+  appointmentId: string,
+  doctorName: string,
+  scheduledAt: Date,
+  conversationId?: string   // ← NEW optional param
+) {
+  return this.create({
+    userId,
+    userType: "User",
+    title: "Appointment Confirmed ✅",
+    message: `${doctorName} confirmed your appointment for ${scheduledAt.toLocaleString()}. Your chat room is ready!`,
+    type: "appointment",
+    metadata: {
+      appointmentId,
+      doctorName,
+      scheduledAt:    scheduledAt.toISOString(),
+      status:         "confirmed",
+      conversationId: conversationId ?? null,  // ← patient uses this to open chat
+    },
+  });
+}
 
   /**
    * ✅ APPOINTMENT: Rejected by doctor

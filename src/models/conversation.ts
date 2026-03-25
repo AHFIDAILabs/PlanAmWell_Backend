@@ -1,7 +1,7 @@
 // models/conversation.ts - Doctor-Patient Chat Room
 import mongoose, { Schema, Document, Types } from "mongoose";
 
-export type MessageType = "text" | "image" | "video" | "audio" | "system";
+export type MessageType = "text" | "image" | "video" | "audio" | "system" | "document";
 export type MessageStatus = "sent" | "delivered" | "read";
 
 export interface IMessage {
@@ -64,7 +64,7 @@ const MessageSchema = new Schema<IMessage>(
     senderType: { type: String, enum: ["User", "Doctor"], required: true },
     messageType: {
       type: String,
-      enum: ["text", "image", "video", "audio", "system"],
+      enum: ["text", "image", "video", "audio", "system", "document"],
       default: "text",
     },
     content: { type: String, required: true },
