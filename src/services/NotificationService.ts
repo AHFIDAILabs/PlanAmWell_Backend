@@ -451,4 +451,55 @@ static async notifyVideoCallRequest(
     },
   });
 }
+
+
+/**
+ * ✅ APPOINTMENT: Ended by doctor (sent to both patient AND doctor)
+ */
+static async notifyAppointmentEnded(
+  userId: string,
+  userType: "User" | "Doctor",
+  appointmentId: string,
+  otherPartyName: string
+) {
+  const isDoctor = userType === "Doctor";
+  return this.create({
+    userId,
+    userType,
+    title: "Appointment Ended",
+    message: isDoctor
+      ? `You have ended the appointment with ${otherPartyName}.`
+      : `Your appointment with ${otherPartyName} has been ended. Thank you for consulting with us!`,
+    type: "appointment",
+    metadata: {
+      appointmentId,
+      status: "completed",
+      otherPartyName,
+    },
+  });
+}
+ 
+/**
+ * ✅ APPOINTMENT: Auto-expired (sent to both parties by the cron job)
+ */
+static async notifyAppointmentExpired(
+  userId: string,
+  userType: "User" | "Doctor",
+  appointmentId: string,
+  otherPartyName: string
+) {
+  return this.create({
+    userId,
+    userType,
+    title: "Appointment Expired",
+    message: `Your appointment with ${otherPartyName} has automatically expired after 48 hours.`,
+    type: "appointment",
+    metadata: {
+      appointmentId,
+      status: "completed",
+      expired: true,
+      otherPartyName,
+    },
+  });
+}
 }

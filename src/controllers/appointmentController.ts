@@ -8,6 +8,7 @@ import { User } from "../models/user";
 import { NotificationService } from "../services/NotificationService";
 import { createNotificationForUser } from "../util/sendPushNotification";
 import { Conversation } from "../models/conversation";
+import { emitAppointmentEnded } from "../index";
 
 const extractId = (field: any): string => {
   if (!field) return "";
@@ -589,3 +590,88 @@ export const sendAppointmentReminders = async () => {
     return { success: false, error };
   }
 };
+
+
+/**
+ * @desc  Doctor ends an appointment manually
+ * @route PATCH /api/v1/appointments/:id/end
+ * @access Doctor only
+ */
+export const endAppointment = asyncHandler(
+  async (req: Request, res: Response) => {
+    const appointmentId = req.params.id;
+    const doctorId = req.auth?.id;
+ 
+    const appointment = await Appointment.findById(appointmentId)
+      .populate("doctorId", "firstName lastName")
+      .populate("userId", "name");
+ 
+    if (!appointment) {
+      res.status(404);
+      throw new Error("Appointment not found.");
+    }
+ 
+    // Only the assigned doctor can end it
+    if (extractId(appointment.doctorId) !== doctorId) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only end your own appointments.",
+      });
+    }
+ 
+    // Guard: only active appointments can be ended
+    const endableStatuses = ["confirmed", "in-progress", "pending"];
+    if (!endableStatuses.includes(appointment.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot end an appointment with status "${appointment.status}".`,
+      });
+    }
+ 
+    // ── Update appointment ────────────────────────────────────────────────────
+    appointment.status = "completed";
+    appointment.callStatus = "ended";
+    appointment.callEndedAt = new Date();
+    appointment.callEndedBy = "Doctor";
+    await appointment.save();
+ 
+    // ── Lock the conversation (read-only) ─────────────────────────────────────
+    await Conversation.findOneAndUpdate(
+      { appointmentId: appointment._id },
+      { isActive: false }
+    );
+ 
+    // ── Notify both parties ───────────────────────────────────────────────────
+    const patientId = extractId(appointment.userId);
+    const doctor = appointment.doctorId as any;
+    const patient = appointment.userId as any;
+    const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
+    const patientName = patient?.name || "Patient";
+ 
+    try {
+      await NotificationService.notifyAppointmentEnded(
+        patientId,
+        "User",
+        String(appointment._id),
+        doctorName
+      );
+      await NotificationService.notifyAppointmentEnded(
+        doctorId,
+        "Doctor",
+        String(appointment._id),
+        patientName
+      );
+    } catch (err) {
+      console.error("❌ Failed to send appointment-ended notifications:", err);
+    }
+ 
+    // ── Emit real-time event to both parties via appointment room ─────────────
+    emitAppointmentEnded(String(appointment._id));
+ 
+    res.status(200).json({
+      success: true,
+      message: "Appointment ended successfully.",
+      data: appointment,
+    });
+  }
+);

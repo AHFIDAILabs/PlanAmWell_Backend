@@ -97,6 +97,7 @@ export interface IAppointment extends Document {
 
   // ✅ NEW: Call history
   callAttempts: ICallAttempt[];
+  expiresAt?: Date;
 
   // ✅ NEW: Prevent duplicate notifications
   notificationsSent: {
@@ -213,6 +214,10 @@ const AppointmentSchema = new Schema<IAppointment>(
     activeParticipants: {
       type: [ActiveParticipantSchema],
       default: [],
+    },
+
+    expiresAt: {
+      type: Date,
     },
 
     expiryWarningSent: {

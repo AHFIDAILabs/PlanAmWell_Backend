@@ -430,6 +430,26 @@ export const emitVideoCallResponse = (
   }
 };
 
+
+/**
+ * Emit appointment-ended to the appointment room.
+ * Both doctor and patient receive this and lock their UI.
+ */
+export const emitAppointmentEnded = (appointmentId: string) => {
+  try {
+    const roomName = `appointment:${appointmentId}`;
+    io.to(roomName).emit("appointment-ended", {
+      appointmentId,
+      timestamp: new Date().toISOString(),
+    });
+    console.log(`🏁 appointment-ended emitted to room ${appointmentId}`);
+    return true;
+  } catch (error) {
+    console.error("❌ Failed to emit appointment-ended:", error);
+    return false;
+  }
+};
+
 // ✅ Helper to check if user is online
 export const isUserOnline = (userId: string): boolean => {
   return connectedUsers.has(userId);
