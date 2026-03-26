@@ -25,7 +25,7 @@ export const uploadMiddleware = multer({
  
 
 /**
- * ✅ Get or Create Conversation (Auto-created when appointment is confirmed)
+ *  Get or Create Conversation (Auto-created when appointment is confirmed)
  */
 export const getOrCreateConversation = asyncHandler(
   async (req: Request, res: Response) => {
@@ -651,8 +651,8 @@ export const getUserConversations = asyncHandler(
 
     const query =
       role === "Doctor"
-        ? { "participants.doctorId": userId, isActive: true }
-        : { "participants.userId": userId, isActive: true };
+        ? { "participants.doctorId": userId }
+        : { "participants.userId": userId};
 
     const conversations = await Conversation.find(query)
       .populate("appointmentId", "_id scheduledAt status callStatus")
