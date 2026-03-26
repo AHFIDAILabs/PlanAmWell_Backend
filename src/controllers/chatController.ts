@@ -40,7 +40,7 @@ export const getOrCreateConversation = asyncHandler(
       });
     }
 
-    // Check appointment exists and user has access
+    // Fetch appointment and check access
     const appointment = await Appointment.findById(appointmentId)
       .populate("userId", "name userImage email")
       .populate("doctorId", "firstName lastName doctorImage email");
@@ -52,7 +52,6 @@ export const getOrCreateConversation = asyncHandler(
       });
     }
 
-    // Verify user is part of appointment
     const doctorId = String(
       (appointment.doctorId as any)._id || appointment.doctorId
     );
@@ -67,17 +66,31 @@ export const getOrCreateConversation = asyncHandler(
       });
     }
 
-    // Check if conversation exists
-    let conversation = await Conversation.findOne({ appointmentId })
-      .populate("participants.userId", "name userImage")
-      .populate("participants.doctorId", "firstName lastName doctorImage");
+    // Try to find existing conversation for this appointment
+    let conversation = await Conversation.findOne({
+      appointmentId: appointment._id,
+      "participants.userId": patientId,
+      "participants.doctorId": doctorId,
+    });
 
-    // Create conversation if doesn't exist
-    if (!conversation) {
+    if (conversation) {
+      // Reactivate conversation if it was inactive
+      if (!conversation.isActive) {
+        conversation.isActive = true;
+        conversation.lastActivityAt = new Date();
+        await conversation.save();
+      }
+
+      // Populate participants
+      conversation = await (await conversation
+        .populate("participants.userId", "name userImage"))
+        .populate("participants.doctorId", "firstName lastName doctorImage");
+    } else {
+      // Create new conversation
       const doctorName = `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`;
-      
-      conversation = await Conversation.create({
-        appointmentId,
+
+      conversation = new Conversation({
+        appointmentId: appointment._id,
         participants: {
           userId: patientId,
           doctorId: doctorId,
@@ -93,27 +106,36 @@ export const getOrCreateConversation = asyncHandler(
             createdAt: new Date(),
           },
         ],
+        unreadCount: { user: 0, doctor: 0 },
+        isActive: true,
+        isPinned: { user: false, doctor: false },
+        isMuted: { user: false, doctor: false },
+        lastActivityAt: new Date(),
+        videoCallHistory: [],
       });
 
-      // Populate the newly created conversation
-      conversation = await Conversation.findById(conversation._id)
-        .populate("participants.userId", "name userImage")
+      await conversation.save();
+
+      // Populate participants
+      conversation = await (await conversation
+        .populate("participants.userId", "name userImage"))
         .populate("participants.doctorId", "firstName lastName doctorImage");
 
       // Link conversation to appointment
-      appointment.conversationId = conversation!._id as mongoose.Types.ObjectId;
+      appointment.conversationId = conversation._id as mongoose.Types.ObjectId;
       await appointment.save();
 
       console.log(`✅ Conversation created for appointment ${appointmentId}`);
     }
 
-    // Mark messages as read for current user
+    // Reset unread count for current user
     const unreadField = role === "Doctor" ? "doctor" : "user";
-    if (conversation!.unreadCount[unreadField] > 0) {
-      conversation!.unreadCount[unreadField] = 0;
-      await conversation!.save();
+    if (conversation.unreadCount[unreadField] > 0) {
+      conversation.unreadCount[unreadField] = 0;
+      await conversation.save();
     }
 
+    // Return response
     res.status(200).json({
       success: true,
       data: conversation,
