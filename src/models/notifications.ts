@@ -10,6 +10,9 @@ export interface INotification {
   message: string;
   isRead: boolean;
   metadata?: {
+    patientId?: Types.ObjectId;
+    type: "record_access_response" | "record_access_request" | "record_accessed"
+    approved?: boolean;
     orderId?: string;
     appointmentId?: string;
     conversationId?: String;

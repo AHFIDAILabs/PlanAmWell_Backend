@@ -4,6 +4,8 @@ import { Appointment } from "../models/appointment";
 import { Conversation } from "../models/conversation";
 import { NotificationService } from "../services/NotificationService";
 import { emitAppointmentEnded } from "../index";
+import { AccessRequest } from "../models/AccessRequest";
+import { User } from "../models/user";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // JOB 1: 15-minute appointment reminders (unchanged, runs every minute)
@@ -131,5 +133,54 @@ cron.schedule("*/15 * * * *", async () => {
     console.error("❌ [ExpiryJob] Error:", error);
   }
 });
+
+// Auto-deny access requests that have passed their 48h expiry
+// Runs every 30 minutes — expiry is 48h so this is more than fine
+cron.schedule("*\/30 * * * *", async () => {
+  try {
+    const now = new Date();
+ 
+    const expired = await AccessRequest.find({
+      status:    "pending",
+      expiresAt: { $lt: now },
+    });
+ 
+    if (expired.length === 0) return;
+ 
+    console.log(`⏰ [AccessRequestExpiry] Expiring ${expired.length} access requests`);
+ 
+    for (const request of expired) {
+      request.status      = "expired";
+      request.respondedAt = now;
+      await request.save();
+ 
+      // Notify requesting doctor
+      try {
+        const patient = await User.findById(request.patientId).select("name");
+        const patientName = patient?.name || "The patient";
+ 
+        await NotificationService.create({
+          userId:   String(request.requestingDoctorId),
+          userType: "Doctor",
+          title:    "Record Access Request Expired",
+          message:  `Your request to access ${patientName}'s medical record has expired without a response.`,
+          type:     "system",
+          metadata: {
+            patientId:      String(request.patientId),
+            accessRequestId: String(request._id),
+            type:           "record_access_response",
+          },
+        });
+      } catch (err) {
+        console.error(`❌ [AccessRequestExpiry] Notify failed for ${request._id}:`, err);
+      }
+    }
+  } catch (error) {
+    console.error("❌ [AccessRequestExpiry] Error:", error);
+  }
+});
+
+
+
 
 console.log("✅ Appointment reminder + auto-expiry cron jobs started");

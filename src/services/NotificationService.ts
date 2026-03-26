@@ -3,6 +3,7 @@ import Notification from "../models/notifications";
 import { Appointment } from "../models/appointment";
 import { emitNotification } from "../index";
 import { sendPushNotification } from "../util/sendPushNotification";
+import { User } from "../models/user";
 
 export interface NotificationPayload {
   userId: string;
@@ -502,4 +503,69 @@ static async notifyAppointmentExpired(
     },
   });
 }
+
+ static async notifyRecordAccessRequest(
+    patientId: string,
+    accessRequestId: string,
+    doctorName: string,
+    doctorSpecialization: string
+  ) {
+    return this.create({
+      userId:   patientId,
+      userType: "User",
+      title:    "Medical Record Access Request",
+      message:  `${doctorName} (${doctorSpecialization}) is requesting access to your medical record.`,
+      type:     "system",
+      metadata: {
+        accessRequestId,
+        doctorName,
+        type: "record_access_request",
+      },
+    });
+  }
+ 
+  static async notifyRecordAccessResponse(
+    doctorId: string,
+    patientId: string,
+    doctorName: string,
+    approved: boolean
+  ) {
+    // Notify doctor of patient's decision
+    const patient = await User.findById(patientId).select("name");
+    const patientName = patient?.name || "The patient";
+ 
+    return this.create({
+      userId:   doctorId,
+      userType: "Doctor",
+      title:    approved ? "Record Access Approved ✅" : "Record Access Denied",
+      message:  approved
+        ? `${patientName} approved your request to access their medical record.`
+        : `${patientName} denied your request to access their medical record.`,
+      type: "system",
+      metadata: {
+        patientId,
+        approved,
+        type: "record_access_response",
+      },
+    });
+  }
+ 
+  static async notifyRecordAccessed(
+    patientId: string,
+    recordId: string,
+    doctorName: string
+  ) {
+    return this.create({
+      userId:   patientId,
+      userType: "User",
+      title:    "Medical Record Viewed",
+      message:  `${doctorName} viewed your medical record.`,
+      type:     "system",
+      metadata: {
+        recordId,
+        doctorName,
+        type: "record_accessed",
+      },
+    });
+  }
 }

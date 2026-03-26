@@ -10,6 +10,7 @@ import morgan from "morgan";
 import http from "http";
 import mongoose from "mongoose";
 import { errorHandler } from "./middleware/errorHandler";
+
 import "./cron/reminderJob";
 
 // Import routers
@@ -33,6 +34,7 @@ import videoRouter from "./routes/videoRoutes";
 import partnerRouter from "./routes/partnerRoutes";
 import cronRouter from "./routes/cron";
 import chatRouter from "./routes/chatRoutes";
+import medicalRecordRouter from "./routes/medicalRecordRoutes";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
@@ -450,6 +452,26 @@ export const emitAppointmentEnded = (appointmentId: string) => {
   }
 };
 
+export const emitAccessRequestUpdate = (
+  doctorId: string,
+  accessRequestId: string,
+  status: "approved" | "denied" | "expired"
+) => {
+  try {
+    const roomName = `user_${doctorId}`;
+    io.to(roomName).emit("access-request-update", {
+      accessRequestId,
+      status,
+      timestamp: new Date().toISOString(),
+    });
+    console.log(`🏥 access-request-update (${status}) sent to doctor ${doctorId}`);
+    return true;
+  } catch (error) {
+    console.error("❌ Failed to emit access-request-update:", error);
+    return false;
+  }
+};
+
 // ✅ Helper to check if user is online
 export const isUserOnline = (userId: string): boolean => {
   return connectedUsers.has(userId);
@@ -538,6 +560,7 @@ app.use("/api/v1/video", videoRouter);
 app.use("/api/v1/partners", partnerRouter);
 app.use("/api/v1/cron", cronRouter);
 app.use("/api/v1/chat", chatRouter);
+app.use("/api/v1/medical-records", medicalRecordRouter);
 
 app.use(errorHandler);
 
