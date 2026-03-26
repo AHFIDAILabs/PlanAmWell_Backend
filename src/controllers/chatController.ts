@@ -74,12 +74,20 @@ export const getOrCreateConversation = asyncHandler(
     });
 
     if (conversation) {
-      // Reactivate conversation if it was inactive
-      if (!conversation.isActive) {
-        conversation.isActive = true;
-        conversation.lastActivityAt = new Date();
-        await conversation.save();
-      }
+  // Reactivate conversation if it was inactive
+if (!conversation.isActive) {
+  // Prevent reactivation if appointment is completed
+  if (appointment.status === "completed") {
+    return res.status(403).json({
+      success: false,
+      message: "Chat is locked because the appointment has ended.",
+    });
+  }
+
+  conversation.isActive = true;
+  conversation.lastActivityAt = new Date();
+  await conversation.save();
+}
 
       // Populate participants
       conversation = await (await conversation
@@ -179,6 +187,8 @@ export const sendMessage = asyncHandler(
       });
     }
 
+    
+
     // Verify user is participant
     const doctorId = String(conversation.participants.doctorId._id);
     const patientId = String(conversation.participants.userId._id);
@@ -189,6 +199,13 @@ export const sendMessage = asyncHandler(
         message: "Unauthorized",
       });
     }
+
+    if (!conversation.isActive) {
+  return res.status(403).json({
+    success: false,
+    message: "Cannot send messages: this chat is locked.",
+  });
+}
 
     // Create message
     const newMessage: IMessage = {
