@@ -714,13 +714,13 @@ export const endAppointment = asyncHandler(
     }
  
     // Guard: only active appointments can be ended
-    const endableStatuses = ["confirmed", "in-progress", "pending"];
-    if (!endableStatuses.includes(appointment.status)) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot end an appointment with status "${appointment.status}".`,
-      });
-    }
+ if (appointment.status === "completed") {
+  return res.status(200).json({
+    success: true,
+    message: "Appointment already ended.",
+    data: appointment,
+  });
+}
  
     // ── Update appointment ────────────────────────────────────────────────────
     appointment.status = "completed";
