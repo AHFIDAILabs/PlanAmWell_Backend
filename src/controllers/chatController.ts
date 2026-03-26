@@ -6,8 +6,8 @@ import { Conversation, IMessage } from "../models/conversation";
 import { Appointment } from "../models/appointment";
 import { User } from "../models/user";
 import { Doctor } from "../models/doctor";
-import { 
-  emitNewMessage, 
+import {
+  emitNewMessage,
   emitTypingIndicator,
   emitMessageRead,
   emitVideoCallRequest,
@@ -15,17 +15,24 @@ import {
 } from "../index";
 import { NotificationService } from "../services/NotificationService";
 import multer from "multer";
-import { uploadToCloudinary, uploadDocumentToCloudinary } from "../middleware/claudinary";
+import {
+  uploadToCloudinary,
+  uploadDocumentToCloudinary,
+} from "../middleware/claudinary";
 
 const storage = multer.memoryStorage();
 export const uploadMiddleware = multer({
   storage,
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB limit
 }).single("file");
- 
 
 /**
- *  Get or Create Conversation (Auto-created when appointment is confirmed)
+ * Get or Create Conversation
+ *
+ * FIX: Removed the auto-reactivation block that was re-enabling locked
+ * conversations. `isActive` is now exclusively managed by `endAppointment`.
+ * If a conversation is inactive (appointment ended), we return it as-is so
+ * the frontend can render the correct read-only state.
  */
 export const getOrCreateConversation = asyncHandler(
   async (req: Request, res: Response) => {
@@ -74,28 +81,38 @@ export const getOrCreateConversation = asyncHandler(
     });
 
     if (conversation) {
-  // Reactivate conversation if it was inactive
-if (!conversation.isActive) {
-  // Prevent reactivation if appointment is completed
-  if (appointment.status === "completed") {
-    return res.status(403).json({
-      success: false,
-      message: "Chat is locked because the appointment has ended.",
-    });
-  }
-
-  conversation.isActive = true;
-  conversation.lastActivityAt = new Date();
-  await conversation.save();
-}
+      // ── FIX: REMOVED the auto-reactivation block entirely ──────────────────
+      //
+      // Previously this block existed here:
+      //
+      //   if (!conversation.isActive) {
+      //     if (appointment.status === "completed") {
+      //       return res.status(403).json({ ... });
+      //     }
+      //     conversation.isActive = true;   ← THIS was the bug
+      //     await conversation.save();
+      //   }
+      //
+      // The race condition: endAppointment saves appointment.status="completed"
+      // and conversation.isActive=false in two separate DB writes. If this
+      // function ran between those two writes, appointment.status was still
+      // "confirmed" so the guard didn't fire, and the conversation got
+      // reactivated — unlocking the chat.
+      //
+      // Now we simply return the conversation as-is. The frontend reads
+      // `isActive` and renders locked/unlocked state accordingly.
+      // Only `endAppointment` may set isActive = false.
+      // ───────────────────────────────────────────────────────────────────────
 
       // Populate participants
-      conversation = await (await conversation
-        .populate("participants.userId", "name userImage"))
-        .populate("participants.doctorId", "firstName lastName doctorImage");
+      conversation = await (
+        await conversation.populate("participants.userId", "name userImage")
+      ).populate("participants.doctorId", "firstName lastName doctorImage");
     } else {
-      // Create new conversation
-      const doctorName = `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`;
+      // ── Create new conversation ─────────────────────────────────────────────
+      const doctorName = `Dr. ${(appointment.doctorId as any).firstName} ${
+        (appointment.doctorId as any).lastName
+      }`;
 
       conversation = new Conversation({
         appointmentId: appointment._id,
@@ -125,12 +142,13 @@ if (!conversation.isActive) {
       await conversation.save();
 
       // Populate participants
-      conversation = await (await conversation
-        .populate("participants.userId", "name userImage"))
-        .populate("participants.doctorId", "firstName lastName doctorImage");
+      conversation = await (
+        await conversation.populate("participants.userId", "name userImage")
+      ).populate("participants.doctorId", "firstName lastName doctorImage");
 
       // Link conversation to appointment
-      appointment.conversationId = conversation._id as mongoose.Types.ObjectId;
+      appointment.conversationId =
+        conversation._id as mongoose.Types.ObjectId;
       await appointment.save();
 
       console.log(`✅ Conversation created for appointment ${appointmentId}`);
@@ -143,7 +161,8 @@ if (!conversation.isActive) {
       await conversation.save();
     }
 
-    // Return response
+    // Return response — frontend uses conversation.isActive to decide
+    // whether to render the input bar or the read-only locked footer
     res.status(200).json({
       success: true,
       data: conversation,
@@ -160,7 +179,7 @@ if (!conversation.isActive) {
 );
 
 /**
- * ✅ Send Message
+ * Send Message
  */
 export const sendMessage = asyncHandler(
   async (req: Request, res: Response) => {
@@ -178,7 +197,10 @@ export const sendMessage = asyncHandler(
 
     const conversation = await Conversation.findById(conversationId)
       .populate("participants.userId", "name userImage expoPushTokens")
-      .populate("participants.doctorId", "firstName lastName doctorImage expoPushTokens");
+      .populate(
+        "participants.doctorId",
+        "firstName lastName doctorImage expoPushTokens"
+      );
 
     if (!conversation) {
       return res.status(404).json({
@@ -186,8 +208,6 @@ export const sendMessage = asyncHandler(
         message: "Conversation not found",
       });
     }
-
-    
 
     // Verify user is participant
     const doctorId = String(conversation.participants.doctorId._id);
@@ -201,11 +221,11 @@ export const sendMessage = asyncHandler(
     }
 
     if (!conversation.isActive) {
-  return res.status(403).json({
-    success: false,
-    message: "Cannot send messages: this chat is locked.",
-  });
-}
+      return res.status(403).json({
+        success: false,
+        message: "Cannot send messages: this chat is locked.",
+      });
+    }
 
     // Create message
     const newMessage: IMessage = {
@@ -236,26 +256,26 @@ export const sendMessage = asyncHandler(
     emitNewMessage(conversationId, newMessage, recipientId);
 
     // Send push notification
-  try {
-  const senderName = role === "Doctor"
-    ? `Dr. ${(conversation.participants.doctorId as any).firstName}`
-    : (conversation.participants.userId as any).name;
+    try {
+      const senderName =
+        role === "Doctor"
+          ? `Dr. ${(conversation.participants.doctorId as any).firstName}`
+          : (conversation.participants.userId as any).name;
 
-  // appointmentId comes from the conversation document, not from params
-  const apptId = String(conversation.appointmentId);
-  console.log('[Chat] appointmentId for notification:', apptId);
+      const apptId = String(conversation.appointmentId);
+      console.log("[Chat] appointmentId for notification:", apptId);
 
-  await NotificationService.notifyNewMessage(
-    recipientId,
-    role === "Doctor" ? "User" : "Doctor",  
-    senderName,
-    content,
-    conversationId,
-    apptId  
-  );
-} catch (error) {
-  console.error("Failed to send message notification:", error);
-}
+      await NotificationService.notifyNewMessage(
+        recipientId,
+        role === "Doctor" ? "User" : "Doctor",
+        senderName,
+        content,
+        conversationId,
+        apptId
+      );
+    } catch (error) {
+      console.error("Failed to send message notification:", error);
+    }
 
     res.status(201).json({
       success: true,
@@ -265,7 +285,7 @@ export const sendMessage = asyncHandler(
 );
 
 /**
- * ✅ Get Messages (Paginated)
+ * Get Messages (Paginated)
  */
 export const getMessages = asyncHandler(
   async (req: Request, res: Response) => {
@@ -295,10 +315,13 @@ export const getMessages = asyncHandler(
 
     const skip = (Number(page) - 1) * Number(limit);
     const totalMessages = conversation.messages.length;
-    
+
     // Get messages in reverse order (newest first) with pagination
     const messages = conversation.messages
-      .slice(Math.max(0, totalMessages - skip - Number(limit)), totalMessages - skip)
+      .slice(
+        Math.max(0, totalMessages - skip - Number(limit)),
+        totalMessages - skip
+      )
       .reverse();
 
     res.status(200).json({
@@ -314,37 +337,44 @@ export const getMessages = asyncHandler(
   }
 );
 
-
+/**
+ * Upload Chat Media
+ */
 export const uploadChatMedia = asyncHandler(
   async (req: Request, res: Response) => {
     const userId = req.auth?.id;
- 
+
     if (!userId) {
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
- 
+
     if (!req.file) {
-      return res.status(400).json({ success: false, message: "No file provided" });
+      return res
+        .status(400)
+        .json({ success: false, message: "No file provided" });
     }
- 
+
     const { buffer, mimetype, originalname } = req.file;
     const isImage = mimetype.startsWith("image/");
-    const isDocument = !isImage; // pdf, docx, etc.
- 
+
     try {
       let url = "";
       let fileType: "image" | "document" = "image";
- 
+
       if (isImage) {
         const result = await uploadToCloudinary(buffer, "chat/images");
         url = result.secure_url;
         fileType = "image";
       } else {
-        const result = await uploadDocumentToCloudinary(buffer, "chat/documents", mimetype);
+        const result = await uploadDocumentToCloudinary(
+          buffer,
+          "chat/documents",
+          mimetype
+        );
         url = result.fileUrl;
         fileType = "document";
       }
- 
+
       return res.status(200).json({
         success: true,
         data: {
@@ -365,7 +395,7 @@ export const uploadChatMedia = asyncHandler(
 );
 
 /**
- * ✅ Mark Messages as Read
+ * Mark Messages as Read
  */
 export const markAsRead = asyncHandler(
   async (req: Request, res: Response) => {
@@ -402,7 +432,7 @@ export const markAsRead = asyncHandler(
       role === "Doctor"
         ? String(conversation.participants.userId)
         : String(conversation.participants.doctorId);
-    
+
     emitMessageRead(conversationId, recipientId);
 
     res.status(200).json({
@@ -413,7 +443,7 @@ export const markAsRead = asyncHandler(
 );
 
 /**
- * ✅ Update Typing Indicator
+ * Update Typing Indicator
  */
 export const updateTyping = asyncHandler(
   async (req: Request, res: Response) => {
@@ -446,7 +476,7 @@ export const updateTyping = asyncHandler(
 );
 
 /**
- * ✅ Request Video Call (Consent Required)
+ * Request Video Call (Consent Required)
  */
 export const requestVideoCall = asyncHandler(
   async (req: Request, res: Response) => {
@@ -551,16 +581,17 @@ export const requestVideoCall = asyncHandler(
 );
 
 /**
- * ✅ Respond to Video Call Request
+ * Respond to Video Call Request
  */
 export const respondToVideoCall = asyncHandler(
   async (req: Request, res: Response) => {
     const { conversationId, requestId } = req.params;
-    const { accept } = req.body; // true or false
+    const { accept } = req.body;
     const userId = req.auth?.id;
 
-    const conversation = await Conversation.findById(conversationId)
-      .populate("appointmentId");
+    const conversation = await Conversation.findById(conversationId).populate(
+      "appointmentId"
+    );
 
     if (!conversation) {
       return res.status(404).json({
@@ -592,11 +623,11 @@ export const respondToVideoCall = asyncHandler(
     conversation.videoCallHistory.push(conversation.activeVideoRequest);
 
     const requesterId = String(conversation.activeVideoRequest.requestedBy);
-    
+
     // Clear active request
     const responseStatus = conversation.activeVideoRequest.status;
     conversation.activeVideoRequest = undefined;
-    
+
     await conversation.save();
 
     // Emit response to requester
@@ -616,7 +647,7 @@ export const respondToVideoCall = asyncHandler(
 );
 
 /**
- * ✅ Cancel Video Call Request (by requester)
+ * Cancel Video Call Request (by requester)
  */
 export const cancelVideoCallRequest = asyncHandler(
   async (req: Request, res: Response) => {
@@ -681,7 +712,7 @@ export const cancelVideoCallRequest = asyncHandler(
 );
 
 /**
- * ✅ Get User's Conversations
+ * Get User's Conversations
  */
 export const getUserConversations = asyncHandler(
   async (req: Request, res: Response) => {
@@ -691,7 +722,7 @@ export const getUserConversations = asyncHandler(
     const query =
       role === "Doctor"
         ? { "participants.doctorId": userId }
-        : { "participants.userId": userId};
+        : { "participants.userId": userId };
 
     const conversations = await Conversation.find(query)
       .populate("appointmentId", "_id scheduledAt status callStatus")
