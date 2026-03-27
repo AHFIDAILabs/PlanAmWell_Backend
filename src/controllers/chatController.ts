@@ -89,34 +89,21 @@ if (!conversation) {
 }
 
     if (conversation) {
-      // ── FIX: REMOVED the auto-reactivation block entirely ──────────────────
-      //
-      // Previously this block existed here:
-      //
-      //   if (!conversation.isActive) {
-      //     if (appointment.status === "completed") {
-      //       return res.status(403).json({ ... });
-      //     }
-      //     conversation.isActive = true;   ← THIS was the bug
-      //     await conversation.save();
-      //   }
-      //
-      // The race condition: endAppointment saves appointment.status="completed"
-      // and conversation.isActive=false in two separate DB writes. If this
-      // function ran between those two writes, appointment.status was still
-      // "confirmed" so the guard didn't fire, and the conversation got
-      // reactivated — unlocking the chat.
-      //
-      // Now we simply return the conversation as-is. The frontend reads
-      // `isActive` and renders locked/unlocked state accordingly.
-      // Only `endAppointment` may set isActive = false.
-      // ───────────────────────────────────────────────────────────────────────
+      // SAFETY: If appointment is completed, ALWAYS ensure conversation is locked
+  // regardless of what isActive currently says. This is the single source of truth.
+  const appointmentIsCompleted = appointment.status === "completed";
+  
+  if (appointmentIsCompleted && conversation.isActive) {
+    // Self-heal: appointment is done but conversation was left active somehow
+    conversation.isActive = false;
+    await conversation.save();
+  }
 
-      // Populate participants
-      conversation = await (
-        await conversation.populate("participants.userId", "name userImage")
-      ).populate("participants.doctorId", "firstName lastName doctorImage");
-    } else {
+  // Populate and return — frontend reads isActive to decide lock state
+  conversation = await (
+    await conversation.populate("participants.userId", "name userImage")
+  ).populate("participants.doctorId", "firstName lastName doctorImage");
+} else {
       // ── Create new conversation ─────────────────────────────────────────────
       const doctorName = `Dr. ${(appointment.doctorId as any).firstName} ${
         (appointment.doctorId as any).lastName
