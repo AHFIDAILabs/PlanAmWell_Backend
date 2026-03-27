@@ -330,46 +330,82 @@ export const updateAppointment = asyncHandler(
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = patient?.name || "Patient";
 
-    // ── AUTO-CREATE CONVERSATION ─────────────────────────────────────────────
-    let conversationId: string | null = null;
+// ── AUTO-CREATE OR REACTIVATE CONVERSATION
+let conversationId: string | null = null;
 
-    if (
-      role === "Doctor" &&
-      updates.status === "confirmed" &&
-      oldStatus !== "confirmed" &&
-      !updatedAppointment.conversationId
-    ) {
-      try {
-        const conversation = await Conversation.create({
-          appointmentId: updatedAppointment._id,
-          participants: {
-            userId: patientId,
-            doctorId: doctorId,
+if (
+  role === "Doctor" &&
+  updates.status === "confirmed" &&
+  oldStatus !== "confirmed"
+) {
+  try {
+    // Check if a conversation already exists between this doctor-patient pair
+    let conversation = await Conversation.findOne({
+      "participants.userId": patientId,
+      "participants.doctorId": doctorId,
+    });
+
+    if (conversation) {
+      // RETURNING PATIENT — reactivate the existing conversation
+      conversation.isActive = true;
+
+      // Add a system message marking the new appointment
+      conversation.messages.push({
+        _id: new mongoose.Types.ObjectId(),
+        senderId: new mongoose.Types.ObjectId(doctorId),
+        senderType: "Doctor",
+        messageType: "system",
+        content: `New appointment confirmed for ${updatedAppointment.scheduledAt.toLocaleString()}. Previous conversation history is available above.`,
+        status: "sent",
+        createdAt: new Date(),
+      });
+
+      conversation.lastActivityAt = new Date();
+      await conversation.save();
+
+      // Link the NEW appointment to the EXISTING conversation
+      updatedAppointment.conversationId = conversation._id;
+      await updatedAppointment.save();
+
+      conversationId = String(conversation._id);
+      console.log(`✅ Existing conversation reactivated for returning patient`);
+
+    } else if (!updatedAppointment.conversationId) {
+      // 3️⃣ FIRST-TIME PATIENT — create a fresh conversation
+      conversation = await Conversation.create({
+        appointmentId: updatedAppointment._id,
+        participants: {
+          userId: patientId,
+          doctorId: doctorId,
+        },
+        messages: [
+          {
+            _id: new mongoose.Types.ObjectId(),
+            senderId: new mongoose.Types.ObjectId(doctorId),
+            senderType: "Doctor",
+            messageType: "system",
+            content: `${doctorName} confirmed your appointment. You can now chat before your consultation on ${updatedAppointment.scheduledAt.toLocaleString()}.`,
+            status: "sent",
+            createdAt: new Date(),
           },
-          messages: [
-            {
-              _id: new mongoose.Types.ObjectId(),
-              senderId: new mongoose.Types.ObjectId(doctorId),
-              senderType: "Doctor",
-              messageType: "system",
-              content: `${doctorName} confirmed your appointment. You can now chat before your consultation on ${updatedAppointment.scheduledAt.toLocaleString()}.`,
-              status: "sent",
-              createdAt: new Date(),
-            },
-          ],
-        });
+        ],
+      });
 
-        updatedAppointment.conversationId = conversation._id;
-        await updatedAppointment.save();
+      updatedAppointment.conversationId = conversation._id;
+      await updatedAppointment.save();
 
-        conversationId = String(conversation._id);
-      } catch (err) {
-        console.error("❌ Failed to create conversation:", err);
-      }
-    } else if (updatedAppointment.conversationId) {
+      conversationId = String(conversation._id);
+      console.log(`✅ New conversation created for first-time patient`);
+    } else {
       conversationId = String(updatedAppointment.conversationId);
     }
 
+  } catch (err) {
+    console.error("❌ Failed to create/reactivate conversation:", err);
+  }
+} else if (updatedAppointment.conversationId) {
+  conversationId = String(updatedAppointment.conversationId);
+}
     // ── NOTIFICATIONS ────────────────────────────────────────────────────────
     if (role === "Doctor" && updates.status && updates.status !== oldStatus) {
       try {

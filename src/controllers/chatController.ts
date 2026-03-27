@@ -74,11 +74,19 @@ export const getOrCreateConversation = asyncHandler(
     }
 
     // Try to find existing conversation for this appointment
-    let conversation = await Conversation.findOne({
-      appointmentId: appointment._id,
-      "participants.userId": patientId,
-      "participants.doctorId": doctorId,
-    });
+// First try: find conversation directly linked to this appointment
+let conversation = await Conversation.findOne({
+  appointmentId: appointment._id,
+});
+
+// Second try: find by doctor-patient pair (covers reactivated conversations
+// linked to an older appointmentId)
+if (!conversation) {
+  conversation = await Conversation.findOne({
+    "participants.userId": patientId,
+    "participants.doctorId": doctorId,
+  });
+}
 
     if (conversation) {
       // ── FIX: REMOVED the auto-reactivation block entirely ──────────────────
