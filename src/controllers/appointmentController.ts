@@ -1,4 +1,4 @@
-// controllers/appointmentController.ts - UPGRADED WITH NOTIFICATION SERVICE
+// controllers/appointmentController.ts
 import mongoose from "mongoose";
 import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
@@ -8,7 +8,7 @@ import { User } from "../models/user";
 import { NotificationService } from "../services/NotificationService";
 import { createNotificationForUser } from "../util/sendPushNotification";
 import { Conversation } from "../models/conversation";
-import { emitAppointmentEnded } from "../index";
+import { emitAppointmentEnded, emitConversationUnlocked } from "../index";
 
 const extractId = (field: any): string => {
   if (!field) return "";
@@ -34,42 +34,21 @@ export const createAppointment = asyncHandler(
       consultationType,
     } = req.body;
 
-    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    // console.log("📅 NEW APPOINTMENT REQUEST");
-    // console.log("Patient ID:", req.auth?.id);
-    // console.log("Doctor ID:", doctorId);
-    // console.log("Scheduled At:", scheduledAt);
-    // console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
     if (!doctorId || !scheduledAt) {
       res.status(400);
       throw new Error("doctorId and scheduledAt are required.");
     }
 
-    // Validate doctor exists + approved
     const doctor = await Doctor.findById(doctorId);
     if (!doctor || doctor.status !== "approved") {
       res.status(404);
       throw new Error("Doctor not found or not approved.");
     }
 
-    // console.log("✅ Doctor found:", {
-    //   id: doctor._id,
-    //   name: `${doctor.firstName} ${doctor.lastName}`,
-    //   status: doctor.status,
-    // });
-
-    // Get user info
     const user = await User.findById(req.auth?.id).select(
       "name email phone gender dateOfBirth homeAddress"
     );
 
-    console.log("✅ Patient found:", {
-      id: user?._id,
-      name: user?.name,
-    });
-
-    // Get patient snapshot if share toggle is ON
     let patientSnapshot = null;
     if (shareUserInfo && user) {
       patientSnapshot = {
@@ -93,7 +72,6 @@ export const createAppointment = asyncHandler(
       throw new Error("Unauthorized");
     }
 
-    // ✅ Create appointment
     const appointment = await Appointment.create({
       userId: req.auth?.id,
       doctorId,
@@ -112,12 +90,9 @@ export const createAppointment = asyncHandler(
       },
     });
 
-    // console.log("✅ Appointment created:", appointment._id);
-
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = user?.name || "A patient";
 
-    // ✅ NOTIFICATION 1: Notify PATIENT (request sent)
     try {
       await NotificationService.notifyAppointmentRequestSent(
         req.auth.id,
@@ -125,12 +100,10 @@ export const createAppointment = asyncHandler(
         doctorName,
         scheduledDate
       );
-      // console.log("✅ Patient notification sent successfully");
     } catch (error) {
       console.error("❌ Failed to send patient notification:", error);
     }
 
-    // ✅ NOTIFICATION 2: Notify DOCTOR (new request)
     try {
       await NotificationService.notifyDoctorNewRequest(
         String(doctorId),
@@ -139,12 +112,9 @@ export const createAppointment = asyncHandler(
         scheduledDate,
         reason
       );
-      // console.log("✅ Doctor notification sent successfully");
     } catch (error) {
       console.error("❌ Failed to send doctor notification:", error);
     }
-
-   
 
     res.status(201).json({
       success: true,
@@ -178,13 +148,9 @@ export const getDoctorAppointments = asyncHandler(
   async (req: Request, res: Response) => {
     const doctorId = req.auth?.id;
 
-    // console.log("🔍 Fetching appointments for doctor:", doctorId);
-
     const appointments = await Appointment.find({ doctorId })
       .populate("userId")
       .sort({ scheduledAt: 1 });
-
-    // console.log("✅ Found appointments:", appointments.length);
 
     res.status(200).json({ success: true, data: appointments });
   }
@@ -212,20 +178,14 @@ export const updateAppointment = asyncHandler(
       throw new Error("Unauthorized");
     }
 
-    // ── Authorization ────────────────────────────────────────────────────────
     if (role === "User" && appointment.userId.toString() !== userId) {
-      return res.status(403).json({
-        message: "You can only update your own appointments.",
-      });
+      return res.status(403).json({ message: "You can only update your own appointments." });
     }
 
     if (role === "Doctor" && appointment.doctorId.toString() !== userId) {
-      return res.status(403).json({
-        message: "You can only update appointments assigned to you.",
-      });
+      return res.status(403).json({ message: "You can only update appointments assigned to you." });
     }
 
-    // ── Types ────────────────────────────────────────────────────────────────
     type AppointmentUpdatePayload = {
       status?: IAppointment["status"];
       scheduledAt?: Date;
@@ -238,7 +198,7 @@ export const updateAppointment = asyncHandler(
     const updates: AppointmentUpdatePayload = {};
     const oldStatus = appointment.status;
 
-    // ── USER updates ─────────────────────────────────────────────────────────
+    // ── USER updates ──────────────────────────────────────────────────────────
     if (role === "User") {
       if (
         req.body.status === "cancelled" &&
@@ -246,7 +206,6 @@ export const updateAppointment = asyncHandler(
       ) {
         updates.status = "cancelled";
       }
-
       if (req.body.scheduledAt) {
         const newDate = new Date(req.body.scheduledAt);
         if (isNaN(newDate.getTime())) {
@@ -254,66 +213,43 @@ export const updateAppointment = asyncHandler(
         }
         updates.scheduledAt = newDate;
       }
-
       if (req.body.notes) updates.notes = req.body.notes;
       if (typeof req.body.shareUserInfo === "boolean")
         updates.shareUserInfo = req.body.shareUserInfo;
-      if (req.body.patientSnapshot)
-        updates.patientSnapshot = req.body.patientSnapshot;
-      if (req.body.consultationType)
-        updates.consultationType = req.body.consultationType;
+      if (req.body.patientSnapshot) updates.patientSnapshot = req.body.patientSnapshot;
+      if (req.body.consultationType) updates.consultationType = req.body.consultationType;
     }
 
-    // ── DOCTOR updates ───────────────────────────────────────────────────────
+    // ── DOCTOR updates ────────────────────────────────────────────────────────
     if (role === "Doctor") {
       if (req.body.status) {
         const allowedDoctorStatuses: IAppointment["status"][] = [
-          "confirmed",
-          "rejected",
-          "cancelled",
-          "rescheduled",
+          "confirmed", "rejected", "cancelled", "rescheduled",
         ];
-
         if (!allowedDoctorStatuses.includes(req.body.status)) {
-          return res
-            .status(400)
-            .json({ message: "Invalid status update." });
+          return res.status(400).json({ message: "Invalid status update." });
         }
-
         updates.status = req.body.status;
       }
-
       if (req.body.scheduledAt) {
         const newDate = new Date(req.body.scheduledAt);
-
         if (isNaN(newDate.getTime())) {
           return res.status(400).json({ message: "Invalid scheduledAt date." });
         }
-
         updates.scheduledAt = newDate;
-
-        if (req.body.consultationType) {
-          updates.consultationType = req.body.consultationType;
-        }
-
-        if (appointment.status !== "rescheduled") {
-          updates.status = "rescheduled";
-        }
+        if (req.body.consultationType) updates.consultationType = req.body.consultationType;
+        if (appointment.status !== "rescheduled") updates.status = "rescheduled";
       }
-
       if (req.body.notes) updates.notes = req.body.notes;
     }
 
-    // ── Apply updates ────────────────────────────────────────────────────────
+    // ── Apply updates ─────────────────────────────────────────────────────────
     const updatedAppointment = (await Appointment.findByIdAndUpdate(
       req.params.id,
       updates,
       { new: true, runValidators: true }
     )
-      .populate(
-        "doctorId",
-        "firstName lastName doctorImage email contactNumber licenseNumber"
-      )
+      .populate("doctorId", "firstName lastName doctorImage email contactNumber licenseNumber")
       .populate("userId", "name userImage email")) as any;
 
     if (!updatedAppointment) {
@@ -323,90 +259,113 @@ export const updateAppointment = asyncHandler(
 
     const patientId = extractId(updatedAppointment.userId);
     const doctorId = extractId(updatedAppointment.doctorId);
-
     const doctor = updatedAppointment.doctorId as any;
     const patient = updatedAppointment.userId as any;
-
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = patient?.name || "Patient";
 
-// ── AUTO-CREATE OR REACTIVATE CONVERSATION
-let conversationId: string | null = null;
+    // ── CONVERSATION: Auto-unlock on new appointment confirmation ─────────────
+    //
+    // RULES:
+    //  1. One conversation per doctor-patient pair — NEVER create a second one.
+    //  2. When doctor confirms a new appointment → find the existing conversation
+    //     and unlock it (isActive = true) + add a system message + link new appointment.
+    //  3. If truly no conversation exists yet → create one fresh.
+    //  4. isActive = false is set ONLY by endAppointment.
+    //  5. isActive = true here (on confirm) OR via manual unlockConversation endpoint.
+    //
+    let conversationId: string | null = null;
 
-if (
-  role === "Doctor" &&
-  updates.status === "confirmed" &&
-  oldStatus !== "confirmed"
-) {
-  try {
-    // Check if a conversation already exists between this doctor-patient pair
-    let conversation = await Conversation.findOne({
-      "participants.userId": patientId,
-      "participants.doctorId": doctorId,
-    });
+    if (
+      role === "Doctor" &&
+      updates.status === "confirmed" &&
+      oldStatus !== "confirmed"
+    ) {
+      try {
+        // Look up by doctor-patient pair first — handles returning patients whose
+        // conversation appointmentId still points to an older appointment.
+        let conversation = await Conversation.findOne({
+          "participants.userId": patientId,
+          "participants.doctorId": doctorId,
+        });
 
-    if (conversation) {
-      // RETURNING PATIENT — reactivate the existing conversation
-      conversation.isActive = true;
+        if (conversation) {
+          // ── RETURNING PATIENT: unlock the existing conversation ─────────────
+          const wasLocked = !conversation.isActive;
 
-      // Add a system message marking the new appointment
-      conversation.messages.push({
-        _id: new mongoose.Types.ObjectId(),
-        senderId: new mongoose.Types.ObjectId(doctorId),
-        senderType: "Doctor",
-        messageType: "system",
-        content: `New appointment confirmed for ${updatedAppointment.scheduledAt.toLocaleString()}. Previous conversation history is available above.`,
-        status: "sent",
-        createdAt: new Date(),
-      });
+          conversation.isActive = true; // ← THE unlock
 
-      conversation.lastActivityAt = new Date();
-      await conversation.save();
-
-      // Link the NEW appointment to the EXISTING conversation
-      updatedAppointment.conversationId = conversation._id;
-      await updatedAppointment.save();
-
-      conversationId = String(conversation._id);
-      console.log(`✅ Existing conversation reactivated for returning patient`);
-
-    } else if (!updatedAppointment.conversationId) {
-      // 3️⃣ FIRST-TIME PATIENT — create a fresh conversation
-      conversation = await Conversation.create({
-        appointmentId: updatedAppointment._id,
-        participants: {
-          userId: patientId,
-          doctorId: doctorId,
-        },
-        messages: [
-          {
+          // Add a system message so both parties can see the new appointment
+          conversation.messages.push({
             _id: new mongoose.Types.ObjectId(),
             senderId: new mongoose.Types.ObjectId(doctorId),
             senderType: "Doctor",
             messageType: "system",
-            content: `${doctorName} confirmed your appointment. You can now chat before your consultation on ${updatedAppointment.scheduledAt.toLocaleString()}.`,
+            content: `New appointment confirmed for ${updatedAppointment.scheduledAt.toLocaleString()}. Chat is now active again.`,
             status: "sent",
             createdAt: new Date(),
-          },
-        ],
-      });
+          } as any);
 
-      updatedAppointment.conversationId = conversation._id;
-      await updatedAppointment.save();
+          conversation.lastActivityAt = new Date();
+          await conversation.save();
 
-      conversationId = String(conversation._id);
-      console.log(`✅ New conversation created for first-time patient`);
-    } else {
+          // Always link the new appointment to this conversation so
+          // getOrCreateConversation Step 1 (appointmentId lookup) works next time.
+          updatedAppointment.conversationId = conversation._id;
+          await updatedAppointment.save();
+
+          conversationId = String(conversation._id);
+
+          if (wasLocked) {
+            // Emit real-time unlock event so the patient's ChatRoomScreen
+            // immediately reflects the unlocked state without a manual refresh.
+            emitConversationUnlocked(String(conversation._id), patientId);
+            console.log(
+              `🔓 Conversation ${conversationId} auto-unlocked for returning patient`
+            );
+          } else {
+            console.log(
+              `✅ Existing active conversation reused for returning patient`
+            );
+          }
+
+        } else {
+          // ── FIRST-TIME PATIENT: create a brand-new conversation ─────────────
+          conversation = await Conversation.create({
+            appointmentId: updatedAppointment._id,
+            participants: {
+              userId: patientId,
+              doctorId: doctorId,
+            },
+            messages: [
+              {
+                _id: new mongoose.Types.ObjectId(),
+                senderId: new mongoose.Types.ObjectId(doctorId),
+                senderType: "Doctor",
+                messageType: "system",
+                content: `${doctorName} confirmed your appointment. You can now chat before your consultation on ${updatedAppointment.scheduledAt.toLocaleString()}.`,
+                status: "sent",
+                createdAt: new Date(),
+              },
+            ],
+            isActive: true,
+          });
+
+          updatedAppointment.conversationId = conversation._id;
+          await updatedAppointment.save();
+
+          conversationId = String(conversation._id);
+          console.log(`✅ New conversation created for first-time patient`);
+        }
+      } catch (err) {
+        console.error("❌ Failed to create/unlock conversation:", err);
+      }
+
+    } else if (updatedAppointment.conversationId) {
       conversationId = String(updatedAppointment.conversationId);
     }
 
-  } catch (err) {
-    console.error("❌ Failed to create/reactivate conversation:", err);
-  }
-} else if (updatedAppointment.conversationId) {
-  conversationId = String(updatedAppointment.conversationId);
-}
-    // ── NOTIFICATIONS ────────────────────────────────────────────────────────
+    // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
     if (role === "Doctor" && updates.status && updates.status !== oldStatus) {
       try {
         switch (updates.status) {
@@ -419,14 +378,12 @@ if (
               conversationId ?? undefined
             );
 
-            // Create access request
+            // Auto-create access request for medical records
             try {
               const { AccessRequest } = await import("../models/AccessRequest");
-
               const existingRequest = await AccessRequest.findOne({
                 appointmentId: updatedAppointment._id,
               });
-
               if (!existingRequest) {
                 const newRequest = await AccessRequest.create({
                   patientId,
@@ -434,11 +391,8 @@ if (
                   appointmentId: updatedAppointment._id,
                   status: "pending",
                   requestedAt: new Date(),
-                  expiresAt: new Date(
-                    Date.now() + 48 * 60 * 60 * 1000
-                  ),
+                  expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
                 });
-
                 await NotificationService.notifyRecordAccessRequest(
                   patientId,
                   String(newRequest._id),
@@ -449,7 +403,6 @@ if (
             } catch (err) {
               console.error("❌ Access request error:", err);
             }
-
             break;
 
           case "rejected":
@@ -496,50 +449,28 @@ if (
       }
     }
 
-    // ── REMINDER ─────────────────────────────────────────────────────────────
+    // ── REMINDER ──────────────────────────────────────────────────────────────
     if (
       updatedAppointment.status === "confirmed" &&
       !updatedAppointment.notificationsSent?.reminder &&
       oldStatus !== "confirmed"
     ) {
       const reminderTime =
-        new Date(updatedAppointment.scheduledAt).getTime() -
-        15 * 60 * 1000;
-
+        new Date(updatedAppointment.scheduledAt).getTime() - 15 * 60 * 1000;
       const delay = reminderTime - Date.now();
 
       if (delay > 0 && delay < 7 * 24 * 60 * 60 * 1000) {
         setTimeout(async () => {
           try {
-            const appt = await Appointment.findById(
-              updatedAppointment._id
-            );
-
-            if (
-              appt &&
-              !appt.notificationsSent?.reminder &&
-              appt.status === "confirmed"
-            ) {
+            const appt = await Appointment.findById(updatedAppointment._id);
+            if (appt && !appt.notificationsSent?.reminder && appt.status === "confirmed") {
               await NotificationService.notifyAppointmentReminder(
-                patientId,
-                "User",
-                String(appt._id),
-                doctorName,
-                appt.scheduledAt
+                patientId, "User", String(appt._id), doctorName, appt.scheduledAt
               );
-
               await NotificationService.notifyAppointmentReminder(
-                doctorId,
-                "Doctor",
-                String(appt._id),
-                patientName,
-                appt.scheduledAt
+                doctorId, "Doctor", String(appt._id), patientName, appt.scheduledAt
               );
-
-              await NotificationService.markNotificationSent(
-                String(appt._id),
-                "reminder"
-              );
+              await NotificationService.markNotificationSent(String(appt._id), "reminder");
             }
           } catch (err) {
             console.error("❌ Reminder error:", err);
@@ -548,11 +479,7 @@ if (
       }
     }
 
-    // ── RESPONSE ─────────────────────────────────────────────────────────────
-    res.status(200).json({
-      success: true,
-      data: updatedAppointment,
-    });
+    res.status(200).json({ success: true, data: updatedAppointment });
   }
 );
 
@@ -594,7 +521,6 @@ export const getAppointmentById = asyncHandler(
     if (role === "User" && (appointment.userId as any)._id.toString() !== userId) {
       return res.status(403).json({ message: "You can only access your own appointments." });
     }
-
     if (role === "Doctor" && (appointment.doctorId as any)._id.toString() !== userId) {
       return res.status(403).json({ message: "You can only access your assigned appointments." });
     }
@@ -613,17 +539,12 @@ export const deleteAppointment = asyncHandler(
     if (req.auth?.role !== "Admin") {
       return res.status(403).json({ message: "Only admin can delete appointments." });
     }
-
     const appointment = await Appointment.findByIdAndDelete(req.params.id);
     if (!appointment) {
       res.status(404);
       throw new Error("Appointment not found.");
     }
-
-    res.status(200).json({
-      success: true,
-      message: "Appointment deleted successfully.",
-    });
+    res.status(200).json({ success: true, message: "Appointment deleted successfully." });
   }
 );
 
@@ -638,16 +559,11 @@ export const sendAppointmentReminders = async () => {
 
     const upcomingAppointments = (await Appointment.find({
       status: "confirmed",
-      scheduledAt: {
-        $gte: reminderTimeStart,
-        $lt: reminderTimeEnd,
-      },
+      scheduledAt: { $gte: reminderTimeStart, $lt: reminderTimeEnd },
       "notificationsSent.reminder": { $ne: true },
     })
       .populate("doctorId", "firstName lastName")
-      .populate("userId", "name firstName lastName")) as (IAppointment & {
-      _id: string;
-    })[];
+      .populate("userId", "name firstName lastName")) as (IAppointment & { _id: string })[];
 
     let sentCount = 0;
 
@@ -656,62 +572,36 @@ export const sendAppointmentReminders = async () => {
       const patient = appt.userId as any;
       const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
       const patientName =
-        patient?.name ||
-        `${patient?.firstName || ""} ${patient?.lastName || ""}`.trim();
+        patient?.name || `${patient?.firstName || ""} ${patient?.lastName || ""}`.trim();
 
       try {
         await Promise.all([
           createNotificationForUser(
-            String(appt.userId),
-            "User",
+            String(appt.userId), "User",
             "Appointment Starting Soon ⏰",
             `Your appointment with ${doctorName} starts in 15 minutes!`,
             "appointment",
-            {
-              appointmentId: String(appt._id),
-              doctorId: String(appt.doctorId),
-              doctorName,
-              scheduledAt: appt.scheduledAt.toISOString(),
-              type: "reminder",
-            }
+            { appointmentId: String(appt._id), doctorId: String(appt.doctorId), doctorName, scheduledAt: appt.scheduledAt.toISOString(), type: "reminder" }
           ),
-
           createNotificationForUser(
-            String(appt.doctorId),
-            "Doctor",
+            String(appt.doctorId), "Doctor",
             "Appointment Starting Soon ⏰",
             `Your appointment with ${patientName} starts in 15 minutes!`,
             "appointment",
-            {
-              appointmentId: String(appt._id),
-              userId: String(appt.userId),
-              patientName,
-              scheduledAt: appt.scheduledAt.toISOString(),
-              type: "reminder",
-            }
+            { appointmentId: String(appt._id), userId: String(appt.userId), patientName, scheduledAt: appt.scheduledAt.toISOString(), type: "reminder" }
           ),
         ]);
 
         if (!appt.notificationsSent) {
-          appt.notificationsSent = {
-            reminder: false,
-            expiryWarning: false,
-            callStarted: false,
-            callEnded: false,
-          };
+          appt.notificationsSent = { reminder: false, expiryWarning: false, callStarted: false, callEnded: false };
         }
         appt.notificationsSent.reminder = true;
         appt.reminderSent = true;
         await appt.save();
-
         sentCount++;
       } catch (err) {
         console.error(`❌ Failed to send reminder for ${appt._id}:`, err);
       }
-    }
-
-    if (sentCount > 0) {
-      // console.log(`✅ Sent ${sentCount * 2} appointment reminders`);
     }
 
     return { success: true, count: sentCount };
@@ -721,88 +611,106 @@ export const sendAppointmentReminders = async () => {
   }
 };
 
-
 /**
  * @desc  Doctor ends an appointment manually
  * @route PATCH /api/v1/appointments/:id/end
  * @access Doctor only
+ *
+ * WHAT THIS DOES:
+ *  1. Marks appointment as completed.
+ *  2. Locks the conversation (isActive = false) — makes chat read-only.
+ *  3. Notifies both parties.
+ *  4. Emits real-time appointment-ended event.
+ *
+ * WHAT IT DOES NOT DO:
+ *  - It does NOT delete the conversation.
+ *  - It does NOT prevent the doctor from manually unlocking later.
+ *  - The conversation stays read-only until:
+ *      a) Doctor confirms a new appointment from same patient (auto-unlock), OR
+ *      b) Doctor manually unlocks via PATCH /chat/conversation/:id/unlock
+ *
+ * NOTE: The "End" button on the frontend should visually switch to an
+ * "Unlock" button after this succeeds, using the isActive flag returned
+ * by getOrCreateConversation.
  */
 export const endAppointment = asyncHandler(
   async (req: Request, res: Response) => {
     const appointmentId = req.params.id;
     const doctorId = req.auth?.id;
- 
+
     const appointment = await Appointment.findById(appointmentId)
       .populate("doctorId", "firstName lastName")
       .populate("userId", "name");
- 
+
     if (!appointment) {
       res.status(404);
       throw new Error("Appointment not found.");
     }
- 
-    // Only the assigned doctor can end it
+
     if (extractId(appointment.doctorId) !== doctorId) {
       return res.status(403).json({
         success: false,
         message: "You can only end your own appointments.",
       });
     }
- 
-    // Guard: only active appointments can be ended
- if (appointment.status === "completed") {
-  return res.status(200).json({
-    success: true,
-    message: "Appointment already ended.",
-    data: appointment,
-  });
-}
- 
-    // ── Update appointment ────────────────────────────────────────────────────
+
+    // Idempotent — already ended
+    if (appointment.status === "completed") {
+      return res.status(200).json({
+        success: true,
+        message: "Appointment already ended.",
+        data: appointment,
+      });
+    }
+
+    // ── 1. Update appointment status ──────────────────────────────────────────
     appointment.status = "completed";
     appointment.callStatus = "ended";
     appointment.callEndedAt = new Date();
     appointment.callEndedBy = "Doctor";
     await appointment.save();
- 
-    // ── Lock the conversation (read-only) ─────────────────────────────────────
-    await Conversation.findOneAndUpdate(
-      { appointmentId: appointment._id },
-      { isActive: false }
-    );
- 
-    // ── Notify both parties ───────────────────────────────────────────────────
+
+    // ── 2. Lock the conversation ───────────────────────────────────────────────
+    // Find by doctor-patient pair (more reliable than appointmentId since the
+    // conversation may be linked to an older appointmentId after reactivations).
     const patientId = extractId(appointment.userId);
+
+    const lockedConversation = await Conversation.findOneAndUpdate(
+      {
+        "participants.userId": patientId,
+        "participants.doctorId": doctorId,
+      },
+      { isActive: false },
+      { new: true }
+    );
+
+    if (lockedConversation) {
+      console.log(`🔒 Conversation ${lockedConversation._id} locked after appointment ended`);
+    }
+
+    // ── 3. Notify both parties ────────────────────────────────────────────────
     const doctor = appointment.doctorId as any;
     const patient = appointment.userId as any;
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = patient?.name || "Patient";
- 
+
     try {
       await NotificationService.notifyAppointmentEnded(
-        patientId,
-        "User",
-        String(appointment._id),
-        doctorName
+        patientId, "User", String(appointment._id), doctorName
       );
       await NotificationService.notifyAppointmentEnded(
-        doctorId,
-        "Doctor",
-        String(appointment._id),
-        patientName
+        doctorId!, "Doctor", String(appointment._id), patientName
       );
     } catch (err) {
       console.error("❌ Failed to send appointment-ended notifications:", err);
     }
- 
-    // ── Emit real-time event to both parties via appointment room ─────────────
+
+    // ── 4. Emit real-time event to both parties ───────────────────────────────
     emitAppointmentEnded(String(appointment._id));
 
-    
- 
     res.status(200).json({
       success: true,
-      message: "Appointment ended successfully.",
+      message: "Appointment ended. Chat is now read-only.",
       data: appointment,
     });
   }

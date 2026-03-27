@@ -472,6 +472,10 @@ export const emitAccessRequestUpdate = (
   }
 };
 
+export const emitConversationUnlocked = (conversationId: string, patientId: string) => {
+  io.to(patientId).emit("conversation-unlocked", { conversationId });
+};
+
 // ✅ Helper to check if user is online
 export const isUserOnline = (userId: string): boolean => {
   return connectedUsers.has(userId);

@@ -29,10 +29,19 @@ export const uploadMiddleware = multer({
 /**
  * Get or Create Conversation
  *
- * FIX: Removed the auto-reactivation block that was re-enabling locked
- * conversations. `isActive` is now exclusively managed by `endAppointment`.
- * If a conversation is inactive (appointment ended), we return it as-is so
- * the frontend can render the correct read-only state.
+ * RULES:
+ * - One conversation per doctor-patient pair, forever. Never create a second one.
+ * - isActive is the sole lock/unlock flag.
+ * - isActive = false  →  read-only (locked)
+ * - isActive = true   →  active (unlocked)
+ *
+ * Who can change isActive:
+ *   → false : endAppointment (doctor clicks "End")
+ *   → true  : updateAppointment when doctor confirms a new appointment (auto-unlock)
+ *             OR doctor manually unlocks via unlockConversation endpoint
+ *
+ * This function NEVER changes isActive. It only reads and returns.
+ * The frontend reads isActive and renders the correct UI state.
  */
 export const getOrCreateConversation = asyncHandler(
   async (req: Request, res: Response) => {
@@ -47,7 +56,7 @@ export const getOrCreateConversation = asyncHandler(
       });
     }
 
-    // Fetch appointment and check access
+    // Fetch appointment and verify access
     const appointment = await Appointment.findById(appointmentId)
       .populate("userId", "name userImage email")
       .populate("doctorId", "firstName lastName doctorImage email");
@@ -73,38 +82,43 @@ export const getOrCreateConversation = asyncHandler(
       });
     }
 
-    // Try to find existing conversation for this appointment
-// First try: find conversation directly linked to this appointment
-let conversation = await Conversation.findOne({
-  appointmentId: appointment._id,
-});
+    // ── Step 1: Find by appointmentId (fastest path — new appointment already linked) ──
+    let conversation = await Conversation.findOne({
+      appointmentId: appointment._id,
+    });
 
-// Second try: find by doctor-patient pair (covers reactivated conversations
-// linked to an older appointmentId)
-if (!conversation) {
-  conversation = await Conversation.findOne({
-    "participants.userId": patientId,
-    "participants.doctorId": doctorId,
-  });
-}
+    // ── Step 2: Fallback — find by doctor-patient pair (returning patient whose
+    //    existing conversation is linked to an older appointmentId) ──────────────
+    if (!conversation) {
+      conversation = await Conversation.findOne({
+        "participants.userId": patientId,
+        "participants.doctorId": doctorId,
+      });
+
+      if (conversation) {
+        // Link this existing conversation to the current appointment so Step 1
+        // works on subsequent calls — avoids repeated pair lookups
+        appointment.conversationId = conversation._id as mongoose.Types.ObjectId;
+        await appointment.save();
+        console.log(
+          `🔗 Existing conversation ${conversation._id} linked to appointment ${appointmentId}`
+        );
+      }
+    }
 
     if (conversation) {
-      // SAFETY: If appointment is completed, ALWAYS ensure conversation is locked
-  // regardless of what isActive currently says. This is the single source of truth.
-  const appointmentIsCompleted = appointment.status === "completed";
-  
-  if (appointmentIsCompleted && conversation.isActive) {
-    // Self-heal: appointment is done but conversation was left active somehow
-    conversation.isActive = false;
-    await conversation.save();
-  }
+      // ── Found: populate and return as-is ─────────────────────────────────────
+      // We do NOT touch isActive here under any circumstance.
+      // isActive is managed exclusively by:
+      //   - endAppointment       → sets false
+      //   - updateAppointment    → sets true on new confirmation
+      //   - unlockConversation   → sets true on manual unlock
+      conversation = await (
+        await conversation.populate("participants.userId", "name userImage")
+      ).populate("participants.doctorId", "firstName lastName doctorImage");
 
-  // Populate and return — frontend reads isActive to decide lock state
-  conversation = await (
-    await conversation.populate("participants.userId", "name userImage")
-  ).populate("participants.doctorId", "firstName lastName doctorImage");
-} else {
-      // ── Create new conversation ─────────────────────────────────────────────
+    } else {
+      // ── Not found: first-ever conversation for this doctor-patient pair ───────
       const doctorName = `Dr. ${(appointment.doctorId as any).firstName} ${
         (appointment.doctorId as any).lastName
       }`;
@@ -142,22 +156,19 @@ if (!conversation) {
       ).populate("participants.doctorId", "firstName lastName doctorImage");
 
       // Link conversation to appointment
-      appointment.conversationId =
-        conversation._id as mongoose.Types.ObjectId;
+      appointment.conversationId = conversation._id as mongoose.Types.ObjectId;
       await appointment.save();
 
-      console.log(`✅ Conversation created for appointment ${appointmentId}`);
+      console.log(`✅ New conversation created for appointment ${appointmentId}`);
     }
 
-    // Reset unread count for current user
+    // ── Reset unread count for the caller (read-side bookkeeping only) ─────────
     const unreadField = role === "Doctor" ? "doctor" : "user";
     if (conversation.unreadCount[unreadField] > 0) {
       conversation.unreadCount[unreadField] = 0;
       await conversation.save();
     }
 
-    // Return response — frontend uses conversation.isActive to decide
-    // whether to render the input bar or the read-only locked footer
     res.status(200).json({
       success: true,
       data: conversation,
@@ -169,6 +180,77 @@ if (!conversation) {
         doctor: appointment.doctorId,
         patient: appointment.userId,
       },
+    });
+  }
+);
+
+/**
+ * Unlock Conversation (Doctor only — manual unlock)
+ *
+ * Allows the doctor to manually reopen a locked (read-only) conversation
+ * without needing a new appointment confirmation to trigger auto-unlock.
+ *
+ * PATCH /api/v1/chat/conversation/:conversationId/unlock
+ */
+export const unlockConversation = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { conversationId } = req.params;
+    const userId = req.auth?.id;
+    const role = req.auth?.role;
+
+    if (role !== "Doctor") {
+      return res.status(403).json({
+        success: false,
+        message: "Only doctors can unlock conversations.",
+      });
+    }
+
+    const conversation = await Conversation.findById(conversationId);
+
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        message: "Conversation not found.",
+      });
+    }
+
+    // Verify this doctor is a participant
+    if (String(conversation.participants.doctorId) !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not a participant in this conversation.",
+      });
+    }
+
+    if (conversation.isActive) {
+      // Already unlocked — idempotent, just return success
+      return res.status(200).json({
+        success: true,
+        message: "Conversation is already active.",
+        data: { isActive: true },
+      });
+    }
+
+    // Unlock
+    conversation.isActive = true;
+    conversation.messages.push({
+      _id: new mongoose.Types.ObjectId(),
+      senderId: new mongoose.Types.ObjectId(userId),
+      senderType: "Doctor",
+      messageType: "system",
+      content: "Doctor has reopened this conversation.",
+      status: "sent",
+      createdAt: new Date(),
+    } as IMessage);
+    conversation.lastActivityAt = new Date();
+    await conversation.save();
+
+    console.log(`🔓 Conversation ${conversationId} manually unlocked by doctor ${userId}`);
+
+    res.status(200).json({
+      success: true,
+      message: "Conversation unlocked.",
+      data: { isActive: true },
     });
   }
 );
@@ -258,8 +340,6 @@ export const sendMessage = asyncHandler(
           : (conversation.participants.userId as any).name;
 
       const apptId = String(conversation.appointmentId);
-      console.log("[Chat] appointmentId for notification:", apptId);
-
       await NotificationService.notifyNewMessage(
         recipientId,
         role === "Doctor" ? "User" : "Doctor",
@@ -311,7 +391,6 @@ export const getMessages = asyncHandler(
     const skip = (Number(page) - 1) * Number(limit);
     const totalMessages = conversation.messages.length;
 
-    // Get messages in reverse order (newest first) with pagination
     const messages = conversation.messages
       .slice(
         Math.max(0, totalMessages - skip - Number(limit)),
@@ -344,9 +423,7 @@ export const uploadChatMedia = asyncHandler(
     }
 
     if (!req.file) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No file provided" });
+      return res.status(400).json({ success: false, message: "No file provided" });
     }
 
     const { buffer, mimetype, originalname } = req.file;
@@ -361,30 +438,18 @@ export const uploadChatMedia = asyncHandler(
         url = result.secure_url;
         fileType = "image";
       } else {
-        const result = await uploadDocumentToCloudinary(
-          buffer,
-          "chat/documents",
-          mimetype
-        );
+        const result = await uploadDocumentToCloudinary(buffer, "chat/documents", mimetype);
         url = result.fileUrl;
         fileType = "document";
       }
 
       return res.status(200).json({
         success: true,
-        data: {
-          url,
-          fileType,
-          fileName: originalname,
-          mimeType: mimetype,
-        },
+        data: { url, fileType, fileName: originalname, mimeType: mimetype },
       });
     } catch (error: any) {
       console.error("[Chat Upload] Failed:", error.message);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to upload file",
-      });
+      return res.status(500).json({ success: false, message: "Failed to upload file" });
     }
   }
 );
@@ -401,17 +466,12 @@ export const markAsRead = asyncHandler(
     const conversation = await Conversation.findById(conversationId);
 
     if (!conversation) {
-      return res.status(404).json({
-        success: false,
-        message: "Conversation not found",
-      });
+      return res.status(404).json({ success: false, message: "Conversation not found" });
     }
 
-    // Reset unread count
     const unreadField = role === "Doctor" ? "doctor" : "user";
     conversation.unreadCount[unreadField] = 0;
 
-    // Mark messages as read
     const now = new Date();
     conversation.messages.forEach((msg) => {
       if (String(msg.senderId) !== userId && msg.status !== "read") {
@@ -422,7 +482,6 @@ export const markAsRead = asyncHandler(
 
     await conversation.save();
 
-    // Emit read receipt
     const recipientId =
       role === "Doctor"
         ? String(conversation.participants.userId)
@@ -430,10 +489,7 @@ export const markAsRead = asyncHandler(
 
     emitMessageRead(conversationId, recipientId);
 
-    res.status(200).json({
-      success: true,
-      message: "Messages marked as read",
-    });
+    res.status(200).json({ success: true, message: "Messages marked as read" });
   }
 );
 
@@ -444,19 +500,14 @@ export const updateTyping = asyncHandler(
   async (req: Request, res: Response) => {
     const { conversationId } = req.params;
     const { isTyping } = req.body;
-    const userId = req.auth?.id;
     const role = req.auth?.role;
 
     const conversation = await Conversation.findById(conversationId);
 
     if (!conversation) {
-      return res.status(404).json({
-        success: false,
-        message: "Conversation not found",
-      });
+      return res.status(404).json({ success: false, message: "Conversation not found" });
     }
 
-    // Emit typing event to recipient
     const recipientId =
       role === "Doctor"
         ? String(conversation.participants.userId)
@@ -464,9 +515,7 @@ export const updateTyping = asyncHandler(
 
     emitTypingIndicator(conversationId, recipientId, isTyping, role!);
 
-    res.status(200).json({
-      success: true,
-    });
+    res.status(200).json({ success: true });
   }
 );
 
@@ -485,37 +534,28 @@ export const requestVideoCall = asyncHandler(
       .populate("participants.doctorId", "firstName lastName expoPushTokens");
 
     if (!conversation) {
-      return res.status(404).json({
-        success: false,
-        message: "Conversation not found",
-      });
+      return res.status(404).json({ success: false, message: "Conversation not found" });
     }
 
-    // Check if there's already an active request
     if (
       conversation.activeVideoRequest &&
       conversation.activeVideoRequest.status === "pending"
     ) {
-      return res.status(400).json({
-        success: false,
-        message: "A video call request is already pending",
-      });
+      return res.status(400).json({ success: false, message: "A video call request is already pending" });
     }
 
-    // Create video call request
     const videoRequest = {
       _id: new mongoose.Types.ObjectId(),
       requestedBy: new mongoose.Types.ObjectId(userId),
       requestedByType: role,
       status: "pending" as const,
       requestedAt: new Date(),
-      expiresAt: new Date(Date.now() + 60 * 1000), // 60 seconds
+      expiresAt: new Date(Date.now() + 60 * 1000),
     };
 
     conversation.activeVideoRequest = videoRequest;
     await conversation.save();
 
-    // Emit to recipient
     const recipientId =
       role === "Doctor"
         ? String(conversation.participants.userId._id)
@@ -526,14 +566,8 @@ export const requestVideoCall = asyncHandler(
         ? `Dr. ${(conversation.participants.doctorId as any).firstName}`
         : (conversation.participants.userId as any).name;
 
-    emitVideoCallRequest(
-      conversationId,
-      recipientId,
-      requesterName,
-      videoRequest._id.toString()
-    );
+    emitVideoCallRequest(conversationId, recipientId, requesterName, videoRequest._id.toString());
 
-    // Send push notification
     try {
       await NotificationService.notifyVideoCallRequest(
         recipientId,
@@ -557,13 +591,7 @@ export const requestVideoCall = asyncHandler(
         conv.videoCallHistory.push(conv.activeVideoRequest);
         conv.activeVideoRequest = undefined;
         await conv.save();
-
-        emitVideoCallResponse(
-          conversationId,
-          String(userId),
-          "expired",
-          videoRequest._id.toString()
-        );
+        emitVideoCallResponse(conversationId, String(userId), "expired", videoRequest._id.toString());
       }
     }, 60000);
 
@@ -582,50 +610,34 @@ export const respondToVideoCall = asyncHandler(
   async (req: Request, res: Response) => {
     const { conversationId, requestId } = req.params;
     const { accept } = req.body;
-    const userId = req.auth?.id;
 
-    const conversation = await Conversation.findById(conversationId).populate(
-      "appointmentId"
-    );
+    const conversation = await Conversation.findById(conversationId).populate("appointmentId");
 
     if (!conversation) {
-      return res.status(404).json({
-        success: false,
-        message: "Conversation not found",
-      });
+      return res.status(404).json({ success: false, message: "Conversation not found" });
     }
 
     if (
       !conversation.activeVideoRequest ||
       String(conversation.activeVideoRequest._id) !== requestId
     ) {
-      return res.status(404).json({
-        success: false,
-        message: "Video call request not found or expired",
-      });
+      return res.status(404).json({ success: false, message: "Video call request not found or expired" });
     }
 
     if (conversation.activeVideoRequest.status !== "pending") {
-      return res.status(400).json({
-        success: false,
-        message: "Video call request is no longer pending",
-      });
+      return res.status(400).json({ success: false, message: "Video call request is no longer pending" });
     }
 
-    // Update request status
     conversation.activeVideoRequest.status = accept ? "accepted" : "declined";
     conversation.activeVideoRequest.respondedAt = new Date();
     conversation.videoCallHistory.push(conversation.activeVideoRequest);
 
     const requesterId = String(conversation.activeVideoRequest.requestedBy);
-
-    // Clear active request
     const responseStatus = conversation.activeVideoRequest.status;
     conversation.activeVideoRequest = undefined;
 
     await conversation.save();
 
-    // Emit response to requester
     emitVideoCallResponse(conversationId, requesterId, responseStatus, requestId);
 
     res.status(200).json({
@@ -634,9 +646,7 @@ export const respondToVideoCall = asyncHandler(
         accepted: accept,
         appointmentId: (conversation.appointmentId as any)._id,
       },
-      message: accept
-        ? "Video call accepted. Redirecting to call..."
-        : "Video call declined",
+      message: accept ? "Video call accepted. Redirecting to call..." : "Video call declined",
     });
   }
 );
@@ -652,38 +662,24 @@ export const cancelVideoCallRequest = asyncHandler(
     const conversation = await Conversation.findById(conversationId);
 
     if (!conversation) {
-      return res.status(404).json({
-        success: false,
-        message: "Conversation not found",
-      });
+      return res.status(404).json({ success: false, message: "Conversation not found" });
     }
 
     if (
       !conversation.activeVideoRequest ||
       String(conversation.activeVideoRequest._id) !== requestId
     ) {
-      return res.status(404).json({
-        success: false,
-        message: "Video call request not found",
-      });
+      return res.status(404).json({ success: false, message: "Video call request not found" });
     }
 
-    // Verify requester is the one cancelling
     if (String(conversation.activeVideoRequest.requestedBy) !== userId) {
-      return res.status(403).json({
-        success: false,
-        message: "Only the requester can cancel the request",
-      });
+      return res.status(403).json({ success: false, message: "Only the requester can cancel the request" });
     }
 
     if (conversation.activeVideoRequest.status !== "pending") {
-      return res.status(400).json({
-        success: false,
-        message: "Video call request is no longer pending",
-      });
+      return res.status(400).json({ success: false, message: "Video call request is no longer pending" });
     }
 
-    // Cancel request
     conversation.activeVideoRequest.status = "cancelled";
     conversation.activeVideoRequest.respondedAt = new Date();
     conversation.videoCallHistory.push(conversation.activeVideoRequest);
@@ -696,13 +692,9 @@ export const cancelVideoCallRequest = asyncHandler(
     conversation.activeVideoRequest = undefined;
     await conversation.save();
 
-    // Notify recipient
     emitVideoCallResponse(conversationId, recipientId, "cancelled", requestId);
 
-    res.status(200).json({
-      success: true,
-      message: "Video call request cancelled",
-    });
+    res.status(200).json({ success: true, message: "Video call request cancelled" });
   }
 );
 
@@ -725,9 +717,6 @@ export const getUserConversations = asyncHandler(
       .populate("participants.doctorId", "firstName lastName doctorImage")
       .sort({ lastActivityAt: -1 });
 
-    res.status(200).json({
-      success: true,
-      data: conversations,
-    });
+    res.status(200).json({ success: true, data: conversations });
   }
 );
