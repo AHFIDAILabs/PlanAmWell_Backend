@@ -437,14 +437,23 @@ export const emitVideoCallResponse = (
  * Emit appointment-ended to the appointment room.
  * Both doctor and patient receive this and lock their UI.
  */
-export const emitAppointmentEnded = (appointmentId: string) => {
+export const emitAppointmentEnded = (
+  appointmentId: string,
+  patientId?: string,
+  doctorId?: string
+) => {
   try {
-    const roomName = `appointment:${appointmentId}`;
-    io.to(roomName).emit("appointment-ended", {
-      appointmentId,
-      timestamp: new Date().toISOString(),
-    });
-    console.log(`🏁 appointment-ended emitted to room ${appointmentId}`);
+    const payload = { appointmentId, timestamp: new Date().toISOString() };
+
+    // 1. Broadcast to appointment room (catches anyone already in the chat)
+    io.to(`appointment:${appointmentId}`).emit("appointment-ended", payload);
+
+    // 2. Also emit directly to each participant's user room so the event
+    //    arrives even if they haven't joined the appointment room yet
+    if (patientId) io.to(`user_${patientId}`).emit("appointment-ended", payload);
+    if (doctorId)  io.to(`user_${doctorId}`).emit("appointment-ended", payload);
+
+    console.log(`🏁 appointment-ended emitted to room + users (patient:${patientId}, doctor:${doctorId})`);
     return true;
   } catch (error) {
     console.error("❌ Failed to emit appointment-ended:", error);
@@ -473,7 +482,9 @@ export const emitAccessRequestUpdate = (
 };
 
 export const emitConversationUnlocked = (conversationId: string, patientId: string) => {
-  io.to(patientId).emit("conversation-unlocked", { conversationId });
+  // Must use the user room name — NOT the raw userId
+  io.to(`user_${patientId}`).emit("conversation-unlocked", { conversationId });
+  console.log(`🔓 conversation-unlocked emitted to patient ${patientId}`);
 };
 
 // ✅ Helper to check if user is online

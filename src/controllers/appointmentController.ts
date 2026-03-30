@@ -780,7 +780,7 @@ export const endAppointment = asyncHandler(
     }
 
     // ── 4. Emit real-time event so both screens update immediately ────────────
-    emitAppointmentEnded(String(appointment._id));
+    emitAppointmentEnded(String(appointment._id), patientId, doctorId!);
 
     res.status(200).json({
       success: true,
