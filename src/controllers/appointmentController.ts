@@ -17,6 +17,25 @@ const extractId = (field: any): string => {
   return String(field);
 };
 
+
+// ── Helper ─────────────────────────────────────────────────────────────────
+ 
+/**
+ * Returns an array of field names that are required for appointment booking
+ * but are not yet filled in on the user document.
+ * An empty array means the profile is complete enough to proceed.
+ */
+function getMissingAppointmentFields(user: any): string[] {
+  const required: { field: string; label: string }[] = [
+    { field: "phone",       label: "Phone number" },
+    { field: "gender",      label: "Gender" },
+    { field: "dateOfBirth", label: "Date of birth" },
+  ];
+  return required
+    .filter(({ field }) => !user[field])
+    .map(({ label }) => label);
+}
+
 /**
  * @desc Create Appointment (Users)
  * @route POST /api/v1/appointments
@@ -33,22 +52,45 @@ export const createAppointment = asyncHandler(
       shareUserInfo,
       consultationType,
     } = req.body;
-
+ 
     if (!doctorId || !scheduledAt) {
       res.status(400);
       throw new Error("doctorId and scheduledAt are required.");
     }
-
+ 
     const doctor = await Doctor.findById(doctorId);
     if (!doctor || doctor.status !== "approved") {
       res.status(404);
       throw new Error("Doctor not found or not approved.");
     }
-
-    const user = await User.findById(req.auth?.id).select(
+ 
+    if (!req.auth?.id) {
+      res.status(401);
+      throw new Error("Unauthorized");
+    }
+ 
+    // ── Profile completeness gate ───────────────────────────────────────────
+    const user = await User.findById(req.auth.id).select(
       "name email phone gender dateOfBirth homeAddress"
     );
-
+ 
+    if (!user) {
+      res.status(404);
+      throw new Error("User not found.");
+    }
+ 
+    const missingFields = getMissingAppointmentFields(user);
+    if (missingFields.length > 0) {
+      // 422 Unprocessable Entity — the client knows what to ask for
+      return res.status(422).json({
+        success: false,
+        code: "PROFILE_INCOMPLETE",
+        message: "Please complete your profile before booking an appointment.",
+        missingFields, // e.g. ["Phone number", "Date of birth"]
+      });
+    }
+    // ───────────────────────────────────────────────────────────────────────
+ 
     let patientSnapshot = null;
     if (shareUserInfo && user) {
       patientSnapshot = {
@@ -60,20 +102,15 @@ export const createAppointment = asyncHandler(
         homeAddress: user.homeAddress,
       };
     }
-
+ 
     const scheduledDate = new Date(scheduledAt);
     if (isNaN(scheduledDate.getTime())) {
       res.status(400);
       throw new Error("Invalid scheduledAt date.");
     }
-
-    if (!req.auth?.id) {
-      res.status(401);
-      throw new Error("Unauthorized");
-    }
-
+ 
     const appointment = await Appointment.create({
-      userId: req.auth?.id,
+      userId: req.auth.id,
       doctorId,
       scheduledAt,
       duration,
@@ -89,10 +126,10 @@ export const createAppointment = asyncHandler(
         callEnded: false,
       },
     });
-
+ 
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = user?.name || "A patient";
-
+ 
     try {
       await NotificationService.notifyAppointmentRequestSent(
         req.auth.id,
@@ -103,7 +140,7 @@ export const createAppointment = asyncHandler(
     } catch (error) {
       console.error("❌ Failed to send patient notification:", error);
     }
-
+ 
     try {
       await NotificationService.notifyDoctorNewRequest(
         String(doctorId),
@@ -115,7 +152,7 @@ export const createAppointment = asyncHandler(
     } catch (error) {
       console.error("❌ Failed to send doctor notification:", error);
     }
-
+ 
     res.status(201).json({
       success: true,
       data: appointment,

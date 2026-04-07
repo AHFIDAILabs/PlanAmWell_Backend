@@ -156,46 +156,59 @@ export const convertGuestToUser = asyncHandler(async (req: Request, res: Respons
 // ------------------ CREATE User (Local Only) ------------------
 
 export const createUser = asyncHandler(async (req: Request, res: Response) => {
-  // Prevent creating user if already logged in
   if (req.auth?.id) {
     res.status(400);
     throw new Error("Already logged in, cannot create new account");
   }
-
-  const { name, email, phone, password, dateOfBirth, city, state, homeAddress, lga, roles } = req.body;
-
-  // Check if email exists locally
+ 
+  // ✅ Only these three are required at signup
+  const { name, email, password } = req.body;
+ 
+  if (!name || !email || !password) {
+    res.status(400);
+    throw new Error("name, email and password are required");
+  }
+ 
   const existingUser = await User.findOne({ email });
   if (existingUser) {
     return res.status(409).json({
       success: false,
-      message: "User with this email already exists locally",
+      message: "User with this email already exists",
     });
   }
-
-  // Create new user
-  const newUser = await User.create({
-    name,
-    email,
-    password,
+ 
+  // Optional fields — collected later during checkout / appointment booking
+  const {
     phone,
     dateOfBirth,
     homeAddress,
     city,
     state,
     lga,
+    gender,
+    roles,
+  } = req.body;
+ 
+  const newUser = await User.create({
+    name,
+    email,
+    password,
+    // Optional — undefined values are silently ignored by Mongoose
+    phone: phone || undefined,
+    dateOfBirth: dateOfBirth || undefined,
+    homeAddress: homeAddress || undefined,
+    city: city || undefined,
+    state: state || undefined,
+    lga: lga || undefined,
+    gender: gender || undefined,
     roles: roles || ["User"],
     verified: true,
   });
-
-  // Populate relations (userImage, others if needed)
+ 
   const fullUser = await User.findById(newUser._id).populate("userImage");
-
   const userResponse = fullUser?.toObject({ virtuals: true });
-
-  // Remove password from response
   if (userResponse?.password) delete userResponse.password;
-
+ 
   res.status(201).json({
     success: true,
     data: userResponse,

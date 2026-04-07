@@ -189,7 +189,7 @@ const MedicalRecordSchema = new Schema<IMedicalRecord>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      unique: true, // one record per patient
+
     },
     patientSnapshot: {
       name: { type: String, required: true },

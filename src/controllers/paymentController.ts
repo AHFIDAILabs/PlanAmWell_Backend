@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import { Payment } from "../models/initiatedPayment";
 import axios from "axios";
+import { Order } from "../models/order";
+import { User } from "../models/user";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "https://mymedicines-stage-api-zhrr2.ondigitalocean.app/v1/PlanAmWell";
 const PARTNER_API_KEY = process.env.PARTNER_API_KEY;
@@ -34,81 +36,147 @@ export const getPaymentMethods = asyncHandler(async (req: Request, res: Response
 });
 
 
-export const initiatePayment = asyncHandler(async (req: Request, res: Response) => {
-  const { orderId, userId, paymentMethod, amount, partnerReferenceCode, customerEmail } = req.body;
 
-  if (!orderId || !userId || !amount || !paymentMethod || !partnerReferenceCode || !customerEmail) {
+export const initiatePayment = asyncHandler(async (req: Request, res: Response) => {
+  const { orderId, paymentMethod } = req.body;
+
+  /** ------------------ 1. Basic validation ------------------ */
+  if (!orderId || !paymentMethod) {
     return res.status(400).json({
       success: false,
-      message: "All fields are required: orderId, userId, paymentMethod, amount, partnerReferenceCode, customerEmail"
+      message: "orderId and paymentMethod are required",
     });
   }
+
+  /** ------------------ 2. Load order ------------------ */
+  const order = await Order.findById(orderId);
+  if (!order) {
+    return res.status(404).json({
+      success: false,
+      message: "Order not found",
+    });
+  }
+
+  /** ------------------ 3. Validate order state ------------------ */
+  if (order.paymentStatus !== "pending") {
+    return res.status(422).json({
+      success: false,
+      message: "Order is not eligible for payment",
+    });
+  }
+
+  if (!order.partnerOrderId) {
+    return res.status(422).json({
+      success: false,
+      message: "Partner order ID missing",
+    });
+  }
+
+  if (!order.userId) {
+    return res.status(422).json({
+      success: false,
+      message: "Order has no associated user",
+    });
+  }
+
+  /** ------------------ 4. Load user ------------------ */
+  const user = await User.findById(order.userId);
+  if (!user || !user.partnerId) {
+    return res.status(422).json({
+      success: false,
+      message: "User not synced with partner system",
+    });
+  }
+
+  /** ------------------ 5. Idempotency check ------------------ */
+  const existingPayment = await Payment.findOne({
+    orderId: order.id,
+    status: "pending",
+  });
+
+  if (existingPayment) {
+    return res.status(200).json({
+      success: true,
+      message: "Payment already initiated",
+      data: {
+        checkoutUrl: existingPayment.checkoutUrl,
+        paymentReference: existingPayment.paymentReference,
+        transactionId: existingPayment.transactionId,
+        status: existingPayment.status,
+      },
+    });
+  }
+
+  /** ------------------ 6. Derive secure server-side values ------------------ */
+  const amount = order.total; // ✅ authoritative
+  const partnerReferenceCode = `PAW-${order.orderNumber}`; // ✅ idempotent
+  const partnerOrderUuid = order.orderNumber; // ✅ UUID expected by partner
+  const partnerUserId = user.partnerId;
+
+  /** ------------------ 7. Initiate payment with partner ------------------ */
+  let partnerResponse;
 
   try {
-    // Call Partner API
     const response = await axios.post(`${PARTNER_API_URL}/payments/initiate`, {
-      orderId,
-      userId,
+      orderId: partnerOrderUuid,
+      userId: partnerUserId,
       paymentMethod,
       amount,
       partnerReferenceCode,
+      customerEmail: user.email,
       apiKey: PARTNER_API_KEY,
-      customerEmail
     });
 
-    const data = response.data.data; // explicitly use partner data
-
-    // Save payment record
-    const payment = await Payment.create({
-      orderId,
-      userId,
-      paymentMethod,
-      partnerReferenceCode,
-      paymentReference: data.paymentReference,
-      transactionId: data.transactionId,
-      checkoutUrl: data.checkoutUrl,
-      amount,
-      status: data.status || "pending"
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "Payment initiated successfully",
-      data
-    });
-
+    partnerResponse = response.data?.data;
   } catch (err: any) {
-    console.error("[Payment] Initiate failed:", err.response?.data || err.message);
+    console.error(
+      "[initiatePayment] Partner API failed:",
+      err.response?.data || err.message
+    );
 
-    // Simulated fallback
-    const fallbackData = {
-      paymentReference: `PS_REF_${Date.now()}`,
-      transactionId: `TXN_${Date.now()}`,
-      orderId,
-      amount,
-      status: "pending",
-      checkoutUrl: "https://checkout.paystack.com/example"
-    };
-
-    await Payment.create({
-      orderId,
-      userId,
-      paymentMethod,
-      partnerReferenceCode,
-      paymentReference: fallbackData.paymentReference,
-      transactionId: fallbackData.transactionId,
-      checkoutUrl: fallbackData.checkoutUrl,
-      amount,
-      status: fallbackData.status
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "Payment initiated (Simulated)",
-      data: fallbackData
+    return res.status(502).json({
+      success: false,
+      message: "Failed to initiate payment with partner",
     });
   }
+
+  if (
+    !partnerResponse?.paymentReference ||
+    !partnerResponse?.transactionId ||
+    !partnerResponse?.checkoutUrl
+  ) {
+    return res.status(500).json({
+      success: false,
+      message: "Invalid response from payment provider",
+    });
+  }
+
+  /** ------------------ 8. Persist payment ------------------ */
+  const payment = await Payment.create({
+    orderId: order.id,
+    userId: user.id,
+    paymentMethod,
+    partnerReferenceCode,
+    paymentReference: partnerResponse.paymentReference,
+    transactionId: partnerResponse.transactionId,
+    checkoutUrl: partnerResponse.checkoutUrl,
+    amount,
+    status: "pending",
+  });
+
+  /** ------------------ 9. Respond to frontend ------------------ */
+  return res.status(201).json({
+    success: true,
+    message: "Payment initiated successfully",
+    data: {
+      checkoutUrl: payment.checkoutUrl,
+      paymentReference: payment.paymentReference,
+      transactionId: payment.transactionId,
+      status: payment.status,
+    },
+  });
 });
+
 
 // ------------------ VERIFY PAYMENT ------------------
 export const verifyPayment = asyncHandler(async (req: Request, res: Response) => {

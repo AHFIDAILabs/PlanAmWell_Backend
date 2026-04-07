@@ -35,6 +35,7 @@ import partnerRouter from "./routes/partnerRoutes";
 import cronRouter from "./routes/cron";
 import chatRouter from "./routes/chatRoutes";
 import medicalRecordRouter from "./routes/medicalRecordRoutes";
+import webhookRouter from "./routes/webhookRoutes";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
@@ -576,6 +577,7 @@ app.use("/api/v1/partners", partnerRouter);
 app.use("/api/v1/cron", cronRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/medical-records", medicalRecordRouter);
+app.use("/api/v1/webhooks", webhookRouter);
 
 app.use(errorHandler);
 
