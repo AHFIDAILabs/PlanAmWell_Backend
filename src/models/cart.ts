@@ -1,18 +1,18 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
 export interface ICartItem {
-  drugId: string;            
+  drugId: string;              // ✅ PARTNER drug UUID (single source of truth)
   quantity: number;
-  price?: number;            
-  specialInstructions?: string; 
-  dosage?: string;  
+  price?: number;
+  dosage?: string;
+  specialInstructions?: string;
   imageUrl?: string;
-  drugName?: string;            
+  drugName?: string;
 }
 
 export interface ICart extends Document {
-  userId?: Types.ObjectId;      // optional for guest carts
-  sessionId?: string;           // optional for guest carts
+  userId?: Types.ObjectId;
+  sessionId?: string;
   items: ICartItem[];
   totalItems: number;
   totalPrice: number;
@@ -23,27 +23,30 @@ export interface ICart extends Document {
 const CartSchema = new Schema<ICart>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User" },
-    sessionId: { type: String }, // for guests
+    sessionId: { type: String },
+
     items: [
       {
-        drugId: { type: String, required: true },
+        drugId: { type: String, required: true }, // ✅ partner UUID only
         quantity: { type: Number, required: true },
         price: { type: Number },
         dosage: { type: String, default: "" },
         specialInstructions: { type: String, default: "" },
         imageUrl: { type: String },
-        drugName: { type: String}
+        drugName: { type: String },
       },
     ],
+
     totalItems: { type: Number, default: 0 },
     totalPrice: { type: Number, default: 0 },
+
     partnerCartId: { type: String },
     isAbandoned: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-// Add a compound index to ensure either userId or sessionId is unique per cart
+// Ensure one cart per user/session
 CartSchema.index({ userId: 1 }, { unique: true, sparse: true });
 CartSchema.index({ sessionId: 1 }, { unique: true, sparse: true });
 

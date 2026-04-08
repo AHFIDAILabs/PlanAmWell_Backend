@@ -19,7 +19,7 @@ const getOwnerQuery = (req: Request) => {
 
 // ------------------ Helper: map cart item for partner API ------------------
 const mapCartItemForPartner = (item: ICartItem) => ({
-  drug_id: item.drugId,              // Must be partner UUID
+  drugId: item.drugId,              // Must be partner UUID
   quantity: item.quantity,
   dosage: item.dosage || "",
   special_instructions: item.specialInstructions || "",

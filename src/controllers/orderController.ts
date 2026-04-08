@@ -4,6 +4,8 @@ import asyncHandler from "../middleware/asyncHandler";
 import { Order, IOrderItem } from "../models/order";
 import { v4 as uuidv4 } from "uuid";
 import { createOrderNotification } from "../util/sendPushNotification";
+import { Product } from "../models/product";
+import { User } from "../models/user";
 
 const API_BASE = process.env.PARTNER_API_URL;
 
@@ -57,6 +59,16 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId || undefined;
   const sessionId = userId ? undefined : req.user?.sessionId;
 
+  
+let partnerUserId: string | undefined;
+if (userId) {
+  const user = await User.findById(userId);
+  partnerUserId = user?.partnerId;
+  if (!partnerUserId) {
+    console.warn("[OrderController] User has no partnerId, order will sync without userId");
+  }
+}
+
   // --- Create local Order ---
   const order = await Order.create({
     orderNumber: uuidv4(),
@@ -88,25 +100,34 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  // --- Prepare Partner API Payload ---
-  const apiItems = items.map((item: IOrderItem) => ({
-    drugId: item.productId,
-    quantity: item.qty,
-    dosage: item.dosage || "",
-    specialInstructions: item.specialInstructions || "",
-  }));
+ 
+  // --- Sync with Partner API ---
+const apiItems = await Promise.all(
+  items.map(async (item: IOrderItem) => {
+    const product = await Product.findById(item.productId);
+    if (!product) {
+      throw new Error(`Product not found for id: ${item.productId}`);
+    }
+    return {
+      drug_id: product.partnerProductId, // ✅ Partner UUID, not Mongo ObjectId
+      quantity: item.qty,
+      dosage: item.dosage || "",
+      special_instructions: item.specialInstructions || "",
+    };
+  })
+);
 
-  const apiPayload = {
-    userId: userId || undefined, // Never send sessionId
-    telephone: shippingAddress?.phone || "",
-    address: shippingAddress?.addressLine || "",
-    state: shippingAddress?.state || "",
-    lga: shippingAddress?.city || "",
-    isHomeAddress: true,
-    isThirdPartyOrder: true,
-    platform: "PlanAmWell",
-    items: apiItems,
-  };
+const apiPayload = {
+  userId: partnerUserId || undefined,
+  telephone: shippingAddress?.phone || "",
+  address: shippingAddress?.addressLine || "",
+  state: shippingAddress?.state || "",
+  lga: shippingAddress?.city || "",
+  isHomeAddress: true,
+  isThirdPartyOrder: true,
+  platform: "PlanAmWell",
+  items: apiItems, // ✅ now has correct partner UUIDs
+};
 
   // --- Sync with Partner API ---
   let partnerResponse: any = "Failed to sync with partner API";
