@@ -114,10 +114,13 @@ export const initiatePayment = asyncHandler(async (req: Request, res: Response) 
   const partnerUserId = user.partnerId;
 
   /** ------------------ 7. Initiate payment with partner ------------------ */
-  let partnerResponse;
+ 
+let partnerResponse;
 
-  try {
-    const response = await axios.post(`${PARTNER_API_URL}/v1/PlanAmWell/payments/initiate`, {
+try {
+  const response = await axios.post(
+    `${PARTNER_API_URL}/v1/PlanAmWell/payments/initiate`,
+    {
       orderId: partnerOrderUuid,
       userId: partnerUserId,
       paymentMethod,
@@ -125,31 +128,50 @@ export const initiatePayment = asyncHandler(async (req: Request, res: Response) 
       partnerReferenceCode,
       customerEmail: user.email,
       apiKey: PARTNER_API_KEY,
-    });
+    }
+  );
 
-    partnerResponse = response.data?.data;
-  } catch (err: any) {
-    console.error(
-      "[initiatePayment] Partner API failed:",
-      err.response?.data || err.message
-    );
+  // ✅ FIX: extract the nested data
+  partnerResponse = response.data?.data;
+  
+console.log(
+  "[Partner Raw Response]",
+  JSON.stringify(response.data, null, 2)
+);
 
-    return res.status(502).json({
-      success: false,
-      message: "Failed to initiate payment with partner",
-    });
-  }
+} catch (err: any) {
+  console.error(
+    "[initiatePayment] Partner API failed:",
+    err.response?.data || err.message
+  );
 
-  if (
-    !partnerResponse?.paymentReference ||
-    !partnerResponse?.transactionId ||
-    !partnerResponse?.checkoutUrl
-  ) {
-    return res.status(500).json({
-      success: false,
-      message: "Invalid response from payment provider",
-    });
-  }
+  
+
+  return res.status(502).json({
+    success: false,
+    message: "Failed to initiate payment with partner",
+  });
+}
+
+// ✅ Validate against correct object
+if (
+  !partnerResponse?.paymentReference ||
+  !partnerResponse?.transactionId ||
+  !partnerResponse?.checkoutUrl
+) {
+  console.error(
+    "[initiatePayment] Invalid partner response:",
+    partnerResponse
+  );
+
+  
+
+  return res.status(500).json({
+    success: false,
+    message: "Invalid response from payment provider",
+  });
+}
+
 
   /** ------------------ 8. Persist payment ------------------ */
   const payment = await Payment.create({
