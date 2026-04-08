@@ -131,21 +131,26 @@ try {
     }
   );
 
-  // ✅ FIX: extract the nested data
-  partnerResponse = response.data?.data;
-  
-console.log(
-  "[Partner Raw Response]",
-  JSON.stringify(response.data, null, 2)
-);
+  console.log(
+    "[Partner Raw Response]",
+    JSON.stringify(response.data, null, 2)
+  );
+
+  // ✅ CORRECT extraction based on REAL response
+  const initializedPayment = response.data?.initializedPayment;
+  const payment = response.data?.payment;
+
+  partnerResponse = {
+    checkoutUrl: initializedPayment?.data?.authorization_url,
+    paymentReference: initializedPayment?.data?.reference,
+    transactionId: payment?.transactionId,
+  };
 
 } catch (err: any) {
   console.error(
     "[initiatePayment] Partner API failed:",
     err.response?.data || err.message
   );
-
-  
 
   return res.status(502).json({
     success: false,
@@ -163,9 +168,6 @@ if (
     "[initiatePayment] Invalid partner response:",
     partnerResponse
   );
-
-  
-
   return res.status(500).json({
     success: false,
     message: "Invalid response from payment provider",
