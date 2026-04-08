@@ -77,3 +77,32 @@ export const handlePaymentWebhook = asyncHandler(
     return res.status(200).json({ received: true });
   }
 );
+
+
+export const handleDeliveryWebhook = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { orderId, status } = req.body;
+
+    if (!orderId || !status) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid delivery webhook payload",
+      });
+    }
+
+    // ⚠️ orderId here is partner order ID or orderCode
+    const order = await Order.findOne({ partnerOrderId: orderId });
+
+    if (!order) {
+      console.warn(
+        `[DeliveryWebhook] Order not found for partnerOrderId=${orderId}`
+      );
+      return res.status(200).json({ received: true });
+    }
+
+    order.deliveryStatus = status.toLowerCase();
+    await order.save();
+
+    return res.status(200).json({ received: true });
+  }
+);

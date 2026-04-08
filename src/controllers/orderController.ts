@@ -112,7 +112,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   let partnerResponse: any = "Failed to sync with partner API";
 
   try {
-    const response = await axios.post(`${API_BASE}/orders`, apiPayload);
+    const response = await axios.post(`${API_BASE}/v1/PlanAmWell/orders`, apiPayload);
     partnerResponse = response.data;
 
     // Save partner order ID
@@ -236,3 +236,25 @@ export const deleteOrder = asyncHandler(async (req: Request, res: Response) => {
   }
   res.status(200).json({ success: true, message: "Order deleted successfully" });
 });
+
+
+
+export const refreshDeliveryStatus = asyncHandler(
+  async (req: Request, res: Response) => {
+    const order = await Order.findById(req.params.id);
+
+    if (!order || !order.partnerOrderId) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const response = await axios.get(
+      `${API_BASE}/v1/PlanAmWell/delivery/${order.partnerOrderId}`
+    );
+
+    // assuming response.data.status
+    order.deliveryStatus = response.data.status.toLowerCase();
+    await order.save();
+
+    res.json({ success: true, data: order.deliveryStatus });
+  }
+);
