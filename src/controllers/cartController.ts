@@ -19,7 +19,7 @@ const getOwnerQuery = (req: Request) => {
 
 // ------------------ Helper: map cart item for partner API ------------------
 const mapCartItemForPartner = (item: ICartItem) => ({
-  drugId: item.drugId,              // Must be partner UUID
+  drug_id: item.drugId,              // Must be partner UUID
   quantity: item.quantity,
   dosage: item.dosage || "",
   special_instructions: item.specialInstructions || "",
@@ -41,7 +41,7 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
   } else {
     // Merge items
     items.forEach((item) => {
-      if (!item.drugId) throw new Error("All items must have drugId (partner UUID)");
+      if (!item.drugId) throw new Error("All items must have drug_id (partner UUID)");
       const index = cart!.items.findIndex((i) => i.drugId === item.drugId);
       if (index > -1) {
         cart!.items[index].quantity += item.quantity;
