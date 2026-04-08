@@ -5,7 +5,7 @@ import axios from "axios";
 import { Order } from "../models/order";
 import { User } from "../models/user";
 
-const PARTNER_API_URL = process.env.PARTNER_API_URL || "https://mymedicines-stage-api-zhrr2.ondigitalocean.app/v1/PlanAmWell";
+const PARTNER_API_URL = process.env.PARTNER_API_URL;
 const PARTNER_API_KEY = process.env.PARTNER_API_KEY;
 
 // ------------------ GET PAYMENT METHODS ------------------
@@ -117,7 +117,7 @@ export const initiatePayment = asyncHandler(async (req: Request, res: Response) 
   let partnerResponse;
 
   try {
-    const response = await axios.post(`${PARTNER_API_URL}/payments/initiate`, {
+    const response = await axios.post(`${PARTNER_API_URL}/v1/PlanAmWell/payments/initiate`, {
       orderId: partnerOrderUuid,
       userId: partnerUserId,
       paymentMethod,
@@ -190,7 +190,7 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
   }
 
   try {
-    const response = await axios.post(`${PARTNER_API_URL}/payments/verify`, {
+    const response = await axios.post(`${PARTNER_API_URL}/v1/PlanAmWell/payments/verify`, {
       paymentReference,
       apiKey: PARTNER_API_KEY
     });
