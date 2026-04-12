@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
 export interface ICartItem {
-  drugId: string; // ✅ YOUR local Product._id (MongoDB ObjectId as string)
+  drugId: string; // ✅ Partner UUID (product.drugId = product.partnerProductId)
   quantity: number;
   price?: number;
   dosage?: string;

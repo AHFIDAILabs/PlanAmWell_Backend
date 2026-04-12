@@ -122,11 +122,7 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
   for (const item of items) {
     if (!item.drugId) throw new Error("Each item must have a drugId");
 
-    // Guard against invalid ObjectId format crashing Product.exists()
-    if (!Types.ObjectId.isValid(item.drugId)) {
-      throw new Error(`Invalid drugId format: ${item.drugId}`);
-    }
-
+    // drugId must be uuid string (partnerProductId), not MongoDB ObjectId — no DB lookup needed here
     const exists = await Product.exists({ _id: item.drugId });
     if (!exists) throw new Error(`Product not found: ${item.drugId}`);
   }
