@@ -377,51 +377,27 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   const partnerId = await syncUserWithPartner(user, safePassword);
   if (!partnerId) throw new Error("Failed to get partner user ID");
 
-  // ✅ NEW: Sync cart to partner BEFORE creating the order
+  // NEW: Sync cart to partner BEFORE creating the order
   /** ------------------ 4b. Sync Cart to Partner ------------------ */
-  // Build productLookup ONCE and reuse in both 4b and 5 — no double DB queries
-  const productLookup = new Map<string, any>();
-  for (const item of cart.items) {
-    if (!productLookup.has(item.drugId)) {
-      const product = await Product.findById(item.drugId);
-      if (!product) throw new Error(`Product not found: ${item.drugId}`);
-      if (!product.partnerProductId)
-        throw new Error(`partnerProductId missing for: ${product.name}`);
-      productLookup.set(item.drugId, product);
-    }
-  }
-
-  // Partner cart expects drug_id (underscore)
-  const partnerCartItems = cart.items.map((item) => ({
-    drug_id: productLookup.get(item.drugId)!.partnerProductId,
-    quantity: item.quantity,
-    dosage: item.dosage || "",
-    special_instructions: item.specialInstructions || "",
-  }));
-
   try {
     await axios.post(`${PARTNER_API_URL}${PARTNER_PREFIX}/cart`, {
       userId: partnerId,
-      items: partnerCartItems,
+      items: cart.items.map((item) => ({
+        drug_id: item.drugId, //  already partner UUID
+        quantity: item.quantity,
+        dosage: item.dosage || "",
+        special_instructions: item.specialInstructions || "",
+      })),
     });
-    console.log("[Checkout] Partner cart synced ✅");
-  } catch (cartSyncErr: any) {
-    // Non-fatal — order creation may still work
+    console.log("[Checkout] Partner cart synced");
+  } catch (err: any) {
     console.error(
       "[Checkout] Partner cart sync failed:",
-      cartSyncErr.response?.data || cartSyncErr.message,
+      err.response?.data || err.message,
     );
   }
 
   /** ------------------ 5. Create Partner Order ------------------ */
-  // Partner order expects drugId (camelCase) — confirm with partner docs if unsure
-  const partnerOrderItems = cart.items.map((item) => ({
-    drugId: productLookup.get(item.drugId)!.partnerProductId, // ✅ partner UUID
-    quantity: item.quantity,
-    dosage: item.dosage || "",
-    special_instructions: item.specialInstructions || "",
-  }));
-
   let partnerOrder;
   try {
     const orderRes = await axios.post(
@@ -429,15 +405,11 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       {
         userId: partnerId,
         telephone: user.phone,
-        address: user.homeAddress || (user.preferences as any)?.address || "",
-        state: user.state || (user.preferences as any)?.state || "",
-        lga: user.lga || (user.preferences as any)?.lga || "",
-        deliveryMethod: "home",
-        isHomeAddress: true,
-        isThirdPartyOrder: true,
-        discount: 0,
         platform: "PlanAmWell",
-        items: partnerOrderItems,
+        items: cart.items.map((item) => ({
+          drugId: item.drugId, //  already partner UUID — matches order API spec
+          quantity: item.quantity,
+        })),
       },
     );
     partnerOrder = orderRes.data.data;
@@ -457,21 +429,17 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   const localOrder = await Order.create({
     orderNumber: uuidv4(),
     userId: authUserId,
-    partnerOrderId: partnerOrder?.orderId, // ✅ partner UUID saved here
+    partnerOrderId: partnerOrder?.orderId,
     isThirdPartyOrder: true,
     platform: "PlanAmWell",
-    items: cart.items.map((i) => {
-      const product = productLookup.get(i.drugId)!;
-      return {
-        productId: product._id,
-        name: product.name,
-        sku: product.sku,
-        qty: i.quantity,
-        price: product.price || i.price || 0,
-        dosage: i.dosage,
-        specialInstructions: i.specialInstructions,
-      };
-    }),
+    items: cart.items.map((i) => ({
+      productId: i.drugId, // partner UUID as reference
+      name: i.drugName || "",
+      qty: i.quantity,
+      price: i.price || 0,
+      dosage: i.dosage,
+      specialInstructions: i.specialInstructions,
+    })),
     subtotal: cart.totalPrice,
     total: cart.totalPrice,
     paymentStatus: "pending",
