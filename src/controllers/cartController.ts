@@ -165,12 +165,15 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
 });
 
 // ── GET CART ─────────────────────────────────────────────────────────────────
+// getCart in cartController.ts
 export const getCart = asyncHandler(async (req: Request, res: Response) => {
   const ownerQuery = getOwnerQuery(req);
   const cart = await Cart.findOne(ownerQuery);
   if (!cart)
     return res.status(404).json({ success: false, message: "Cart not found" });
-  res.status(200).json({ success: true, data: cart });
+  
+  // ✅ Match addToCart response shape so frontend reads consistently
+  res.status(200).json({ success: true, localCart: cart, data: cart });
 });
 
 // ── CLEAR CART ───────────────────────────────────────────────────────────────
@@ -234,5 +237,5 @@ export const removeCartItem = asyncHandler(async (req: Request, res: Response) =
   cart.totalPrice = cart.items.reduce((s, i) => s + (i.price || 0) * i.quantity, 0);
   await cart.save();
 
-  res.status(200).json({ success: true, data: cart });
+res.status(201).json({ success: true, localCart: cart, partnerCart: undefined });
 });
