@@ -2,7 +2,7 @@ import mongoose, { Document, Schema, Types } from "mongoose";
 import { v4 as uuidv4 } from "uuid";
 
 export interface IOrderItem {
-  productId: Types.ObjectId; // local reference to Product
+  productId: string; // local reference to Product
   name?: string;
   sku?: string;
   qty: number;
@@ -38,7 +38,7 @@ export interface IOrder extends Document {
 
 const OrderItemSchema = new Schema<IOrderItem>(
   {
-    productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+    productId: { type: String, ref: "Product", required: true },
     name: String,
     sku: String,
     qty: { type: Number, required: true },
