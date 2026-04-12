@@ -451,6 +451,8 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       payload,
     );
     partnerOrder = orderRes.data.data;
+    console.log("[Checkout] Partner order response:", JSON.stringify(partnerOrder, null, 2));
+
   } catch (err: any) {
     console.error(
       "[Checkout] Failed to create partner order:",
