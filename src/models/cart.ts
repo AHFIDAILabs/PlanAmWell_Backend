@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
 export interface ICartItem {
-  drugId: string;              // ✅ PARTNER drug UUID (single source of truth)
+  drugId: string; // ✅ YOUR local Product._id (MongoDB ObjectId as string)
   quantity: number;
   price?: number;
   dosage?: string;
@@ -24,10 +24,9 @@ const CartSchema = new Schema<ICart>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User" },
     sessionId: { type: String },
-
     items: [
       {
-        drugId: { type: String, required: true }, // ✅ partner UUID only
+        drugId: { type: String, required: true },
         quantity: { type: Number, required: true },
         price: { type: Number },
         dosage: { type: String, default: "" },
@@ -36,17 +35,14 @@ const CartSchema = new Schema<ICart>(
         drugName: { type: String },
       },
     ],
-
     totalItems: { type: Number, default: 0 },
     totalPrice: { type: Number, default: 0 },
-
     partnerCartId: { type: String },
     isAbandoned: { type: Boolean, default: false },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
-// Ensure one cart per user/session
 CartSchema.index({ userId: 1 }, { unique: true, sparse: true });
 CartSchema.index({ sessionId: 1 }, { unique: true, sparse: true });
 

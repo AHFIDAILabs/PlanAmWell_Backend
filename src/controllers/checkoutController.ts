@@ -283,7 +283,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       });
     }
 
-  authUserId = (user._id as Types.ObjectId).toString();
+    authUserId = (user._id as Types.ObjectId).toString();
   }
 
   /** ------------------ 2 & 3. Fetch Cart + Migrate sessionId → userId ------------------ */
@@ -379,83 +379,75 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
   // ✅ NEW: Sync cart to partner BEFORE creating the order
   /** ------------------ 4b. Sync Cart to Partner ------------------ */
-  try {
-    const partnerCartItems = await Promise.all(
-      cart.items.map(async (item) => {
-        const product = await Product.findById(item.drugId);
-        if (!product) throw new Error(`Product not found: ${item.drugId}`);
-        if (!product.partnerProductId)
-          throw new Error(`partnerProductId missing for: ${product.name}`);
-        return {
-          drug_id: product.partnerProductId,
-          quantity: item.quantity,
-          dosage: item.dosage || "",
-          special_instructions: item.specialInstructions || "",
-        };
-      }),
-    );
+  // Build productLookup ONCE and reuse in both 4b and 5 — no double DB queries
+  const productLookup = new Map<string, any>();
+  for (const item of cart.items) {
+    if (!productLookup.has(item.drugId)) {
+      const product = await Product.findById(item.drugId);
+      if (!product) throw new Error(`Product not found: ${item.drugId}`);
+      if (!product.partnerProductId)
+        throw new Error(`partnerProductId missing for: ${product.name}`);
+      productLookup.set(item.drugId, product);
+    }
+  }
 
+  // Partner cart expects drug_id (underscore)
+  const partnerCartItems = cart.items.map((item) => ({
+    drug_id: productLookup.get(item.drugId)!.partnerProductId,
+    quantity: item.quantity,
+    dosage: item.dosage || "",
+    special_instructions: item.specialInstructions || "",
+  }));
+
+  try {
     await axios.post(`${PARTNER_API_URL}${PARTNER_PREFIX}/cart`, {
       userId: partnerId,
       items: partnerCartItems,
     });
-
-    console.log("[Checkout] Partner cart synced successfully before order");
+    console.log("[Checkout] Partner cart synced ✅");
   } catch (cartSyncErr: any) {
+    // Non-fatal — order creation may still work
     console.error(
       "[Checkout] Partner cart sync failed:",
       cartSyncErr.response?.data || cartSyncErr.message,
     );
   }
 
-  /** ------------------ 5. Prepare Partner Order ------------------ */
-  const productLookup = new Map();
-  for (const item of cart.items) {
-    const product = await Product.findById(item.drugId);
-    if (!product) throw new Error(`Product not found: ${item.drugId}`);
-    if (!product.partnerProductId)
-      throw new Error(
-        `Partner product ID missing for ${product.name} (${item.drugId})`,
-      );
-    productLookup.set(item.drugId.toString(), product);
-  }
-
-  const partnerItems = cart.items.map((item) => {
-    const product = productLookup.get(item.drugId.toString())!;
-    return {
-      drugId: product.partnerProductId,
-      quantity: item.quantity,
-      dosage: item.dosage || "",
-      special_instructions: item.specialInstructions || "",
-    };
-  });
+  /** ------------------ 5. Create Partner Order ------------------ */
+  // Partner order expects drugId (camelCase) — confirm with partner docs if unsure
+  const partnerOrderItems = cart.items.map((item) => ({
+    drugId: productLookup.get(item.drugId)!.partnerProductId, // ✅ partner UUID
+    quantity: item.quantity,
+    dosage: item.dosage || "",
+    special_instructions: item.specialInstructions || "",
+  }));
 
   let partnerOrder;
   try {
-    const payload = {
-      userId: partnerId,
-      telephone: user.phone,
-      address: user.homeAddress || (user.preferences as any)?.address || "",
-      state: user.state || (user.preferences as any)?.state || "",
-      lga: user.lga || (user.preferences as any)?.lga || "",
-      deliveryMethod: "home",
-      isHomeAddress: true,
-      isThirdPartyOrder: true,
-      discount: 0,
-      platform: "PlanAmWell",
-      items: partnerItems,
-    };
-
     const orderRes = await axios.post(
       `${PARTNER_API_URL}${PARTNER_PREFIX}/orders`,
-      payload,
+      {
+        userId: partnerId,
+        telephone: user.phone,
+        address: user.homeAddress || (user.preferences as any)?.address || "",
+        state: user.state || (user.preferences as any)?.state || "",
+        lga: user.lga || (user.preferences as any)?.lga || "",
+        deliveryMethod: "home",
+        isHomeAddress: true,
+        isThirdPartyOrder: true,
+        discount: 0,
+        platform: "PlanAmWell",
+        items: partnerOrderItems,
+      },
     );
     partnerOrder = orderRes.data.data;
-    console.log("[Checkout] Partner order response:", JSON.stringify(partnerOrder, null, 2));
-
+    console.log(
+      "[Checkout] Partner order:",
+      JSON.stringify(partnerOrder, null, 2),
+    );
   } catch (err: any) {
     console.error(
-      "[Checkout] Failed to create partner order:",
+      "[Checkout] Partner order failed:",
       err.response?.data || err.message,
     );
     throw new Error("Partner order creation failed");
@@ -465,11 +457,11 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   const localOrder = await Order.create({
     orderNumber: uuidv4(),
     userId: authUserId,
-    partnerOrderId: partnerOrder?.orderId,
+    partnerOrderId: partnerOrder?.orderId, // ✅ partner UUID saved here
     isThirdPartyOrder: true,
     platform: "PlanAmWell",
     items: cart.items.map((i) => {
-      const product = productLookup.get(i.drugId.toString())!;
+      const product = productLookup.get(i.drugId)!;
       return {
         productId: product._id,
         name: product.name,
