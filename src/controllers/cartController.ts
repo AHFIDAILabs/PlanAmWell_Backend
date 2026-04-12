@@ -11,7 +11,7 @@ const PARTNER_PREFIX = "/v1/PlanAmWell";
 
 // ── Resolve local drugIds → partner payload ──────────────────────────────────
 const mapCartItemForPartner = (item: ICartItem) => ({
-  drug_id: item.drugId, 
+  drug_id: item.drugId,
   quantity: item.quantity,
   dosage: item.dosage || "",
   special_instructions: item.specialInstructions || "",
@@ -87,13 +87,14 @@ const syncCartToPartner = async (cart: any, partnerId: string) => {
   try {
     const payload = {
       userId: partnerId,
-      items: cart.items.map(mapCartItemForPartner), // ✅ sync, no DB lookup needed
+      platform: "paw", // ✅ add this
+      items: cart.items.map(mapCartItemForPartner),
     };
     const response = await axios.post(
       `${PARTNER_API_URL}${PARTNER_PREFIX}/cart`,
       payload,
     );
-    const partnerCart = response.data.updatedCart;
+    const partnerCart = response.data.cart; // ✅ response shape is { results, cart } not { updatedCart }
     if (partnerCart) {
       cart.partnerCartId = partnerCart.id;
       cart.isAbandoned = partnerCart.isAbandoned;
@@ -101,7 +102,7 @@ const syncCartToPartner = async (cart: any, partnerId: string) => {
       cart.totalPrice = parseFloat(partnerCart.totalPrice);
       await cart.save();
     }
-    console.log("[Cart] Partner cart synced ✅");
+    console.log("[Cart] Partner cart synced");
   } catch (err: any) {
     console.error(
       "[Cart] Partner sync failed:",
@@ -113,7 +114,7 @@ const syncCartToPartner = async (cart: any, partnerId: string) => {
 // ── ADD ITEMS TO CART ────────────────────────────────────────────────────────
 export const addToCart = asyncHandler(async (req: Request, res: Response) => {
   const { items } = req.body as { items: ICartItem[] };
-  
+
   console.log("[addToCart] body:", JSON.stringify(req.body, null, 2));
   console.log("[addToCart] auth:", req.auth);
 
@@ -149,11 +150,19 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
   }
 
   cart.totalItems = cart.items.reduce((s, i) => s + i.quantity, 0);
-  cart.totalPrice = cart.items.reduce((s, i) => s + (i.price || 0) * i.quantity, 0);
-  
+  cart.totalPrice = cart.items.reduce(
+    (s, i) => s + (i.price || 0) * i.quantity,
+    0,
+  );
+
   try {
     await cart.save();
-    console.log("[addToCart] cart saved ✅ id:", cart._id, "items:", cart.items.length);
+    console.log(
+      "[addToCart] cart saved ✅ id:",
+      cart._id,
+      "items:",
+      cart.items.length,
+    );
   } catch (saveErr: any) {
     console.error("[addToCart] cart.save() FAILED:", saveErr.message);
     throw saveErr;
@@ -259,6 +268,5 @@ export const removeCartItem = asyncHandler(
     await cart.save();
 
     res.status(200).json({ success: true, data: cart });
-
   },
 );

@@ -356,16 +356,13 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   /** ------------------ 4b. Sync Cart to Partner ------------------ */
   try {
     await axios.post(`${PARTNER_API_URL}${PARTNER_PREFIX}/cart`, {
-      userId: partnerId,
-      items: partnerItems,
+      userId:   partnerId,
+      platform: "paw", // ✅ must match the platform used in order creation
+      items:    partnerItems,
     });
     console.log("[Checkout] Partner cart synced ✅");
   } catch (err: any) {
-    // Non-fatal — log and continue, order creation carries the items anyway
-    console.error(
-      "[Checkout] Partner cart sync failed:",
-      err.response?.data || err.message,
-    );
+    console.error("[Checkout] Partner cart sync failed:", err.response?.data || err.message);
   }
 
   /** ------------------ 5. Create Partner Order ------------------ */
