@@ -139,20 +139,9 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   let user;
 
   if (authUserId) {
-    // ── Authenticated user path ──────────────────────────────────────────────
     user = await User.findById(authUserId);
     if (!user) throw new Error("Authenticated user not found");
 
-    // ── Profile completeness gate ────────────────────────────────────────────
-    // We run this BEFORE updating the user so that missing fields sent in the
-    // request body (which we're about to merge) are detected from the *current*
-    // saved state. The frontend pre-flight check already blocked most of these;
-    // this is the server-side safety net.
-    //
-    // Exception: if all three fields are supplied in this very request we allow
-    // the checkout to proceed and update them in the same transaction below —
-    // this supports the case where CompleteProfileModal just saved via
-    // PATCH /users/me and the client immediately retries checkout.
     const effectivePhone = phone || user.phone;
     const effectiveGender = gender || user.gender;
     const effectiveDateOfBirth = dateOfBirth || user.dateOfBirth;
@@ -167,14 +156,11 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         success: false,
         code: "PROFILE_INCOMPLETE",
         message: "Please complete your profile before placing an order.",
-        missingFields, // e.g. ["Phone number", "Date of birth"]
+        missingFields,
       });
     }
-    // ────────────────────────────────────────────────────────────────────────
 
-    // Update user fields if the checkout form sent new values
     let needsUpdate = false;
-
     if (name && name !== user.name) {
       user.name = name.trim();
       needsUpdate = true;
@@ -219,12 +205,8 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       ...(preferences || {}),
     };
     needsUpdate = true;
-
     if (needsUpdate) await user.save();
   } else {
-    // ── Guest / anonymous path ───────────────────────────────────────────────
-    // Guests fill all fields inline in CheckoutScreen so no gate here —
-    // validateForm() on the client already ensures phone/gender/dob are present.
     if (!name || !phone)
       throw new Error("Guest checkout requires name & phone");
 
@@ -263,7 +245,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         email: email?.trim().toLowerCase(),
         password: safePassword,
         gender: gender?.toLowerCase(),
-        dateOfBirth: dateOfBirth,
+        dateOfBirth,
         homeAddress: homeAddress?.trim(),
         city: city?.trim(),
         state: state?.trim(),
@@ -287,60 +269,44 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   }
 
   /** ------------------ 2 & 3. Fetch Cart + Migrate sessionId → userId ------------------ */
-
-  // At this point authUserId is always set (either from token or from the
-  // guest registration block above that does: authUserId = user.id.toString())
   let cart;
-
-  // Try userId first (logged-in or already-migrated cart)
   cart = await Cart.findOne({ userId: new Types.ObjectId(authUserId) });
-
-  // Fall back to sessionId cart (guest who just registered at checkout)
-  if (!cart && sessionGuestId) {
+  if (!cart && sessionGuestId)
     cart = await Cart.findOne({ sessionId: sessionGuestId });
-  }
-
-  // If still nothing, the user might have had a sessionId cart before but
-  // it was never linked — try finding by the session from their auth token
-  if (!cart && req.auth?.sessionId) {
+  if (!cart && req.auth?.sessionId)
     cart = await Cart.findOne({ sessionId: req.auth.sessionId });
-  }
 
-  if (!cart || cart.items.length === 0) {
+  if (!cart || cart.items.length === 0)
     throw new Error("Cart is empty or not found");
-  }
 
-  // ── Migrate: if this is a sessionId cart, promote it to userId ────────────
-  // We do this BEFORE partner sync so everything downstream uses userId
+  // Log cart drugIds to confirm they are UUIDs not ObjectIds
+  console.log(
+    "[Checkout] Cart drugIds:",
+    cart.items.map((i) => i.drugId),
+  );
+
   if (cart.sessionId && !cart.userId) {
     try {
-      // Use findOneAndUpdate to atomically swap sessionId → userId
-      // This avoids the unique-index conflict that happens with cart.save()
-      // when the sessionId index is still set
       const migratedCart = await Cart.findOneAndUpdate(
         { _id: cart._id },
         {
           $set: { userId: new Types.ObjectId(authUserId!) },
-          $unset: { sessionId: "" }, // removes the sessionId index entry
+          $unset: { sessionId: "" },
         },
         { new: true },
       );
-
       if (migratedCart) {
         cart = migratedCart;
         console.log(
-          `[Checkout] Cart migrated from sessionId → userId: ${authUserId}`,
+          `[Checkout] Cart migrated sessionId → userId: ${authUserId}`,
         );
       }
     } catch (migrateErr: any) {
-      // If a userId cart already exists (race condition), merge items into it
       if (migrateErr.code === 11000) {
         const existingUserCart = await Cart.findOne({
           userId: new Types.ObjectId(authUserId!),
         });
-
         if (existingUserCart) {
-          // Merge session cart items into the userId cart
           for (const sessionItem of cart.items) {
             const idx = existingUserCart.items.findIndex(
               (i) => i.drugId === sessionItem.drugId,
@@ -360,7 +326,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
             0,
           );
           await existingUserCart.save();
-          await Cart.deleteOne({ _id: cart._id }); // remove orphaned session cart
+          await Cart.deleteOne({ _id: cart._id });
           cart = existingUserCart;
           console.log(
             `[Checkout] Merged session cart into existing userId cart`,
@@ -368,7 +334,6 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         }
       } else {
         console.error("[Checkout] Cart migration failed:", migrateErr.message);
-        // Non-fatal — continue with the session cart as-is
       }
     }
   }
@@ -377,20 +342,26 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   const partnerId = await syncUserWithPartner(user, safePassword);
   if (!partnerId) throw new Error("Failed to get partner user ID");
 
-  // NEW: Sync cart to partner BEFORE creating the order
+  // Build partner items once — reused in cart sync and order creation
+  const partnerItems = cart.items.map((item) => ({
+    drug_id: item.drugId, // ✅ partner UUID
+    quantity: item.quantity,
+  }));
+
+  console.log(
+    "[Checkout] Partner items being sent:",
+    JSON.stringify(partnerItems, null, 2),
+  );
+
   /** ------------------ 4b. Sync Cart to Partner ------------------ */
   try {
     await axios.post(`${PARTNER_API_URL}${PARTNER_PREFIX}/cart`, {
       userId: partnerId,
-      items: cart.items.map((item) => ({
-        drug_id: item.drugId, //  already partner UUID
-        quantity: item.quantity,
-        dosage: item.dosage || "",
-        special_instructions: item.specialInstructions || "",
-      })),
+      items: partnerItems,
     });
-    console.log("[Checkout] Partner cart synced");
+    console.log("[Checkout] Partner cart synced ✅");
   } catch (err: any) {
+    // Non-fatal — log and continue, order creation carries the items anyway
     console.error(
       "[Checkout] Partner cart sync failed:",
       err.response?.data || err.message,
@@ -403,18 +374,18 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     const orderRes = await axios.post(
       `${PARTNER_API_URL}${PARTNER_PREFIX}/orders`,
       {
-        userId: partnerId,
+        userId: partnerId, // ✅ partner user UUID
         telephone: user.phone,
         platform: "PlanAmWell",
         items: cart.items.map((item) => ({
-          drugId: item.drugId, //  already partner UUID — matches order API spec
+          drugId: item.drugId, // ✅ partner drug UUID
           quantity: item.quantity,
         })),
       },
     );
     partnerOrder = orderRes.data.data;
     console.log(
-      "[Checkout] Partner order:",
+      "[Checkout] Partner order created:",
       JSON.stringify(partnerOrder, null, 2),
     );
   } catch (err: any) {
@@ -429,16 +400,16 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   const localOrder = await Order.create({
     orderNumber: uuidv4(),
     userId: authUserId,
-    partnerOrderId: partnerOrder?.orderId,
+    partnerOrderId: partnerOrder?.orderId, // ✅ partner order UUID
     isThirdPartyOrder: true,
     platform: "PlanAmWell",
     items: cart.items.map((i) => ({
-      productId: i.drugId, // partner UUID as reference
+      productId: String(i.drugId), // ✅ partner UUID stored as string
       name: i.drugName || "",
       qty: i.quantity,
       price: i.price || 0,
-      dosage: i.dosage,
-      specialInstructions: i.specialInstructions,
+      dosage: i.dosage || "",
+      specialInstructions: i.specialInstructions || "",
     })),
     subtotal: cart.totalPrice,
     total: cart.totalPrice,
