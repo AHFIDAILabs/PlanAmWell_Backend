@@ -147,7 +147,12 @@ export const initiatePayment = asyncHandler(
         JSON.stringify(response.data, null, 2),
       );
 
-      
+      console.log("[Payment] Sending to partner:", {
+        orderId: partnerOrderUuid,
+        userId: partnerUserId,
+        amount,
+        partnerReferenceCode,
+      });
 
       // ✅ CORRECT extraction based on REAL response
       const initializedPayment = response.data?.initializedPayment;
