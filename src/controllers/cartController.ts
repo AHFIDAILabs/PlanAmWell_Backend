@@ -118,14 +118,6 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
     throw new Error("Items are required");
   }
 
-  // Validate all drugIds exist locally before touching the cart
-  for (const item of items) {
-    if (!item.drugId) throw new Error("Each item must have a drugId");
-
-    // drugId must be uuid string (partnerProductId), not MongoDB ObjectId — no DB lookup needed here
-    const exists = await Product.exists({ _id: item.drugId });
-    if (!exists) throw new Error(`Product not found: ${item.drugId}`);
-  }
   const ownerQuery = getOwnerQuery(req);
   let cart = await Cart.findOne(ownerQuery);
 
@@ -158,7 +150,7 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  res.status(201).json({ success: true, data: cart });
+res.status(201).json({ success: true, localCart: cart });
 });
 
 // ── GET CART ─────────────────────────────────────────────────────────────────
@@ -248,8 +240,7 @@ export const removeCartItem = asyncHandler(
     );
     await cart.save();
 
-    res
-      .status(201)
-      .json({ success: true, localCart: cart, partnerCart: undefined });
+    res.status(200).json({ success: true, data: cart });
+
   },
 );
