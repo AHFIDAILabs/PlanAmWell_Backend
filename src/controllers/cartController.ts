@@ -113,13 +113,27 @@ const syncCartToPartner = async (cart: any, partnerId: string) => {
 // ── ADD ITEMS TO CART ────────────────────────────────────────────────────────
 export const addToCart = asyncHandler(async (req: Request, res: Response) => {
   const { items } = req.body as { items: ICartItem[] };
+  
+  console.log("[addToCart] body:", JSON.stringify(req.body, null, 2));
+  console.log("[addToCart] auth:", req.auth);
+
   if (!items?.length) {
     res.status(400);
     throw new Error("Items are required");
   }
 
-  const ownerQuery = getOwnerQuery(req);
+  let ownerQuery;
+  try {
+    ownerQuery = getOwnerQuery(req);
+    console.log("[addToCart] ownerQuery:", ownerQuery);
+  } catch (e: any) {
+    console.error("[addToCart] getOwnerQuery failed:", e.message);
+    res.status(400);
+    throw e;
+  }
+
   let cart = await Cart.findOne(ownerQuery);
+  console.log("[addToCart] existing cart:", cart?._id ?? "none");
 
   if (!cart) {
     cart = new Cart({ ...ownerQuery, items, totalItems: 0, totalPrice: 0 });
@@ -135,11 +149,15 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
   }
 
   cart.totalItems = cart.items.reduce((s, i) => s + i.quantity, 0);
-  cart.totalPrice = cart.items.reduce(
-    (s, i) => s + (i.price || 0) * i.quantity,
-    0,
-  );
-  await cart.save();
+  cart.totalPrice = cart.items.reduce((s, i) => s + (i.price || 0) * i.quantity, 0);
+  
+  try {
+    await cart.save();
+    console.log("[addToCart] cart saved ✅ id:", cart._id, "items:", cart.items.length);
+  } catch (saveErr: any) {
+    console.error("[addToCart] cart.save() FAILED:", saveErr.message);
+    throw saveErr;
+  }
 
   // Partner sync — only for logged-in users (guests sync at checkout)
   if (ownerQuery.userId) {
@@ -150,7 +168,7 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-res.status(201).json({ success: true, localCart: cart });
+  res.status(201).json({ success: true, localCart: cart });
 });
 
 // ── GET CART ─────────────────────────────────────────────────────────────────

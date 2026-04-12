@@ -12,6 +12,7 @@ export interface IOrderItem {
 }
 
 export interface IOrder extends Document {
+  productId: string; // local reference to Product
     partnerId?: Types.ObjectId; // optional, for API
   orderNumber: string;
   sessionId?: string;
