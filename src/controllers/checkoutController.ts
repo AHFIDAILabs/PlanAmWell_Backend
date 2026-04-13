@@ -52,10 +52,9 @@ async function getPartnerUserId(email: string): Promise<string | null> {
  * ✅ HELPER: Sync or create user in Partner DB
  */
 async function syncUserWithPartner(user: any, password: string) {
-  if (user.partnerId) {
-    return user.partnerId;
-  }
+  if (user.partnerId) return user.partnerId;
 
+  // Always check if they exist first before trying to create
   if (user.email) {
     const existingPartnerId = await getPartnerUserId(user.email);
     if (existingPartnerId) {
@@ -84,20 +83,29 @@ async function syncUserWithPartner(user: any, password: string) {
         isGuest: user.isAnonymous || false,
       },
     );
-
     user.partnerId = partnerRes.data.user.id;
     await user.save();
     return user.partnerId;
   } catch (err: any) {
+    const msg = err.response?.data?.message || "";
+    const status = err.response?.status;
+
+    // Handle ALL "already exists" cases — partner returns 500 OR 409
     if (
-      err.response?.status === 409 ||
-      err.response?.data?.message?.includes("already exists")
+      status === 409 ||
+      status === 500 ||
+      msg.includes("already exists") ||
+      msg.includes("duplicate")
     ) {
       if (user.email) {
         const existingId = await getPartnerUserId(user.email);
         if (existingId) {
           user.partnerId = existingId;
           await user.save();
+          console.log(
+            "[syncUserWithPartner] Found existing partner user:",
+            existingId,
+          );
           return existingId;
         }
       }
@@ -338,55 +346,75 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  /** ------------------ 4. Sync User with Partner + Cart (atomic) ------------------ */
+  /** ------------------ 4. Sync User + Cart with Partner ------------------ */
   let partnerUserId = user.partnerId;
 
-  try {
-    const accountWithCartRes = await axios.post(
-      `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts-with-cart`,
-      {
-        user: {
-          email: user.email,
-          name: user.name,
-          password: safePassword,
+  if (!partnerUserId) {
+    // Try accounts-with-cart first (new users only)
+    try {
+      const accountWithCartRes = await axios.post(
+        `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts-with-cart`,
+        {
+          user: {
+            email:    user.email,
+            name:     user.name,
+            password: safePassword,
+          },
+          cart: {
+            items: cart.items.map((item) => ({
+              drug_id:  item.drugId,
+              quantity: item.quantity,
+            })),
+          },
         },
-        cart: {
-          items: cart.items.map((item) => ({
-            drug_id: item.drugId, // ✅ partner UUID
-            quantity: item.quantity,
-          })),
-        },
-      },
-    );
-
-    console.log(
-      "[Checkout] accounts-with-cart response:",
-      JSON.stringify(accountWithCartRes.data, null, 2),
-    );
-
-    // Partner returns userId — save it if we don't have it yet
-    const returnedPartnerId = accountWithCartRes.data?.userId;
-    if (returnedPartnerId) {
-      partnerUserId = returnedPartnerId;
-      if (!user.partnerId) {
+      );
+      console.log("[Checkout] accounts-with-cart:", JSON.stringify(accountWithCartRes.data, null, 2));
+      const returnedPartnerId = accountWithCartRes.data?.userId;
+      if (returnedPartnerId) {
+        partnerUserId  = returnedPartnerId;
         user.partnerId = returnedPartnerId;
         await user.save();
-        console.log("[Checkout] Partner user ID saved:", returnedPartnerId);
+        console.log("[Checkout] New partner user created, ID:", returnedPartnerId);
       }
+    } catch (err: any) {
+      const msg = err.response?.data?.message || "";
+      console.error("[Checkout] accounts-with-cart failed:", err.response?.data || err.message);
+
+      // User already exists in partner system — look them up
+      if (msg.includes("already exists") || msg.includes("duplicate")) {
+        if (user.email) {
+          const existingId = await getPartnerUserId(user.email);
+          if (existingId) {
+            partnerUserId  = existingId;
+            user.partnerId = existingId;
+            await user.save();
+            console.log("[Checkout] Existing partner user found:", existingId);
+          }
+        }
+      }
+
+      // Still no partnerId — fall back to manual sync
+      if (!partnerUserId) {
+        partnerUserId = await syncUserWithPartner(user, safePassword);
+      }
+      if (!partnerUserId) throw new Error("Failed to sync user with partner system");
     }
-  } catch (err: any) {
-    console.error(
-      "[Checkout] accounts-with-cart failed:",
-      err.response?.data || err.message,
-    );
-    // If it fails, fall back to existing partnerId or sync manually
-    if (!partnerUserId) {
-      partnerUserId = await syncUserWithPartner(user, safePassword);
-    }
-    if (!partnerUserId)
-      throw new Error("Failed to sync user with partner system");
   }
 
+  // Always sync cart (covers both new and existing partner users)
+  try {
+    await axios.post(`${PARTNER_API_URL}${PARTNER_PREFIX}/cart`, {
+      userId: partnerUserId,
+      items:  cart.items.map((item) => ({
+        drug_id:  item.drugId,
+        quantity: item.quantity,
+      })),
+    });
+    console.log("[Checkout] Partner cart synced ✅");
+  } catch (err: any) {
+    console.error("[Checkout] Partner cart sync failed:", err.response?.data || err.message);
+  }
+  
   /** ------------------ 5. Create Partner Order ------------------ */
   let partnerOrder;
   try {
