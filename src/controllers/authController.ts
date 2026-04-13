@@ -33,7 +33,7 @@ export const createGuestSession = asyncHandler(async (req: Request, res: Respons
 // -------------------- Push Token Management --------------------
 
 /**
- * 📲 Register Expo push token
+ *  Register Expo push token
  * POST /auth/register-push-token
  */
 export const registerPushToken = asyncHandler(async (req: Request, res: Response) => {
@@ -68,7 +68,7 @@ export const registerPushToken = asyncHandler(async (req: Request, res: Response
 });
 
 /**
- * 🗑️ Remove Expo push token (on logout)
+ *  Remove Expo push token (on logout)
  * POST /auth/remove-push-token
  */
 export const removePushToken = asyncHandler(async (req: Request, res: Response) => {

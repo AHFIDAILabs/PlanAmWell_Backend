@@ -7,6 +7,7 @@ import {
   deleteOrder,
 } from "../controllers/orderController";
 import { verifyToken, authorize } from "../middleware/auth";
+import { User } from "../models/user";
 
 const orderRouter = Router();
 
