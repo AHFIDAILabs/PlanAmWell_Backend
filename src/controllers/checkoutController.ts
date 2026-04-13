@@ -338,31 +338,53 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  /** ------------------ 4. Sync User with Partner ------------------ */
-  const partnerId = await syncUserWithPartner(user, safePassword);
-  if (!partnerId) throw new Error("Failed to get partner user ID");
+  /** ------------------ 4. Sync User with Partner + Cart (atomic) ------------------ */
+  let partnerUserId = user.partnerId;
 
-  // Build partner items once — reused in cart sync and order creation
-  const partnerItems = cart.items.map((item) => ({
-    drug_id: item.drugId, // ✅ partner UUID
-    quantity: item.quantity,
-  }));
-
-  console.log(
-    "[Checkout] Partner items being sent:",
-    JSON.stringify(partnerItems, null, 2),
-  );
-
-  /** ------------------ 4b. Sync Cart to Partner ------------------ */
   try {
-    await axios.post(`${PARTNER_API_URL}${PARTNER_PREFIX}/cart`, {
-      userId:   partnerId,
-      platform: "paw", // ✅ must match the platform used in order creation
-      items:    partnerItems,
-    });
-    console.log("[Checkout] Partner cart synced ✅");
+    const accountWithCartRes = await axios.post(
+      `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts-with-cart`,
+      {
+        user: {
+          email: user.email,
+          name: user.name,
+          password: safePassword,
+        },
+        cart: {
+          items: cart.items.map((item) => ({
+            drug_id: item.drugId, // ✅ partner UUID
+            quantity: item.quantity,
+          })),
+        },
+      },
+    );
+
+    console.log(
+      "[Checkout] accounts-with-cart response:",
+      JSON.stringify(accountWithCartRes.data, null, 2),
+    );
+
+    // Partner returns userId — save it if we don't have it yet
+    const returnedPartnerId = accountWithCartRes.data?.userId;
+    if (returnedPartnerId) {
+      partnerUserId = returnedPartnerId;
+      if (!user.partnerId) {
+        user.partnerId = returnedPartnerId;
+        await user.save();
+        console.log("[Checkout] Partner user ID saved:", returnedPartnerId);
+      }
+    }
   } catch (err: any) {
-    console.error("[Checkout] Partner cart sync failed:", err.response?.data || err.message);
+    console.error(
+      "[Checkout] accounts-with-cart failed:",
+      err.response?.data || err.message,
+    );
+    // If it fails, fall back to existing partnerId or sync manually
+    if (!partnerUserId) {
+      partnerUserId = await syncUserWithPartner(user, safePassword);
+    }
+    if (!partnerUserId)
+      throw new Error("Failed to sync user with partner system");
   }
 
   /** ------------------ 5. Create Partner Order ------------------ */
@@ -371,11 +393,11 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     const orderRes = await axios.post(
       `${PARTNER_API_URL}${PARTNER_PREFIX}/orders`,
       {
-        userId: partnerId, // ✅ partner user UUID
+        userId: partnerUserId,
         telephone: user.phone,
         platform: "PlanAmWell",
         items: cart.items.map((item) => ({
-          drugId: item.drugId, // ✅ partner drug UUID
+          drugId: item.drugId,
           quantity: item.quantity,
         })),
       },
@@ -397,11 +419,11 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   const localOrder = await Order.create({
     orderNumber: uuidv4(),
     userId: authUserId,
-    partnerOrderId: partnerOrder?.orderId, // ✅ partner order UUID
+    partnerOrderId: partnerOrder?.orderId,
     isThirdPartyOrder: true,
     platform: "PlanAmWell",
     items: cart.items.map((i) => ({
-      productId: String(i.drugId), // ✅ partner UUID stored as string
+      productId: String(i.drugId),
       name: i.drugName || "",
       qty: i.quantity,
       price: i.price || 0,
