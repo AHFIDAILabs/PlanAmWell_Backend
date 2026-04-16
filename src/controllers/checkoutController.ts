@@ -370,7 +370,7 @@ if (!partnerUserId) {
       },
     );
     console.log("[Checkout] accounts-with-cart response:", JSON.stringify(res.data, null, 2));
-    partnerUserId  = res.data?.userId;
+partnerUserId = res.data?.userId || res.data?.user_id;
     user.partnerId = partnerUserId;
     await user.save();
     console.log("[Checkout] Partner user created:", partnerUserId);
@@ -401,7 +401,7 @@ if (!partnerUserId) {
             isGuest:         false,
           },
         );
-        partnerUserId  = accountRes.data?.user?.id;
+partnerUserId = accountRes.data?.user?.id || accountRes.data?.userId || accountRes.data?.user_id;
         user.partnerId = partnerUserId;
         await user.save();
         console.log("[Checkout] Got partner user from accounts endpoint:", partnerUserId);
