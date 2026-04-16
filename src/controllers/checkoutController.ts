@@ -346,32 +346,26 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       }
     }
   }
-
 /** ------------------ 4. Sync User + Cart with Partner ------------------ */
-let partnerUserId = user.partnerId;
+let partnerUserId: string | null = user.partnerId ?? null;
 
 if (!partnerUserId) {
   try {
-    // Try accounts-with-cart — works for new users
-    const res = await axios.post(
+    const partnerRes = await axios.post(
       `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts-with-cart`,
       {
-        user: {
-          email:    user.email,
-          name:     user.name,
-          password: safePassword,
-        },
+        user: { email: user.email, name: user.name, password: safePassword },
         cart: {
           items: cart.items.map((item) => ({
-            drug_id:  item.drugId,
+            drug_id: item.drugId,
             quantity: item.quantity,
           })),
         },
       },
     );
-    console.log("[Checkout] accounts-with-cart response:", JSON.stringify(res.data, null, 2));
-partnerUserId = res.data?.userId || res.data?.user_id;
-    user.partnerId = partnerUserId;
+    console.log("[Checkout] accounts-with-cart response:", JSON.stringify(partnerRes.data, null, 2));
+    partnerUserId = partnerRes.data?.userId || partnerRes.data?.user_id;
+    user.partnerId = partnerUserId || undefined;
     await user.save();
     console.log("[Checkout] Partner user created:", partnerUserId);
 
@@ -380,8 +374,8 @@ partnerUserId = res.data?.userId || res.data?.user_id;
     const status = err.response?.status;
     console.error("[Checkout] accounts-with-cart failed:", err.response?.data);
 
-    // Partner says user exists — try creating account only to get their ID
     if (msg.includes("already exists") || status === 409 || status === 500) {
+      // User exists in partner — try /accounts to get their ID
       try {
         const accountRes = await axios.post(
           `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts`,
@@ -401,29 +395,47 @@ partnerUserId = res.data?.userId || res.data?.user_id;
             isGuest:         false,
           },
         );
-partnerUserId = accountRes.data?.user?.id || accountRes.data?.userId || accountRes.data?.user_id;
-        user.partnerId = partnerUserId;
+        partnerUserId = accountRes.data?.user?.id
+          || accountRes.data?.userId
+          || accountRes.data?.user_id;
+        user.partnerId = partnerUserId || undefined;
         await user.save();
-        console.log("[Checkout] Got partner user from accounts endpoint:", partnerUserId);
+        console.log("[Checkout] Got partner user from /accounts:", partnerUserId);
+
       } catch (accountErr: any) {
-        const accountMsg = accountErr.response?.data?.message || "";
-        // If STILL says already exists, the partner MUST return the existing ID
-        // Log the full response to see if they include it
-        console.log("[Checkout] accounts endpoint full response:", 
-          JSON.stringify(accountErr.response?.data, null, 2));
-        
-        // Check if existing ID is in the error response
-        const existingId = accountErr.response?.data?.userId 
+        const accountErrMsg = accountErr.response?.data?.message || "";
+        console.log("[Checkout] /accounts full response:", JSON.stringify(accountErr.response?.data, null, 2));
+
+        // Check if they buried the ID anywhere in the error body
+        const buriedId = accountErr.response?.data?.userId
           || accountErr.response?.data?.user?.id
           || accountErr.response?.data?.existingUserId;
-          
-        if (existingId) {
-          partnerUserId  = existingId;
-          user.partnerId = existingId;
+
+        if (buriedId) {
+          partnerUserId  = buriedId;
+          user.partnerId = buriedId;
           await user.save();
-          console.log("[Checkout] Got existing partner ID from error response:", existingId);
+          console.log("[Checkout] Recovered partner ID from error body:", buriedId);
+
+        } else if (accountErrMsg.includes("already exists")) {
+          // ✅ Partner has this user but won't tell us their ID.
+          // We cannot create the order without a partnerUserId.
+          // Best we can do: fail with a clear message and log it for manual DB fix.
+          console.error(
+            `[Checkout] MANUAL FIX NEEDED: user ${user.email} exists in partner DB ` +
+            `but no ID returned. Ask partner for GET /accounts/search?email= endpoint. ` +
+            `Once resolved, set user.partnerId in your DB.`
+          );
+          return res.status(503).json({
+            success: false,
+            code: "PARTNER_SYNC_FAILED",
+            message:
+              "We couldn't link your account to complete the order. " +
+              "Please contact support — your cart has been saved.",
+          });
+          // ↑ Notice: we return early WITHOUT clearing the cart,
+          //   so the user keeps their items and can retry later.
         } else {
-          console.error("[Checkout] Cannot resolve partner userId — contact partner for search endpoint");
           throw new Error("Failed to sync user with partner system");
         }
       }
@@ -489,7 +501,9 @@ partnerUserId = accountRes.data?.user?.id || accountRes.data?.userId || accountR
   });
 
   /** ------------------ 7. Clear Cart ------------------ */
-  await Cart.deleteOne({ _id: cart._id });
+  // await Cart.deleteOne({ _id: cart._id });
+  await Cart.findByIdAndUpdate(cart._id, { status: "checked_out", orderId: localOrder._id });
+
 
   /** ------------------ 8. Respond ------------------ */
   res.status(201).json({

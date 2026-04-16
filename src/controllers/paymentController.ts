@@ -4,6 +4,7 @@ import { Payment } from "../models/initiatedPayment";
 import axios from "axios";
 import { Order } from "../models/order";
 import { User } from "../models/user";
+import { Cart } from "../models/cart";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL;
 const PARTNER_API_KEY = process.env.PARTNER_API_KEY;
@@ -120,7 +121,7 @@ export const initiatePayment = asyncHandler(
         message: "Partner order ID missing — cannot initiate payment",
       });
     }
-
+  await Cart.deleteOne({ orderId: order._id });
     const partnerReferenceCode = `PAW-${order.orderNumber}`; // your idempotency key, fine as-is
     const partnerUserId = user.partnerId;
 
