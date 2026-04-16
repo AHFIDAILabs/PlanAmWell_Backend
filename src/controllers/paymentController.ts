@@ -113,7 +113,6 @@ export const initiatePayment = asyncHandler(
     const amount = order.total;
 
     // ✅ Use the actual partner order UUID returned during checkout
-    // order.partnerOrderId was set from partnerOrder.orderId in checkoutController
     const partnerOrderUuid = order.partnerOrderId;
     if (!partnerOrderUuid) {
       return res.status(422).json({
@@ -121,7 +120,6 @@ export const initiatePayment = asyncHandler(
         message: "Partner order ID missing — cannot initiate payment",
       });
     }
-  await Cart.deleteOne({ orderId: order._id });
     const partnerReferenceCode = `PAW-${order.orderNumber}`; // your idempotency key, fine as-is
     const partnerUserId = user.partnerId;
 
@@ -220,70 +218,56 @@ export const initiatePayment = asyncHandler(
 );
 
 // ------------------ VERIFY PAYMENT ------------------
-export const verifyPayment = asyncHandler(
-  async (req: Request, res: Response) => {
-    const { paymentReference } = req.body;
+export const verifyPayment = asyncHandler(async (req: Request, res: Response) => {
+  const { paymentReference } = req.body;
 
-    if (!paymentReference) {
-      return res.status(400).json({
-        success: false,
-        message: "paymentReference is required",
+  if (!paymentReference) {
+    return res.status(400).json({ success: false, message: "paymentReference is required" });
+  }
+
+  try {
+    const response = await axios.post(
+      `${PARTNER_API_URL}/v1/PlanAmWell/payments/verify`,
+      { paymentReference, apiKey: PARTNER_API_KEY },
+    );
+
+    const verifiedData = response.data.data || response.data;
+    const isSuccess = ["success", "paid", "completed"].includes(
+      verifiedData.status?.toLowerCase()
+    );
+
+    // Update payment record
+    const updatedPayment = await Payment.findOneAndUpdate(
+      { paymentReference },
+      { status: verifiedData.status, transactionId: verifiedData.transactionId },
+      { new: true },
+    );
+
+    if (isSuccess && updatedPayment) {
+      // ✅ Update order status
+      await Order.findByIdAndUpdate(updatedPayment.orderId, {
+        paymentStatus: "paid",
       });
+
+      // ✅ NOW it's safe to clear the cart — payment is confirmed
+      await Cart.deleteOne({ orderId: updatedPayment.orderId });
+
+      console.log("[verifyPayment] Cart cleared after confirmed payment:", paymentReference);
     }
 
-    try {
-      const response = await axios.post(
-        `${PARTNER_API_URL}/v1/PlanAmWell/payments/verify`,
-        {
-          paymentReference,
-          apiKey: PARTNER_API_KEY,
-        },
-      );
+    return res.status(200).json({
+      success: true,
+      message: "Payment verified successfully",
+      data: verifiedData,
+    });
 
-      const verifiedData = response.data.data || response.data;
+  } catch (err: any) {
+    console.error("[Payment] Verify failed:", err.response?.data || err.message);
 
-      await Payment.findOneAndUpdate(
-        { paymentReference },
-        {
-          status: verifiedData.status,
-          transactionId: verifiedData.transactionId,
-        },
-        { new: true },
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: "Payment verified successfully",
-        data: verifiedData,
-      });
-    } catch (err: any) {
-      console.error(
-        "[Payment] Verify failed:",
-        err.response?.data || err.message,
-      );
-
-      const fallbackData = {
-        paymentReference,
-        status: "success",
-        amount: 5000,
-        transactionId: `TXN_${Date.now()}`,
-        orderId: `ORDER_${Date.now()}`,
-      };
-
-      await Payment.findOneAndUpdate(
-        { paymentReference },
-        {
-          status: fallbackData.status,
-          transactionId: fallbackData.transactionId,
-        },
-        { upsert: true, new: true },
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: "Payment verified (Simulated)",
-        data: fallbackData,
-      });
-    }
-  },
-);
+    // and marks orders as paid when they aren't. Rather return a real error:
+    return res.status(502).json({
+      success: false,
+      message: "Could not verify payment. Please try again or contact support.",
+    });
+  }
+});
