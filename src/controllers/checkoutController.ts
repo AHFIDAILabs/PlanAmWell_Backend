@@ -463,11 +463,18 @@ if (!partnerUserId) {
         })),
       },
     );
-    partnerOrder = orderRes.data.data;
-    console.log(
-      "[Checkout] Partner order created:",
-      JSON.stringify(partnerOrder, null, 2),
-    );
+   partnerOrder = orderRes.data.data;
+
+console.log(
+  "[Checkout] Partner order created:",
+  JSON.stringify(partnerOrder, null, 2),
+);
+
+// 🔍 ADD IT HERE
+console.log("[FINAL CHECK]", {
+  partnerUserId,
+  partnerOrderId: partnerOrder?.orderId,
+});
   } catch (err: any) {
     console.error(
       "[Checkout] Partner order failed:",
