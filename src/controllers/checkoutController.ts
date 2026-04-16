@@ -364,7 +364,10 @@ if (!partnerUserId) {
       },
     );
     console.log("[Checkout] accounts-with-cart response:", JSON.stringify(partnerRes.data, null, 2));
-    partnerUserId = partnerRes.data?.userId || partnerRes.data?.user_id;
+    partnerUserId = partnerRes.data?.user?.id;
+    if (!partnerUserId) {
+  throw new Error("CRITICAL: Partner userId missing after sync");
+}
     user.partnerId = partnerUserId || undefined;
     await user.save();
     console.log("[Checkout] Partner user created:", partnerUserId);
