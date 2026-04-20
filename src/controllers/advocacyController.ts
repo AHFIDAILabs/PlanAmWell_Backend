@@ -320,7 +320,22 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
 // =========================
 export const updateArticle = asyncHandler(async (req: Request, res: Response) => {
   const id = req.params.id;
-  const updatePayload: any = { ...req.body };
+
+  const ALLOWED_ARTICLE_FIELDS = [
+    "title", "excerpt", "content", "category", "tags",
+    "author", "slug", "status", "featured", "metadata",
+    "partner", "relatedArticles", "commentsEnabled",
+  ];
+  const VALID_ARTICLE_STATUSES = ["draft", "published", "archived"];
+
+  if (req.body.status && !VALID_ARTICLE_STATUSES.includes(req.body.status)) {
+    return res.status(400).json({ success: false, message: "Invalid article status" });
+  }
+
+  const updatePayload: any = {};
+  for (const key of ALLOWED_ARTICLE_FIELDS) {
+    if (req.body[key] !== undefined) updatePayload[key] = req.body[key];
+  }
 
   // Upload new image to Cloudinary if present
   if (req.file?.buffer) {

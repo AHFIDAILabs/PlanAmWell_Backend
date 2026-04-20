@@ -13,7 +13,9 @@ import mongoose, { Types } from "mongoose";
 // GET /api/v1/advocacy/:articleId/comments - Get all comments for an article
 export const getArticleComments = asyncHandler(async (req: Request, res: Response) => {
   const { articleId } = req.params;
-  const { page = 1, limit = 20, sort = "-createdAt" } = req.query;
+  const { page = 1, limit = 20 } = req.query;
+  const ALLOWED_SORTS = ["-createdAt", "createdAt", "-likes", "likes"];
+  const sort = ALLOWED_SORTS.includes(req.query.sort as string) ? (req.query.sort as string) : "-createdAt";
 
   // Verify article exists
   const article = await AdvocacyArticle.findById(articleId);
@@ -113,6 +115,13 @@ export const addComment = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
+  if (content.trim().length > 2000) {
+    return res.status(400).json({
+      success: false,
+      message: "Comment content must not exceed 2000 characters",
+    });
+  }
+
   // Verify article exists and comments are enabled
   const article = await AdvocacyArticle.findById(articleId);
   if (!article) {
@@ -194,6 +203,13 @@ export const editComment = asyncHandler(async (req: Request, res: Response) => {
     return res.status(400).json({
       success: false,
       message: "Comment content is required",
+    });
+  }
+
+  if (content.trim().length > 2000) {
+    return res.status(400).json({
+      success: false,
+      message: "Comment content must not exceed 2000 characters",
     });
   }
 
@@ -318,6 +334,17 @@ export const toggleCommentLike = asyncHandler(async (req: Request, res: Response
 export const flagComment = asyncHandler(async (req: Request, res: Response) => {
   const { commentId } = req.params;
   const { reason } = req.body;
+
+  // Require authentication to prevent anonymous abuse/DoS
+  const user = (req as any).user;
+  if (!user) {
+    return res.status(401).json({ success: false, message: "Authentication required to flag a comment" });
+  }
+
+  const VALID_FLAG_REASONS = ["spam", "harassment", "misinformation", "inappropriate", "other"];
+  if (reason && !VALID_FLAG_REASONS.includes(String(reason))) {
+    return res.status(400).json({ success: false, message: "Invalid flag reason" });
+  }
 
  const comment = await Comment.findByIdAndUpdate(
   commentId,

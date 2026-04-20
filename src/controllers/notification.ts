@@ -53,6 +53,17 @@ export const getUnreadCount = async (req: Request, res: Response) => {
 export const markAsRead = async (req: Request, res: Response) => {
   try {
     const { notificationId } = req.params;
+    const userId = req.auth?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const notification = await Notification.findById(notificationId);
+    if (!notification) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+    if (notification.userId.toString() !== userId) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
     await Notification.findByIdAndUpdate(notificationId, { isRead: true });
     res.json({ success: true });
   } catch (error: any) {
@@ -110,6 +121,17 @@ export const createNotification = async (req: Request, res: Response) => {
 export const deleteNotification = async (req: Request, res: Response) => {
   try {
     const { notificationId } = req.params;
+    const userId = req.auth?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const notification = await Notification.findById(notificationId);
+    if (!notification) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+    if (notification.userId.toString() !== userId) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
     await Notification.findByIdAndDelete(notificationId);
     res.json({ success: true });
   } catch (error: any) {

@@ -243,17 +243,34 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
       { new: true },
     );
 
-    if (isSuccess && updatedPayment) {
-      // ✅ Update order status
-      await Order.findByIdAndUpdate(updatedPayment.orderId, {
-        paymentStatus: "paid",
-      });
+  if (isSuccess && updatedPayment) {
+  const order = await Order.findByIdAndUpdate(updatedPayment.orderId, {
+    paymentStatus: "paid",
+  }, { new: true });
 
-      // ✅ NOW it's safe to clear the cart — payment is confirmed
-      await Cart.deleteOne({ orderId: updatedPayment.orderId });
+  // Delete cart by local orderId (which was set during checkout)
+  await Cart.deleteOne({ orderId: updatedPayment.orderId });
 
-      console.log("[verifyPayment] Cart cleared after confirmed payment:", paymentReference);
+  // Also clear partner cart
+  if (order?.partnerOrderId && order?.userId) {
+    try {
+      const user = await User.findById(order.userId);
+      if (user?.partnerId) {
+        await axios.post(
+          `${PARTNER_API_URL}/v1/PlanAmWell/cart`,
+          {
+            userId: user.partnerId,
+            platform: "paw",
+            items: [],
+          }
+        );
+        console.log("[verifyPayment] Partner cart cleared");
+      }
+    } catch (err: any) {
+      console.error("[verifyPayment] Partner cart clear failed:", err.response?.data || err.message);
     }
+  }
+}
 
     return res.status(200).json({
       success: true,

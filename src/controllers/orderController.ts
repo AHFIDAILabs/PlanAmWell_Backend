@@ -9,6 +9,9 @@ import { User } from "../models/user";
 
 const API_BASE = process.env.PARTNER_API_URL;
 
+const VALID_PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded"];
+const VALID_DELIVERY_STATUSES = ["pending", "processing", "shipped", "delivered", "cancelled", "failed"];
+
 /**
  * ADMIN: Get all orders
  */
@@ -160,7 +163,8 @@ export const updateOrder = asyncHandler(async (req: Request, res: Response) => {
     throw new Error("Order not found");
   }
 
-  const sessionId = req.user?.sessionId || req.body.sessionId;
+  // Only trust sessionId from the auth token — never from request body
+  const sessionId = req.user?.sessionId;
   const userId = req.user?.userId;
 
   const isOwner =
@@ -200,6 +204,13 @@ export const updateOrderStatus = asyncHandler(async (req: Request, res: Response
   if (!order) {
     res.status(404);
     throw new Error("Order not found");
+  }
+
+  if (paymentStatus && !VALID_PAYMENT_STATUSES.includes(paymentStatus)) {
+    return res.status(400).json({ success: false, message: "Invalid payment status" });
+  }
+  if (deliveryStatus && !VALID_DELIVERY_STATUSES.includes(deliveryStatus)) {
+    return res.status(400).json({ success: false, message: "Invalid delivery status" });
   }
 
   // Update statuses if provided
@@ -272,8 +283,12 @@ export const refreshDeliveryStatus = asyncHandler(
       `${API_BASE}/v1/PlanAmWell/delivery/${order.partnerOrderId}`
     );
 
-    // assuming response.data.status
-    order.deliveryStatus = response.data.status.toLowerCase();
+    // Validate status from partner before storing
+    const incomingStatus = String(response.data.status).toLowerCase();
+    if (!VALID_DELIVERY_STATUSES.includes(incomingStatus)) {
+      return res.status(502).json({ message: "Invalid delivery status from partner API" });
+    }
+    order.deliveryStatus = incomingStatus as any;
     await order.save();
 
     res.json({ success: true, data: order.deliveryStatus });

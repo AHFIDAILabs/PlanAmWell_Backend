@@ -145,7 +145,7 @@ export const getUserByIdAdmin = asyncHandler(async (req: Request, res: Response)
 
 // ------------------- Combined Growth Analytics -------------------
 export const getCombinedGrowth = asyncHandler(async (req: Request, res: Response) => {
-  const months = parseInt(req.query.months as string) || 1;
+  const months = Math.min(Math.max(parseInt(req.query.months as string) || 1, 1), 24);
   const now = new Date();
   const startDate = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
 

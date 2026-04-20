@@ -181,7 +181,16 @@ export const updateDoctor = asyncHandler(async (req: Request, res: Response) => 
     if (req.body.status) delete req.body.status;
   }
 
-  const updates: any = { ...req.body };
+  const ALLOWED_DOCTOR_FIELDS = [
+    "firstName", "lastName", "email", "phone", "contactNumber",
+    "specialization", "licenseNumber", "gender", "about", "bio",
+    "yearsOfExperience", "education", "languages", "consultationFee",
+    "availability",
+  ];
+  const updates: Record<string, any> = {};
+  for (const key of ALLOWED_DOCTOR_FIELDS) {
+    if (req.body[key] !== undefined) updates[key] = req.body[key];
+  }
 
   // ✅ Handle password change
   if (req.body.password) {

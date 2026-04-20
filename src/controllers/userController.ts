@@ -10,6 +10,18 @@ import mongoose from "mongoose";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 
+const ALLOWED_PREFERENCE_KEYS = ["homeAddress", "address", "city", "state", "lga", "deliveryInstructions"];
+function sanitizePreferences(raw: any): Record<string, any> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, any> = {};
+  for (const key of ALLOWED_PREFERENCE_KEYS) {
+    if (key in raw && typeof raw[key] === "string") {
+      out[key] = String(raw[key]).slice(0, 200);
+    }
+  }
+  return out;
+}
+
 // ------------------ GET Users (Admin Only) ------------------
 export const getUsers = asyncHandler(async (req: Request, res: Response) => {
   if (req.auth?.role !== "Admin") {
@@ -147,7 +159,15 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
 
   allowedUpdates.forEach((field) => {
     if (req.body[field] !== undefined) {
-      (user as any)[field] = req.body[field];
+      if (field === "preferences") {
+        // Merge only whitelisted preference keys to prevent mass assignment
+        user.preferences = {
+          ...((user.preferences as Record<string, any>) || {}),
+          ...sanitizePreferences(req.body[field]),
+        };
+      } else {
+        (user as any)[field] = req.body[field];
+      }
     }
   });
 

@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { Types } from "mongoose";
+import { randomBytes } from "crypto";
 const jwt = require("jsonwebtoken");
 import { User } from "../models/user";
 import { Doctor } from "../models/doctor";
@@ -148,7 +149,13 @@ export const convertGuestToUser = asyncHandler(async (req: Request, res: Respons
   res.status(201).json({
     success: true,
     token,
-    user: newUser,
+    user: {
+      _id: newUser._id,
+      name: newUser.name,
+      email: newUser.email,
+      phone: newUser.phone,
+      roles: newUser.roles,
+    },
     sessionId: session._id,
   });
 });
@@ -201,7 +208,7 @@ export const createUser = asyncHandler(async (req: Request, res: Response) => {
     state: state || undefined,
     lga: lga || undefined,
     gender: gender || undefined,
-    roles: roles || ["User"],
+    roles: ["User"], // never trust client-supplied roles — privilege escalation
     verified: true,
   });
  

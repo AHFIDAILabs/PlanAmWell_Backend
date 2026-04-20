@@ -5,6 +5,7 @@ import { Cart, ICartItem } from "../models/cart";
 import { Types } from "mongoose";
 import { User } from "../models/user";
 import { Product } from "../models/product";
+import { randomBytes } from "crypto";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 const PARTNER_PREFIX = "/v1/PlanAmWell";
@@ -30,7 +31,7 @@ const ensurePartnerUser = async (user: any): Promise<string | null> => {
         return user.partnerId;
       }
     }
-    const safePassword = Math.random().toString(36).slice(-10);
+    const safePassword = randomBytes(12).toString("hex");
     const createRes = await axios.post(
       `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts`,
       {
@@ -74,11 +75,10 @@ const ensurePartnerUser = async (user: any): Promise<string | null> => {
 };
 
 // ── Identify cart owner ──────────────────────────────────────────────────────
+// Only trust sessionId from the signed JWT — never from request body/query params
 const getOwnerQuery = (req: Request) => {
   if (req.auth?.id) return { userId: req.auth.id };
   if (req.auth?.sessionId) return { sessionId: req.auth.sessionId };
-  const fallback = req.query.sessionId || req.body.sessionId;
-  if (fallback) return { sessionId: fallback as string };
   throw new Error("No userId or sessionId provided to identify cart owner.");
 };
 

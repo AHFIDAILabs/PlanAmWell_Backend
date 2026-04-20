@@ -42,8 +42,8 @@ try {
  * GET /products - paginated list of products
  */
 export const getProducts = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const page = Math.max(parseInt(req.query.page as string) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
   const skip = (page - 1) * limit;
 
   let products = await Product.find({ partnerProductId: { $exists: true } })
@@ -102,7 +102,8 @@ export const getProduct = asyncHandler(async (req: Request, res: Response) => {
  * POST /products/sync - admin only
  */
 export const syncProducts = asyncHandler(async (req: Request, res: Response) => {
-  const { page = 1, limit = 200 } = req.query;
+  const page = Math.max(parseInt(req.query.page as string) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 200, 1), 500);
   const url = `${API_BASE}/PlanAmWell/inventory?page=${page}&limit=${limit}`;
 
   try {
@@ -155,7 +156,8 @@ export const syncProducts = asyncHandler(async (req: Request, res: Response) => 
 // Search products (public endpoint for chatbot)
 export const searchProducts = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { query, category, limit = '10' } = req.query;
+        const { query, category } = req.query;
+        const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 10, 1), 50);
         
         if (!query || typeof query !== 'string') {
             res.status(400).json({ success: false, message: 'Search query is required' });
@@ -181,7 +183,7 @@ export const searchProducts = async (req: Request, res: Response): Promise<void>
             includeScore: true
         });
         
-        const results = fuse.search(query).slice(0, parseInt(limit as string));
+        const results = fuse.search(query as string).slice(0, limit);
         const products = results.map(result => result.item);
         
         res.status(200).json({
@@ -201,14 +203,14 @@ export const searchProducts = async (req: Request, res: Response): Promise<void>
 export const getProductsByCategory = async (req: Request, res: Response): Promise<void> => {
     try {
         const { category } = req.params;
-        const { limit = '20' } = req.query;
-        
-        const products = await Product.find({ 
+        const catLimit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+
+        const products = await Product.find({
             categoryName: { $regex: category, $options: 'i' },
             stockQuantity: { $gt: 0 },
             status: { $ne: 'inactive' }
         })
-        .limit(parseInt(limit as string))
+        .limit(catLimit)
         .lean<IProduct[]>();
         
         res.status(200).json({

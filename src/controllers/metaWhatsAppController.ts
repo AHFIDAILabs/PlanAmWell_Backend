@@ -732,12 +732,16 @@ export const handleMetaWebhook = async (req: Request, res: Response): Promise<vo
         const body = req.body;
 
         const signature = req.headers['x-hub-signature-256'] as string;
-        
-        if (signature) {
-            const rawBody = JSON.stringify(body);
-            const isValid = verifySignature(rawBody, signature);
-            
-            if (!isValid) {
+        const rawBody = JSON.stringify(body);
+
+        // Require signature verification when META_APP_SECRET is configured
+        if (META_APP_SECRET) {
+            if (!signature) {
+                console.error('❌ Missing webhook signature - request rejected');
+                res.sendStatus(403);
+                return;
+            }
+            if (!verifySignature(rawBody, signature)) {
                 console.error('❌ Invalid signature - potential security threat');
                 res.sendStatus(403);
                 return;

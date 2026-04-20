@@ -69,8 +69,17 @@ export const createPartner = async (req: AuthRequest, res: Response): Promise<vo
       imageId = image._id;
     }
 
+    // Explicitly whitelist fields to prevent mass assignment
+    const {
+      name, email, phone, partnerType, profession, description,
+      website, bio, specialization, licenseNumber, address, city, state,
+      isActive, consultationFee, languages,
+    } = req.body;
+
     const partner = await Partner.create({
-      ...req.body,
+      name, email, phone, partnerType, profession, description,
+      website, bio, specialization, licenseNumber, address, city, state,
+      isActive, consultationFee, languages,
       socialLinks,
       partnerImage: imageId,
       createdBy: adminId,
@@ -263,8 +272,19 @@ export const updatePartner = async (req: AuthRequest, res: Response): Promise<vo
       partner.partnerImage = newImage._id;
     }
 
-    // Update other fields
-    Object.assign(partner, { ...req.body, socialLinks });
+    // Explicitly whitelist fields to prevent mass assignment
+    const {
+      name, email, phone, partnerType, profession, description,
+      website, bio, specialization, licenseNumber, address, city, state,
+      isActive, consultationFee, languages,
+    } = req.body;
+
+    Object.assign(partner, {
+      name, email, phone, partnerType, profession, description,
+      website, bio, specialization, licenseNumber, address, city, state,
+      isActive, consultationFee, languages,
+      socialLinks,
+    });
     await partner.save();
 
     res.status(200).json({

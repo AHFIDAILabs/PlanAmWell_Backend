@@ -2,6 +2,25 @@ import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import { Payment } from "../models/initiatedPayment";
 import { Order } from "../models/order";
+import { createHmac, timingSafeEqual } from "crypto";
+
+const PARTNER_API_KEY= process.env.PARTNER_API_KEY;
+if (!PARTNER_API_KEY) {
+  console.warn("[Webhook] WARNING: PARTNER_API_KEY is not set. Webhook endpoints are unauthenticated.");
+}
+
+const VALID_DELIVERY_STATUSES = ["pending", "processing", "shipped", "delivered", "cancelled", "failed"];
+
+function verifyWebhookSecret(req: Request): boolean {
+  if (!PARTNER_API_KEY) return true; // unconfigured — warn at startup, allow through
+  const provided = (req.headers["x-webhook-secret"] as string) || (req.headers["authorization"] as string)?.replace("Bearer ", "");
+  if (!provided) return false;
+  try {
+    return timingSafeEqual(Buffer.from(provided), Buffer.from(PARTNER_API_KEY));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * ✅ Partner Webhook: Payment Status Update
@@ -13,6 +32,10 @@ import { Order } from "../models/order";
  */
 export const handlePaymentWebhook = asyncHandler(
   async (req: Request, res: Response) => {
+    if (!verifyWebhookSecret(req)) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
     const { paymentId, status } = req.body;
 
     /** ------------------ 1. Validate payload ------------------ */
@@ -81,6 +104,10 @@ export const handlePaymentWebhook = asyncHandler(
 
 export const handleDeliveryWebhook = asyncHandler(
   async (req: Request, res: Response) => {
+    if (!verifyWebhookSecret(req)) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
     const { orderId, status } = req.body;
 
     if (!orderId || !status) {
@@ -88,6 +115,12 @@ export const handleDeliveryWebhook = asyncHandler(
         success: false,
         message: "Invalid delivery webhook payload",
       });
+    }
+
+    const normalizedStatus = String(status).toLowerCase();
+    if (!VALID_DELIVERY_STATUSES.includes(normalizedStatus)) {
+      console.warn(`[DeliveryWebhook] Invalid status value: ${status}`);
+      return res.status(400).json({ success: false, message: "Invalid status value" });
     }
 
     // ⚠️ orderId here is partner order ID or orderCode
@@ -100,7 +133,7 @@ export const handleDeliveryWebhook = asyncHandler(
       return res.status(200).json({ received: true });
     }
 
-    order.deliveryStatus = status.toLowerCase();
+    order.deliveryStatus = normalizedStatus as any;
     await order.save();
 
     return res.status(200).json({ received: true });
