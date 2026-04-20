@@ -122,10 +122,12 @@ export const initiatePayment = asyncHandler(
     }
     const partnerReferenceCode = `PAW-${order.orderNumber}`; // your idempotency key, fine as-is
     const partnerUserId = user.partnerId;
+  
 
     /** ------------------ 7. Initiate payment with partner ------------------ */
 
     let partnerResponse;
+     const mobileRedirectUrl = `planamwell://order-complete?orderId=${order._id}`;
 
     try {
       const response = await axios.post(
@@ -138,6 +140,7 @@ export const initiatePayment = asyncHandler(
           partnerReferenceCode,
           customerEmail: user.email,
           apiKey: PARTNER_API_KEY,
+          mobileRedirectUrl: mobileRedirectUrl,
         },
       );
 
