@@ -9,6 +9,7 @@ import { Product } from "../models/product";
 import { v4 as uuidv4 } from "uuid";
 import { Types } from "mongoose";
 import { randomBytes } from "crypto";
+import { Payment } from "../models/initiatedPayment";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 const PARTNER_PREFIX = "/v1/PlanAmWell";
@@ -544,85 +545,160 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  /** ------------------ 5. Create Partner Order ------------------ */
+ /** ------------------ 5. Save Local Order ------------------ */
+const localOrder = await Order.create({
+  orderNumber: uuidv4(),
+  userId: authUserId,
+  partnerUserId: partnerUserId, // save this for confirmOrder step
+  isThirdPartyOrder: true,
+  platform: "PlanAmWell",
+  items: cart.items.map((i) => ({
+    productId: String(i.drugId),
+    name: i.drugName || "",
+    qty: i.quantity,
+    price: i.price || 0,
+    dosage: i.dosage || "",
+    specialInstructions: i.specialInstructions || "",
+  })),
+  subtotal: cart.totalPrice,
+  total: cart.totalPrice,
+  paymentStatus: "pending",
+  shippingAddress: {
+    name: user.name,
+    phone: user.phone,
+    addressLine: user.homeAddress || (user.preferences as any)?.address,
+    city: user.city || (user.preferences as any)?.city,
+    state: user.state || (user.preferences as any)?.state,
+  },
+});
+
+/** ------------------ 6. Mark Cart checked_out ------------------ */
+await Cart.findByIdAndUpdate(cart._id, {
+  status: "checked_out",
+  orderId: localOrder._id,
+});
+
+/** ------------------ 7. Respond ------------------ */
+res.status(201).json({
+  success: true,
+  message: "Checkout successful",
+  localOrder,
+  partnerUserId, // frontend needs this for confirm step
+  user: {
+    id: user._id,
+    isAnonymous: user.isAnonymous,
+    partnerId: user.partnerId,
+  },
+});
+
+});
+
+/** ------------------ CONFIRM ORDER (creates partner order + initiates payment) ------------------ */
+export const confirmOrder = asyncHandler(async (req: Request, res: Response) => {
+  const { orderId } = req.body;
+  const authUserId = req.auth?.id;
+
+  if (!orderId) {
+    return res.status(400).json({ success: false, message: "orderId is required" });
+  }
+
+  const order = await Order.findById(orderId);
+  if (!order) {
+    return res.status(404).json({ success: false, message: "Order not found" });
+  }
+
+  if (order.userId?.toString() !== authUserId) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+
+  if (order.partnerOrderId) {
+    // Already confirmed — idempotent, just return existing payment
+    return res.status(200).json({ success: true, message: "Already confirmed", orderId: order._id });
+  }
+
+  const user = await User.findById(authUserId);
+  if (!user || !user.partnerId) {
+    return res.status(422).json({ success: false, message: "User not synced with partner" });
+  }
+
+  /** --- Create Partner Order --- */
   let partnerOrder;
   try {
     const orderRes = await axios.post(
       `${PARTNER_API_URL}${PARTNER_PREFIX}/orders`,
       {
-        userId: partnerUserId,
+        userId: user.partnerId,
         telephone: user.phone,
         platform: "PlanAmWell",
-        items: cart.items.map((item) => ({
-          drugId: item.drugId,
-          quantity: item.quantity,
+        items: order.items.map((item) => ({
+          drugId: item.productId,
+          quantity: item.qty,
         })),
       },
     );
     partnerOrder = orderRes.data.data;
-
-    console.log(
-      "[Checkout] Partner order created:",
-      JSON.stringify(partnerOrder, null, 2),
-    );
-
-    // 🔍 ADD IT HERE
-    console.log("[FINAL CHECK]", {
-      partnerUserId,
-      partnerOrderId: partnerOrder?.orderId,
-    });
+    console.log("[ConfirmOrder] Partner order created:", JSON.stringify(partnerOrder, null, 2));
   } catch (err: any) {
-    console.error(
-      "[Checkout] Partner order failed:",
-      err.response?.data || err.message,
-    );
-    throw new Error("Partner order creation failed");
+    console.error("[ConfirmOrder] Partner order failed:", err.response?.data || err.message);
+    return res.status(502).json({ success: false, message: "Failed to create partner order" });
   }
 
-  /** ------------------ 6. Save Local Order ------------------ */
-  const localOrder = await Order.create({
-    orderNumber: uuidv4(),
-    userId: authUserId,
-    partnerOrderId: partnerOrder?.orderId,
-    isThirdPartyOrder: true,
-    platform: "PlanAmWell",
-    items: cart.items.map((i) => ({
-      productId: String(i.drugId),
-      name: i.drugName || "",
-      qty: i.quantity,
-      price: i.price || 0,
-      dosage: i.dosage || "",
-      specialInstructions: i.specialInstructions || "",
-    })),
-    subtotal: cart.totalPrice,
-    total: cart.totalPrice,
-    paymentStatus: "pending",
-    shippingAddress: {
-      name: user.name,
-      phone: user.phone,
-      addressLine: user.homeAddress || (user.preferences as any)?.address,
-      city: user.city || (user.preferences as any)?.city,
-      state: user.state || (user.preferences as any)?.state,
-    },
-  });
+  // Save partner order ID to local order
+  order.partnerOrderId = partnerOrder?.orderId;
+  await order.save();
 
-  /** ------------------ 7. Clear Cart ------------------ */
-  // await Cart.deleteOne({ _id: cart._id });
-  await Cart.findByIdAndUpdate(cart._id, {
-    status: "checked_out",
-    orderId: localOrder._id,
-  });
+  /** --- Initiate Payment --- */
+  const PARTNER_API_KEY = process.env.PARTNER_API_KEY;
+  const partnerReferenceCode = `PAW-${order.orderNumber}`;
+  const mobileRedirectUrl = `planamwell://order-complete?orderId=${order._id}`;
 
-  /** ------------------ 8. Respond ------------------ */
-  res.status(201).json({
+  let checkoutUrl: string;
+  try {
+    const paymentRes = await axios.post(
+      `${PARTNER_API_URL}${PARTNER_PREFIX}/payments/initiate`,
+      {
+        orderId: partnerOrder?.orderId,
+        userId: user.partnerId,
+        paymentMethod: "card",
+        amount: order.total,
+        partnerReferenceCode,
+        apiKey: PARTNER_API_KEY,
+        customerEmail: user.email,
+        mobile_redirect_url: mobileRedirectUrl,
+      },
+    );
+
+    console.log("[ConfirmOrder] Payment response:", JSON.stringify(paymentRes.data, null, 2));
+
+    checkoutUrl = paymentRes.data?.initializedPayment?.data?.authorization_url;
+    const transactionId = paymentRes.data?.payment?.transactionId;
+    const paymentReference = paymentRes.data?.initializedPayment?.data?.reference;
+
+    if (!checkoutUrl) {
+      throw new Error("No checkout URL returned from partner");
+    }
+
+    // Persist payment record
+    await Payment.create({
+      orderId: order._id,
+      userId: user._id,
+      paymentMethod: "card",
+      partnerReferenceCode,
+      paymentReference,
+      transactionId,
+      checkoutUrl,
+      amount: order.total,
+      status: "pending",
+    });
+
+  } catch (err: any) {
+    console.error("[ConfirmOrder] Payment initiation failed:", err.response?.data || err.message);
+    return res.status(502).json({ success: false, message: "Failed to initiate payment" });
+  }
+
+  return res.status(200).json({
     success: true,
-    message: "Checkout successful",
-    localOrder,
-    partnerOrder,
-    user: {
-      id: user._id,
-      isAnonymous: user.isAnonymous,
-      partnerId: user.partnerId,
-    },
+    checkoutUrl,
+    orderId: order._id,
   });
 });
