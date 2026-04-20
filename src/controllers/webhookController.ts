@@ -32,6 +32,9 @@ function verifyWebhookSecret(req: Request): boolean {
  */
 export const handlePaymentWebhook = asyncHandler(
   async (req: Request, res: Response) => {
+     console.log("[Webhook] Payment webhook received:", JSON.stringify(req.body, null, 2));
+    console.log("[Webhook] Headers:", JSON.stringify(req.headers, null, 2));
+
     if (!verifyWebhookSecret(req)) {
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
