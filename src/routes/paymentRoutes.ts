@@ -1,6 +1,6 @@
 
 import { Router } from "express";
-import { getPaymentMethods, initiatePayment,   paymentRedirect,
+import { getPaymentMethods, initiatePayment,   paymentRedirect, getPaymentByOrder
  } from "../controllers/paymentController";
 import { guestAuth } from "../middleware/auth";
 
@@ -10,5 +10,7 @@ const paymentRouter = Router();
 paymentRouter.get("/methods", guestAuth, getPaymentMethods);
 paymentRouter.post("/initiate", guestAuth, initiatePayment);
 paymentRouter.get("/redirect", guestAuth, paymentRedirect);
+paymentRouter.get("/by-order/:orderId", guestAuth, getPaymentByOrder);
+
 
 export default paymentRouter;

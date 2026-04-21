@@ -314,10 +314,19 @@ export const paymentRedirect = asyncHandler(async (req: Request, res: Response) 
         </style>
       </head>
       <body>
-        <h2>Payment Successful! 🎉</h2>
+        <h2>Payment Successful!</h2>
         <p>Tap below to return to the app.</p>
         <a href="planamwell://order-complete?orderId=${orderId}">Return to PlanAmWell</a>
       </body>
     </html>
   `);
+});
+
+// GET /api/v1/payments/by-order/:orderId
+export const getPaymentByOrder = asyncHandler(async (req: Request, res: Response) => {
+  const payment = await Payment.findOne({ orderId: req.params.orderId });
+  if (!payment) {
+    return res.status(404).json({ success: false, message: "Payment not found" });
+  }
+  res.status(200).json({ success: true, data: payment });
 });
