@@ -647,12 +647,11 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
   order.partnerOrderId = partnerOrder?.orderId;
   await order.save();
 
-  /** --- Initiate Payment --- */
+ /** --- Initiate Payment --- */
   const PARTNER_API_KEY = process.env.PARTNER_API_KEY;
   const partnerReferenceCode = `PAW-${order.orderNumber}`;
   const mobileRedirectUrl = `${process.env.APP_URL}/api/v1/payment/redirect?orderId=${order._id}`;
 
-  let checkoutUrl: string;
   try {
     const paymentRes = await axios.post(
       `${PARTNER_API_URL}${PARTNER_PREFIX}/payments/initiate`,
@@ -670,7 +669,7 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
 
     console.log("[ConfirmOrder] Payment response:", JSON.stringify(paymentRes.data, null, 2));
 
-    checkoutUrl = paymentRes.data?.initializedPayment?.data?.authorization_url;
+    const checkoutUrl = paymentRes.data?.initializedPayment?.data?.authorization_url;
     const transactionId = paymentRes.data?.payment?.transactionId;
     const paymentReference = paymentRes.data?.initializedPayment?.data?.reference;
 
@@ -678,7 +677,6 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
       throw new Error("No checkout URL returned from partner");
     }
 
-    // Persist payment record
     await Payment.create({
       orderId: order._id,
       userId: user._id,
@@ -691,14 +689,15 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
       status: "pending",
     });
 
+    // ✅ Moved inside try — checkoutUrl guaranteed defined here
+    return res.status(200).json({
+      success: true,
+      checkoutUrl,
+      orderId: order._id,
+    });
+
   } catch (err: any) {
     console.error("[ConfirmOrder] Payment initiation failed:", err.response?.data || err.message);
     return res.status(502).json({ success: false, message: "Failed to initiate payment" });
   }
-
-  return res.status(200).json({
-    success: true,
-    checkoutUrl,
-    orderId: order._id,
-  });
 });
