@@ -291,3 +291,47 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
     });
   }
 });
+
+
+
+// GET /api/v1/payment/redirect?orderId=xxx
+
+export const paymentRedirect = asyncHandler(async (req: Request, res: Response) => {
+  const { orderId } = req.query;
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Payment Complete</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: sans-serif; text-align: center; padding: 40px 20px; background: #f9f9f9; }
+          h2 { color: #D81E5B; }
+          p { color: #555; }
+          a { display: inline-block; margin-top: 20px; background: #D81E5B; color: #fff; 
+              padding: 14px 28px; border-radius: 12px; text-decoration: none; font-weight: 700; }
+        </style>
+        <script>
+          window.onload = function() {
+            // Try to open the app via deep link
+            window.location.href = "planamwell://order-complete?orderId=${orderId}";
+            
+            // Fallback: if app doesn't open in 2s, show the button
+            setTimeout(function() {
+              document.getElementById('fallback').style.display = 'block';
+            }, 2000);
+          };
+        </script>
+      </head>
+      <body>
+        <h2>Payment Successful!</h2>
+        <p>Redirecting you back to the app...</p>
+        <div id="fallback" style="display:none">
+          <p>If the app didn't open automatically:</p>
+          <a href="planamwell://order-complete?orderId=${orderId}">Open PlanAmWell App</a>
+        </div>
+      </body>
+    </html>
+  `);
+});

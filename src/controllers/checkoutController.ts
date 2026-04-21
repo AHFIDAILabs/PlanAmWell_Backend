@@ -650,7 +650,7 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
   /** --- Initiate Payment --- */
   const PARTNER_API_KEY = process.env.PARTNER_API_KEY;
   const partnerReferenceCode = `PAW-${order.orderNumber}`;
-  const mobileRedirectUrl = `planamwell://order-complete?orderId=${order._id}`;
+  const mobileRedirectUrl = `${process.env.APP_URL}/api/v1/payment/redirect?orderId=${order._id}`;
 
   let checkoutUrl: string;
   try {
