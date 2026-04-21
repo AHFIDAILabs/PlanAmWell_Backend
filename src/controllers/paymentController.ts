@@ -312,25 +312,11 @@ export const paymentRedirect = asyncHandler(async (req: Request, res: Response) 
           a { display: inline-block; margin-top: 20px; background: #D81E5B; color: #fff; 
               padding: 14px 28px; border-radius: 12px; text-decoration: none; font-weight: 700; }
         </style>
-        <script>
-          window.onload = function() {
-            // Try to open the app via deep link
-            window.location.href = "planamwell://order-complete?orderId=${orderId}";
-            
-            // Fallback: if app doesn't open in 2s, show the button
-            setTimeout(function() {
-              document.getElementById('fallback').style.display = 'block';
-            }, 2000);
-          };
-        </script>
       </head>
       <body>
-        <h2>Payment Successful!</h2>
-        <p>Redirecting you back to the app...</p>
-        <div id="fallback" style="display:none">
-          <p>If the app didn't open automatically:</p>
-          <a href="planamwell://order-complete?orderId=${orderId}">Open PlanAmWell App</a>
-        </div>
+        <h2>Payment Successful! 🎉</h2>
+        <p>Tap below to return to the app.</p>
+        <a href="planamwell://order-complete?orderId=${orderId}">Return to PlanAmWell</a>
       </body>
     </html>
   `);
