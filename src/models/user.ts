@@ -1,9 +1,10 @@
-import mongoose, { Document, Schema } from "mongoose";
+import mongoose, { Document, Schema, Types } from "mongoose";
 import bcrypt from "bcryptjs";
 import { IImage } from "./image";
 
 // --- Extended User Interface ---
 export interface IUser extends Document {
+  _id: Types.ObjectId;
   phone?: string;
   email?: string;
   name?: string;

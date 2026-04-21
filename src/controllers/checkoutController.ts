@@ -598,6 +598,9 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
   const { orderId } = req.body;
   const authUserId = req.auth?.id;
 
+    console.log("[ConfirmOrder] START — orderId:", orderId, "authUserId:", authUserId);
+
+
   if (!orderId) {
     return res.status(400).json({ success: false, message: "orderId is required" });
   }
@@ -607,22 +610,31 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
     return res.status(404).json({ success: false, message: "Order not found" });
   }
 
+    console.log("[ConfirmOrder] order.partnerOrderId:", order.partnerOrderId);
+
+
   if (order.userId?.toString() !== authUserId) {
     return res.status(403).json({ success: false, message: "Forbidden" });
   }
 
 if (order.partnerOrderId) {
   const existingPayment = await Payment.findOne({ 
-    orderId: order._id.toString()  // ← force string match
+    orderId: order._id.toString(),
   });
   
-  console.log("[ConfirmOrder] Idempotent hit, existingPayment:", existingPayment?.checkoutUrl);
-  
-  return res.status(200).json({ 
-    success: true, 
-    checkoutUrl: existingPayment?.checkoutUrl ?? null,
-    orderId: order._id,
-  });
+  console.log("[ConfirmOrder] Idempotency — payment found:", !!existingPayment, "checkoutUrl:", existingPayment?.checkoutUrl);
+
+  // If no payment found, proceed to create one instead of returning null checkoutUrl
+  if (!existingPayment) {
+    console.warn("[ConfirmOrder] Partner order exists but no payment record — will re-initiate payment");
+    // fall through to payment initiation below by NOT returning here
+  } else {
+    return res.status(200).json({ 
+      success: true, 
+      checkoutUrl: existingPayment.checkoutUrl,
+      orderId: order._id,
+    });
+  }
 }
 
   const user = await User.findById(authUserId);
@@ -687,8 +699,8 @@ if (order.partnerOrderId) {
     }
 
     await Payment.create({
-      orderId: order._id,
-      userId: user._id,
+      orderId: order._id.toString(),
+      userId: user._id.toString(),
       paymentMethod: "card",
       partnerReferenceCode,
       paymentReference,
