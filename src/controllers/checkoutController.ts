@@ -612,11 +612,15 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
   }
 
 if (order.partnerOrderId) {
-  // Already confirmed — fetch existing payment and return its checkoutUrl
-  const existingPayment = await Payment.findOne({ orderId: order._id });
+  const existingPayment = await Payment.findOne({ 
+    orderId: order._id.toString()  // ← force string match
+  });
+  
+  console.log("[ConfirmOrder] Idempotent hit, existingPayment:", existingPayment?.checkoutUrl);
+  
   return res.status(200).json({ 
     success: true, 
-    checkoutUrl: existingPayment?.checkoutUrl,
+    checkoutUrl: existingPayment?.checkoutUrl ?? null,
     orderId: order._id,
   });
 }

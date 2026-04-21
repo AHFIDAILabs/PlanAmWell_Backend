@@ -1,8 +1,8 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
 export interface IPayment extends Document {
-  orderId: Types.ObjectId;
-  userId: Types.ObjectId;
+  orderId: string;
+  userId: string;
   paymentMethod: "card" | "paystack" | "bank_transfer";
   partnerReferenceCode: string;
   paymentReference: string;
@@ -18,8 +18,8 @@ export interface IPayment extends Document {
 
 const PaymentSchema = new Schema<IPayment>(
   {
-    orderId: { type: Schema.Types.ObjectId, ref: "Order", required: true },
-    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    orderId: { type: String, ref: "Order", required: true },
+    userId: { type: String, ref: "User", required: true },
     paymentMethod: { type: String, required: true },
     partnerReferenceCode: { type: String, required: true },
     paymentReference: { type: String, required: true },
