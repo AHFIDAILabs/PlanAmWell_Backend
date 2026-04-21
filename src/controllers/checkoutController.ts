@@ -611,10 +611,15 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
     return res.status(403).json({ success: false, message: "Forbidden" });
   }
 
-  if (order.partnerOrderId) {
-    // Already confirmed — idempotent, just return existing payment
-    return res.status(200).json({ success: true, message: "Already confirmed", orderId: order._id });
-  }
+if (order.partnerOrderId) {
+  // Already confirmed — fetch existing payment and return its checkoutUrl
+  const existingPayment = await Payment.findOne({ orderId: order._id });
+  return res.status(200).json({ 
+    success: true, 
+    checkoutUrl: existingPayment?.checkoutUrl,
+    orderId: order._id,
+  });
+}
 
   const user = await User.findById(authUserId);
   if (!user || !user.partnerId) {
@@ -689,6 +694,12 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
       status: "pending",
     });
 
+    const responsePayload = {
+  success: true,
+  checkoutUrl,
+  orderId: order._id,
+};
+console.log("[ConfirmOrder] Sending response:", JSON.stringify(responsePayload));
     // ✅ Moved inside try — checkoutUrl guaranteed defined here
     return res.status(200).json({
       success: true,
