@@ -229,19 +229,26 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
     return res.status(400).json({ success: false, message: "paymentReference is required" });
   }
 
+  // ✅ Look up transactionId from our DB using paymentReference
+  const paymentRecord = await Payment.findOne({ paymentReference });
+  if (!paymentRecord) {
+    return res.status(404).json({ success: false, message: "Payment record not found" });
+  }
+
+  const { transactionId } = paymentRecord;
+  console.log("[verifyPayment] Found transactionId:", transactionId);
+
   try {
     console.log("[verifyPayment] Calling partner API...");
 
-    const response = await axios.post(
-      `${PARTNER_API_URL}/v1/PlanAmWell/payments/verify`,
-      { paymentReference, apiKey: PARTNER_API_KEY },
+    // ✅ GET request with transactionId as path param — no body, no apiKey
+    const response = await axios.get(
+      `${PARTNER_API_URL}/v1/PlanAmWell/payments/verify/${transactionId}`,
     );
 
     console.log("[verifyPayment] Raw partner response:", JSON.stringify(response.data, null, 2));
 
-    const verifiedData = response.data.data || response.data;
-
-    console.log("[verifyPayment] Extracted verifiedData:", JSON.stringify(verifiedData, null, 2));
+    const verifiedData = response.data;
     console.log("[verifyPayment] Status from partner:", verifiedData.status);
 
     const isSuccess = ["success", "paid", "completed"].includes(
@@ -250,9 +257,10 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
 
     console.log("[verifyPayment] isSuccess:", isSuccess);
 
+    // Update our payment record status
     const updatedPayment = await Payment.findOneAndUpdate(
       { paymentReference },
-      { status: verifiedData.status, transactionId: verifiedData.transactionId },
+      { status: verifiedData.status },
       { new: true },
     );
 
@@ -263,8 +271,7 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
         paymentStatus: "paid",
       }, { new: true });
 
-      console.log("[verifyPayment] Order after update:", order?.paymentStatus, "| orderId:", updatedPayment.orderId);
-
+      console.log("[verifyPayment] Order updated to paid:", order?.paymentStatus);
       await Cart.deleteOne({ orderId: updatedPayment.orderId });
 
       if (order?.partnerOrderId && order?.userId) {
