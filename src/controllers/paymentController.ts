@@ -239,6 +239,7 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
       verifiedData.status?.toLowerCase()
     );
 
+    console.log("[verifyPayment] Verified data:", verifiedData);
     // Update payment record
     const updatedPayment = await Payment.findOneAndUpdate(
       { paymentReference },
@@ -250,7 +251,7 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
   const order = await Order.findByIdAndUpdate(updatedPayment.orderId, {
     paymentStatus: "paid",
   }, { new: true });
-
+ console.log("[verifyPayment] Order updated to paid:", order);
   // Delete cart by local orderId (which was set during checkout)
   await Cart.deleteOne({ orderId: updatedPayment.orderId });
 
