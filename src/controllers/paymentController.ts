@@ -224,57 +224,66 @@ export const initiatePayment = asyncHandler(
 export const verifyPayment = asyncHandler(async (req: Request, res: Response) => {
   const { paymentReference } = req.body;
 
+  console.log("[verifyPayment] Called with paymentReference:", paymentReference);
+
   if (!paymentReference) {
     return res.status(400).json({ success: false, message: "paymentReference is required" });
   }
 
   try {
+    console.log("[verifyPayment] Calling partner API...");
+
     const response = await axios.post(
       `${PARTNER_API_URL}/v1/PlanAmWell/payments/verify`,
       { paymentReference, apiKey: PARTNER_API_KEY },
     );
 
+    console.log("[verifyPayment] Raw partner response:", JSON.stringify(response.data, null, 2));
+
     const verifiedData = response.data.data || response.data;
+
+    console.log("[verifyPayment] Extracted verifiedData:", JSON.stringify(verifiedData, null, 2));
+    console.log("[verifyPayment] Status from partner:", verifiedData.status);
+
     const isSuccess = ["success", "paid", "completed"].includes(
       verifiedData.status?.toLowerCase()
     );
 
-    console.log("[verifyPayment] Verified data:", verifiedData);
-    // Update payment record
+    console.log("[verifyPayment] isSuccess:", isSuccess);
+
     const updatedPayment = await Payment.findOneAndUpdate(
       { paymentReference },
       { status: verifiedData.status, transactionId: verifiedData.transactionId },
       { new: true },
     );
 
-  if (isSuccess && updatedPayment) {
-  const order = await Order.findByIdAndUpdate(updatedPayment.orderId, {
-    paymentStatus: "paid",
-  }, { new: true });
- console.log("[verifyPayment] Order updated to paid:", order);
-  // Delete cart by local orderId (which was set during checkout)
-  await Cart.deleteOne({ orderId: updatedPayment.orderId });
+    console.log("[verifyPayment] updatedPayment:", updatedPayment ? updatedPayment._id : "NOT FOUND");
 
-  // Also clear partner cart
-  if (order?.partnerOrderId && order?.userId) {
-    try {
-      const user = await User.findById(order.userId);
-      if (user?.partnerId) {
-        await axios.post(
-          `${PARTNER_API_URL}/v1/PlanAmWell/cart`,
-          {
-            userId: user.partnerId,
-            platform: "paw",
-            items: [],
+    if (isSuccess && updatedPayment) {
+      const order = await Order.findByIdAndUpdate(updatedPayment.orderId, {
+        paymentStatus: "paid",
+      }, { new: true });
+
+      console.log("[verifyPayment] Order after update:", order?.paymentStatus, "| orderId:", updatedPayment.orderId);
+
+      await Cart.deleteOne({ orderId: updatedPayment.orderId });
+
+      if (order?.partnerOrderId && order?.userId) {
+        try {
+          const user = await User.findById(order.userId);
+          if (user?.partnerId) {
+            await axios.post(`${PARTNER_API_URL}/v1/PlanAmWell/cart`, {
+              userId: user.partnerId,
+              platform: "paw",
+              items: [],
+            });
+            console.log("[verifyPayment] Partner cart cleared");
           }
-        );
-        console.log("[verifyPayment] Partner cart cleared");
+        } catch (err: any) {
+          console.error("[verifyPayment] Partner cart clear failed:", err.response?.data || err.message);
+        }
       }
-    } catch (err: any) {
-      console.error("[verifyPayment] Partner cart clear failed:", err.response?.data || err.message);
     }
-  }
-}
 
     return res.status(200).json({
       success: true,
@@ -283,9 +292,10 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
     });
 
   } catch (err: any) {
-    console.error("[Payment] Verify failed:", err.response?.data || err.message);
+    console.error("[verifyPayment] Partner API error — status:", err.response?.status);
+    console.error("[verifyPayment] Partner API error — body:", JSON.stringify(err.response?.data, null, 2));
+    console.error("[verifyPayment] Local error message:", err.message);
 
-    // and marks orders as paid when they aren't. Rather return a real error:
     return res.status(502).json({
       success: false,
       message: "Could not verify payment. Please try again or contact support.",
@@ -325,9 +335,20 @@ export const paymentRedirect = asyncHandler(async (req: Request, res: Response) 
 
 // GET /api/v1/payments/by-order/:orderId
 export const getPaymentByOrder = asyncHandler(async (req: Request, res: Response) => {
-  const payment = await Payment.findOne({ orderId: req.params.orderId });
+  const { orderId } = req.params;
+
+  console.log("[getPaymentByOrder] Looking up orderId:", orderId, "| type:", typeof orderId);
+
+  // Debug: show ALL payments to confirm record exists
+  const allPayments = await Payment.find({}).select("orderId paymentReference status").lean();
+  console.log("[getPaymentByOrder] All payments in DB:", JSON.stringify(allPayments, null, 2));
+
+  const payment = await Payment.findOne({ orderId });
+  console.log("[getPaymentByOrder] Result:", payment ? payment._id : "NOT FOUND");
+
   if (!payment) {
     return res.status(404).json({ success: false, message: "Payment not found" });
   }
+
   res.status(200).json({ success: true, data: payment });
 });
