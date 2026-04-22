@@ -139,7 +139,7 @@ if (existingPayment) {
           partnerReferenceCode,
           customerEmail: user.email,
           apiKey: PARTNER_API_KEY,
-          mobileRedirectUrl: mobileRedirectUrl,
+          mobile_redirect_url: mobileRedirectUrl,
         },
       );
 
