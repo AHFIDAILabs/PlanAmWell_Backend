@@ -64,24 +64,26 @@ function getMissingCheckoutFields(user: any): string[] {
 /**
  * ✅ HELPER: Check if user exists in Partner DB and get their ID
  */
-async function getPartnerUserId(userId: string): Promise<string | null> {
+async function getPartnerUserId(email: string): Promise<string | null> {
   try {
     const response = await axios.get(
-      `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts-with-cart/search?userId=${encodeURIComponent(userId)}`,
+      `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts-with-cart/search?userId=${encodeURIComponent(email)}`,
     );
-    if (response.data?.user?.id) {
-      console.log(
-        `[getPartnerUserId] Found partner user ID for ${userId}: ${response.data.user.id}`,
-      );
-      return response.data.user.id;
+
+    // ✅ Handle all possible response shapes
+    const id =
+      response.data?.userId ||
+      response.data?.user_id ||
+      response.data?.user?.id;
+
+    if (id) {
+      console.log(`[getPartnerUserId] Found partner ID for ${email}:`, id);
+      return id;
     }
     return null;
   } catch (err: any) {
     if (err.response?.status === 404) return null;
-    console.warn(
-      "[getPartnerUserId] Error checking partner user:",
-      err.message,
-    );
+    console.warn("[getPartnerUserId] Error:", err.response?.data || err.message);
     return null;
   }
 }
@@ -430,7 +432,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   }
   /** ------------------ 4. Sync User + Cart with Partner ------------------ */
   let partnerUserId: string | null = user.partnerId ?? null;
-
+  
   if (!partnerUserId) {
     try {
       const partnerRes = await axios.post(
