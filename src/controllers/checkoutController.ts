@@ -452,10 +452,15 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         "[Checkout] accounts-with-cart response:",
         JSON.stringify(partnerRes.data, null, 2),
       );
-      partnerUserId = partnerRes.data?.user?.id;
-      if (!partnerUserId) {
-        throw new Error("CRITICAL: Partner userId missing after sync");
-      }
+     partnerUserId =
+  partnerRes.data?.userId ||      // camelCase variant
+  partnerRes.data?.user_id ||     // ← actual response shape
+  partnerRes.data?.user?.id;      // nested variant (keep as fallback)
+
+if (!partnerUserId) {
+  console.error("[Checkout] Could not extract partnerId — full response:", partnerRes.data);
+  throw new Error("CRITICAL: Partner userId missing after sync");
+}
       user.partnerId = partnerUserId || undefined;
       await user.save();
       console.log("[Checkout] Partner user created:", partnerUserId);
