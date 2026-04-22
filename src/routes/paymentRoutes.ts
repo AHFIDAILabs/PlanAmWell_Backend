@@ -13,7 +13,4 @@ paymentRouter.post("/verify", guestAuth, verifyPayment);
 paymentRouter.get("/redirect", guestAuth, paymentRedirect);
 paymentRouter.get("/by-order/:orderId", guestAuth, getPaymentByOrder);
 
-
-
-
 export default paymentRouter;
