@@ -31,14 +31,15 @@ export const getOrder = asyncHandler(async (req: Request, res: Response) => {
     throw new Error("Order not found");
   }
 
-  const sessionId = req.user?.sessionId || req.query.sessionId;
-  const userId = req.user?.userId;
+  // ✅ Use req.auth instead of req.user
+  const sessionId = req.auth?.sessionId;
+  const userId = req.auth?.id;  // 
 
   const isOwner =
     (userId && order.userId?.toString() === userId.toString()) ||
     (sessionId && order.sessionId === sessionId);
 
-  if (!isOwner && req.user?.role !== "Admin") {
+  if (!isOwner && req.auth?.role !== "Admin") {  // ← was req.user?.role
     res.status(403);
     throw new Error("Forbidden - Not your order");
   }
