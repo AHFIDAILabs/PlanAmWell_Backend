@@ -90,24 +90,23 @@ export const initiatePayment = asyncHandler(
       });
     }
 
-    /** ------------------ 5. Idempotency check ------------------ */
-    const existingPayment = await Payment.findOne({
-      orderId: order.id,
-      status: "pending",
-    });
+ /** ------------------ 5. Idempotency check ------------------ */
+const existingPayment = await Payment.findOne({
+  orderId: order.id,
+});  
 
-    if (existingPayment) {
-      return res.status(200).json({
-        success: true,
-        message: "Payment already initiated",
-        data: {
-          checkoutUrl: existingPayment.checkoutUrl,
-          paymentReference: existingPayment.paymentReference,
-          transactionId: existingPayment.transactionId,
-          status: existingPayment.status,
-        },
-      });
-    }
+if (existingPayment) {
+  return res.status(200).json({
+    success: true,
+    message: "Payment already initiated",
+    data: {
+      checkoutUrl: existingPayment.checkoutUrl,
+      paymentReference: existingPayment.paymentReference,
+      transactionId: existingPayment.transactionId,
+      status: existingPayment.status,
+    },
+  });
+}
 
     /** ------------------ 6. Derive secure server-side values ------------------ */
     const amount = order.total;
