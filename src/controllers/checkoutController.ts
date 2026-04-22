@@ -47,11 +47,6 @@ function trimField(
   return String(value).trim().slice(0, maxLen);
 }
 
-// ── Helper: same fields required as appointment booking ──────────────────────
-/**
- * Returns labels for whichever of phone / gender / dateOfBirth are missing.
- * Mirrors getMissingAppointmentFields in appointmentController exactly.
- */
 function getMissingCheckoutFields(user: any): string[] {
   const required: { field: string; label: string }[] = [
     { field: "phone", label: "Phone number" },
@@ -62,20 +57,15 @@ function getMissingCheckoutFields(user: any): string[] {
 }
 
 /**
- * ✅ HELPER: Check if user exists in Partner DB and get their ID
+ * Look up a user in the partner DB by email.
+ * Uses GET /v1/PlanAmWell/user?email= which returns { id, email, ... }
  */
 async function getPartnerUserId(email: string): Promise<string | null> {
   try {
     const response = await axios.get(
-      `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts-with-cart/search?userId=${encodeURIComponent(email)}`,
+      `${PARTNER_API_URL}${PARTNER_PREFIX}/user?email=${encodeURIComponent(email)}`,
     );
-
-    // ✅ Handle all possible response shapes
-    const id =
-      response.data?.userId ||
-      response.data?.user_id ||
-      response.data?.user?.id;
-
+    const id = response.data?.id;
     if (id) {
       console.log(`[getPartnerUserId] Found partner ID for ${email}:`, id);
       return id;
@@ -88,80 +78,9 @@ async function getPartnerUserId(email: string): Promise<string | null> {
   }
 }
 
-/**
- * ✅ HELPER: Sync or create user in Partner DB
- */
-async function syncUserWithPartner(user: any, password: string) {
-  if (user.partnerId) return user.partnerId;
-
-  // Always check if they exist first before trying to create
-  if (user.email) {
-    const existingPartnerId = await getPartnerUserId(user.email);
-    if (existingPartnerId) {
-      user.partnerId = existingPartnerId;
-      await user.save();
-      return existingPartnerId;
-    }
-  }
-
-  try {
-    const partnerRes = await axios.post(
-      `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts`,
-      {
-        name: user.name,
-        email: user.email || `guest-${uuidv4()}@planamwell.local`,
-        phone: user.phone,
-        password: password,
-        confirmPassword: password,
-        gender: user.gender || "male",
-        dateOfBirth: user.dateOfBirth,
-        homeAddress: user.homeAddress,
-        state: user.state,
-        lga: user.lga,
-        role: "CLIENT",
-        origin: "PlanAmWell",
-        isGuest: user.isAnonymous || false,
-      },
-    );
-    user.partnerId = partnerRes.data.user.id;
-    await user.save();
-    return user.partnerId;
-  } catch (err: any) {
-    const msg = err.response?.data?.message || "";
-    const status = err.response?.status;
-
-    // Handle ALL "already exists" cases — partner returns 500 OR 409
-    if (
-      status === 409 ||
-      status === 500 ||
-      msg.includes("already exists") ||
-      msg.includes("duplicate")
-    ) {
-      if (user.email) {
-        const existingId = await getPartnerUserId(user.email);
-        if (existingId) {
-          user.partnerId = existingId;
-          await user.save();
-          console.log(
-            "[syncUserWithPartner] Found existing partner user:",
-            existingId,
-          );
-          return existingId;
-        }
-      }
-    }
-    console.error(
-      "[syncUserWithPartner] Failed:",
-      err.response?.data || err.message,
-    );
-    throw new Error("Failed to sync user with partner system");
-  }
-}
-
 /** ------------------ CHECKOUT ------------------ */
 export const checkout = asyncHandler(async (req: Request, res: Response) => {
   let authUserId = req.auth?.id;
-  // Only accept sessionId from the auth token — never from the request body to prevent cart hijacking
   let sessionGuestId = req.auth?.sessionId;
 
   const {
@@ -181,44 +100,29 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
   // Validate email format if provided
   if (email && !EMAIL_REGEX.test(String(email).trim())) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Invalid email address." });
+    return res.status(400).json({ success: false, message: "Invalid email address." });
   }
 
   // Validate gender if provided
-  const normalizedGender = gender
-    ? String(gender).toLowerCase().trim()
-    : undefined;
+  const normalizedGender = gender ? String(gender).toLowerCase().trim() : undefined;
   if (normalizedGender && !VALID_GENDERS.includes(normalizedGender)) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Invalid gender value." });
+    return res.status(400).json({ success: false, message: "Invalid gender value." });
   }
 
-  // Validate dateOfBirth format if provided (YYYY-MM-DD or ISO string)
+  // Validate dateOfBirth format if provided
   if (dateOfBirth && isNaN(Date.parse(String(dateOfBirth)))) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Invalid date of birth." });
+    return res.status(400).json({ success: false, message: "Invalid date of birth." });
   }
 
-  // Enforce field length limits on free-text inputs
+  // Enforce field length limits
   const textFields = [name, phone, homeAddress, city, state, lga];
-  if (
-    textFields.some(
-      (f) => f !== undefined && String(f).length > MAX_FIELD_LENGTH,
-    )
-  ) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        message: "One or more fields exceed the maximum allowed length.",
-      });
+  if (textFields.some((f) => f !== undefined && String(f).length > MAX_FIELD_LENGTH)) {
+    return res.status(400).json({
+      success: false,
+      message: "One or more fields exceed the maximum allowed length.",
+    });
   }
 
-  // Use a cryptographically secure random password when none is provided or it exceeds max length
   const safePassword =
     password &&
     typeof password === "string" &&
@@ -253,41 +157,16 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     }
 
     let needsUpdate = false;
-    if (name && name !== user.name) {
-      user.name = trimField(name);
-      needsUpdate = true;
-    }
-    if (phone && phone !== user.phone) {
-      user.phone = trimField(phone);
-      needsUpdate = true;
-    }
-    if (homeAddress && homeAddress !== user.homeAddress) {
-      user.homeAddress = trimField(homeAddress);
-      needsUpdate = true;
-    }
-    if (city && city !== user.city) {
-      user.city = trimField(city);
-      needsUpdate = true;
-    }
-    if (state && state !== user.state) {
-      user.state = trimField(state);
-      needsUpdate = true;
-    }
-    if (lga && lga !== user.lga) {
-      user.lga = trimField(lga);
-      needsUpdate = true;
-    }
-    if (normalizedGender && normalizedGender !== user.gender) {
-      user.gender = normalizedGender;
-      needsUpdate = true;
-    }
-    if (dateOfBirth && dateOfBirth !== user.dateOfBirth) {
-      user.dateOfBirth = dateOfBirth;
-      needsUpdate = true;
-    }
+    if (name && name !== user.name) { user.name = trimField(name); needsUpdate = true; }
+    if (phone && phone !== user.phone) { user.phone = trimField(phone); needsUpdate = true; }
+    if (homeAddress && homeAddress !== user.homeAddress) { user.homeAddress = trimField(homeAddress); needsUpdate = true; }
+    if (city && city !== user.city) { user.city = trimField(city); needsUpdate = true; }
+    if (state && state !== user.state) { user.state = trimField(state); needsUpdate = true; }
+    if (lga && lga !== user.lga) { user.lga = trimField(lga); needsUpdate = true; }
+    if (normalizedGender && normalizedGender !== user.gender) { user.gender = normalizedGender; needsUpdate = true; }
+    if (dateOfBirth && dateOfBirth !== user.dateOfBirth) { user.dateOfBirth = dateOfBirth; needsUpdate = true; }
 
     const currentPrefs = (user.preferences || {}) as Record<string, any>;
-    // Only allow whitelisted preference keys to prevent mass assignment
     user.preferences = {
       ...currentPrefs,
       homeAddress: trimField(homeAddress),
@@ -299,9 +178,9 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     };
     needsUpdate = true;
     if (needsUpdate) await user.save();
+
   } else {
-    if (!name || !phone)
-      throw new Error("Guest checkout requires name & phone");
+    if (!name || !phone) throw new Error("Guest checkout requires name & phone");
 
     const existingUser = email
       ? await User.findOne({ email: email.toLowerCase().trim() })
@@ -329,9 +208,6 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       user.isAnonymous = false;
       await user.save();
     } else {
-      let existingPartnerId: string | null = null;
-      // if (email) existingPartnerId = await getPartnerUserId(email);
-
       user = await User.create({
         name: trimField(name),
         phone: trimField(phone),
@@ -354,7 +230,6 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         isAnonymous: false,
         roles: ["User"],
         verified: false,
-        partnerId: existingPartnerId || undefined,
       });
     }
 
@@ -364,19 +239,12 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   /** ------------------ 2 & 3. Fetch Cart + Migrate sessionId → userId ------------------ */
   let cart;
   cart = await Cart.findOne({ userId: new Types.ObjectId(authUserId) });
-  if (!cart && sessionGuestId)
-    cart = await Cart.findOne({ sessionId: sessionGuestId });
-  if (!cart && req.auth?.sessionId)
-    cart = await Cart.findOne({ sessionId: req.auth.sessionId });
+  if (!cart && sessionGuestId) cart = await Cart.findOne({ sessionId: sessionGuestId });
+  if (!cart && req.auth?.sessionId) cart = await Cart.findOne({ sessionId: req.auth.sessionId });
 
-  if (!cart || cart.items.length === 0)
-    throw new Error("Cart is empty or not found");
+  if (!cart || cart.items.length === 0) throw new Error("Cart is empty or not found");
 
-  // Log cart drugIds to confirm they are UUIDs not ObjectIds
-  console.log(
-    "[Checkout] Cart drugIds:",
-    cart.items.map((i) => i.drugId),
-  );
+  console.log("[Checkout] Cart drugIds:", cart.items.map((i) => i.drugId));
 
   if (cart.sessionId && !cart.userId) {
     try {
@@ -390,49 +258,36 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       );
       if (migratedCart) {
         cart = migratedCart;
-        console.log(
-          `[Checkout] Cart migrated sessionId → userId: ${authUserId}`,
-        );
+        console.log(`[Checkout] Cart migrated sessionId → userId: ${authUserId}`);
       }
     } catch (migrateErr: any) {
       if (migrateErr.code === 11000) {
-        const existingUserCart = await Cart.findOne({
-          userId: new Types.ObjectId(authUserId!),
-        });
+        const existingUserCart = await Cart.findOne({ userId: new Types.ObjectId(authUserId!) });
         if (existingUserCart) {
           for (const sessionItem of cart.items) {
-            const idx = existingUserCart.items.findIndex(
-              (i) => i.drugId === sessionItem.drugId,
-            );
+            const idx = existingUserCart.items.findIndex((i) => i.drugId === sessionItem.drugId);
             if (idx > -1) {
               existingUserCart.items[idx].quantity += sessionItem.quantity;
             } else {
               existingUserCart.items.push(sessionItem);
             }
           }
-          existingUserCart.totalItems = existingUserCart.items.reduce(
-            (s, i) => s + i.quantity,
-            0,
-          );
-          existingUserCart.totalPrice = existingUserCart.items.reduce(
-            (s, i) => s + (i.price || 0) * i.quantity,
-            0,
-          );
+          existingUserCart.totalItems = existingUserCart.items.reduce((s, i) => s + i.quantity, 0);
+          existingUserCart.totalPrice = existingUserCart.items.reduce((s, i) => s + (i.price || 0) * i.quantity, 0);
           await existingUserCart.save();
           await Cart.deleteOne({ _id: cart._id });
           cart = existingUserCart;
-          console.log(
-            `[Checkout] Merged session cart into existing userId cart`,
-          );
+          console.log(`[Checkout] Merged session cart into existing userId cart`);
         }
       } else {
         console.error("[Checkout] Cart migration failed:", migrateErr.message);
       }
     }
   }
+
   /** ------------------ 4. Sync User + Cart with Partner ------------------ */
   let partnerUserId: string | null = user.partnerId ?? null;
-  
+
   if (!partnerUserId) {
     try {
       const partnerRes = await axios.post(
@@ -448,91 +303,47 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
           },
         },
       );
-      console.log(
-        "[Checkout] accounts-with-cart response:",
-        JSON.stringify(partnerRes.data, null, 2),
-      );
-     partnerUserId =
-  partnerRes.data?.userId ||      // camelCase variant
-  partnerRes.data?.user_id ||     // ← actual response shape
-  partnerRes.data?.user?.id;      // nested variant (keep as fallback)
 
-if (!partnerUserId) {
-  console.error("[Checkout] Could not extract partnerId — full response:", partnerRes.data);
-  throw new Error("CRITICAL: Partner userId missing after sync");
-}
-      user.partnerId = partnerUserId || undefined;
+      console.log("[Checkout] accounts-with-cart response:", JSON.stringify(partnerRes.data, null, 2));
+
+      // ✅ Partner returns { user_id, message }
+      partnerUserId =
+        partnerRes.data?.user_id ||
+        partnerRes.data?.userId ||
+        partnerRes.data?.user?.id;
+
+      if (!partnerUserId) {
+        console.error("[Checkout] Could not extract partnerId — full response:", partnerRes.data);
+        throw new Error("CRITICAL: Partner userId missing after sync");
+      }
+
+      // ✅ Save immediately before any further logic that could throw
+      user.partnerId = partnerUserId;
       await user.save();
-      console.log("[Checkout] Partner user created:", partnerUserId);
+      console.log("[Checkout] Partner user created and saved:", partnerUserId);
+
     } catch (err: any) {
-      const msg = err.response?.data?.message || "";
+      const isAxiosError = !!err.response;
+      const msg = isAxiosError ? (err.response?.data?.message || "") : err.message;
       const status = err.response?.status;
+
       console.error(
         "[Checkout] accounts-with-cart failed:",
-        err.response?.data,
+        isAxiosError ? err.response?.data : err.message,
       );
 
       if (msg.includes("already exists") || status === 409 || status === 500) {
-        // User exists in partner — try /accounts to get their ID
-        try {
-          const accountRes = await axios.post(
-            `${PARTNER_API_URL}${PARTNER_PREFIX}/accounts`,
-            {
-              name: user.name,
-              email: user.email,
-              phone: user.phone,
-              password: safePassword,
-              confirmPassword: safePassword,
-              gender: user.gender || "male",
-              dateOfBirth: user.dateOfBirth,
-              homeAddress: user.homeAddress,
-              state: user.state,
-              lga: user.lga,
-              role: "CLIENT",
-              origin: "PlanAmWell",
-              isGuest: false,
-            },
-          );
-          partnerUserId =
-            accountRes.data?.user?.id ||
-            accountRes.data?.userId ||
-            accountRes.data?.user_id;
-          user.partnerId = partnerUserId || undefined;
-          await user.save();
-          console.log(
-            "[Checkout] Got partner user from /accounts:",
-            partnerUserId,
-          );
-        } catch (accountErr: any) {
-          const accountErrMsg = accountErr.response?.data?.message || "";
-          console.log(
-            "[Checkout] /accounts full response:",
-            JSON.stringify(accountErr.response?.data, null, 2),
-          );
-
-          // Check if they buried the ID anywhere in the error body
-          const buriedId =
-            accountErr.response?.data?.userId ||
-            accountErr.response?.data?.user?.id ||
-            accountErr.response?.data?.existingUserId;
-
-          if (buriedId) {
-            partnerUserId = buriedId;
-            user.partnerId = buriedId;
+        // ✅ User exists in partner — look them up via /user?email=
+        if (user.email) {
+          const recoveredId = await getPartnerUserId(user.email);
+          if (recoveredId) {
+            partnerUserId = recoveredId;
+            user.partnerId = recoveredId;
             await user.save();
-            console.log(
-              "[Checkout] Recovered partner ID from error body:",
-              buriedId,
-            );
-          } else if (accountErrMsg.includes("already exists")) {
-            // ✅ Partner has this user but won't tell us their ID.
-            // We cannot create the order without a partnerUserId.
-            // Best we can do: fail with a clear message and log it for manual DB fix.
-            console.error(
-              `[Checkout] MANUAL FIX NEEDED: user ${user.email} exists in partner DB ` +
-                `but no ID returned. Ask partner for GET /accounts/search?email= endpoint. ` +
-                `Once resolved, set user.partnerId in your DB.`,
-            );
+            console.log("[Checkout] Recovered partner ID via /user search:", recoveredId);
+            // ✅ Fall through to order creation
+          } else {
+            console.error(`[Checkout] MANUAL FIX NEEDED: ${user.email} not found via /user search`);
             return res.status(503).json({
               success: false,
               code: "PARTNER_SYNC_FAILED",
@@ -540,73 +351,78 @@ if (!partnerUserId) {
                 "We couldn't link your account to complete the order. " +
                 "Please contact support — your cart has been saved.",
             });
-            // ↑ Notice: we return early WITHOUT clearing the cart,
-            //   so the user keeps their items and can retry later.
-          } else {
-            throw new Error("Failed to sync user with partner system");
           }
+        } else {
+          return res.status(503).json({
+            success: false,
+            code: "PARTNER_SYNC_FAILED",
+            message: "We couldn't link your account. Please contact support.",
+          });
         }
       } else {
-        throw new Error("Failed to sync user with partner system");
+        // Non-"already exists" axios error or unknown local error
+        return res.status(502).json({
+          success: false,
+          code: "PARTNER_SYNC_FAILED",
+          message: "Failed to sync with partner system. Please try again.",
+        });
       }
     }
   }
 
- /** ------------------ 5. Save Local Order ------------------ */
-const localOrder = await Order.create({
-  orderNumber: uuidv4(),
-  userId: authUserId,
-  partnerUserId: partnerUserId, // save this for confirmOrder step
-  isThirdPartyOrder: true,
-  platform: "PlanAmWell",
-  items: cart.items.map((i) => ({
-    productId: String(i.drugId),
-    name: i.drugName || "",
-    qty: i.quantity,
-    price: i.price || 0,
-    dosage: i.dosage || "",
-    specialInstructions: i.specialInstructions || "",
-  })),
-  subtotal: cart.totalPrice,
-  total: cart.totalPrice,
-  paymentStatus: "pending",
-  shippingAddress: {
-    name: user.name,
-    phone: user.phone,
-    addressLine: user.homeAddress || (user.preferences as any)?.address,
-    city: user.city || (user.preferences as any)?.city,
-    state: user.state || (user.preferences as any)?.state,
-  },
+  /** ------------------ 5. Save Local Order ------------------ */
+  const localOrder = await Order.create({
+    orderNumber: uuidv4(),
+    userId: authUserId,
+    partnerUserId: partnerUserId,
+    isThirdPartyOrder: true,
+    platform: "PlanAmWell",
+    items: cart.items.map((i) => ({
+      productId: String(i.drugId),
+      name: i.drugName || "",
+      qty: i.quantity,
+      price: i.price || 0,
+      dosage: i.dosage || "",
+      specialInstructions: i.specialInstructions || "",
+    })),
+    subtotal: cart.totalPrice,
+    total: cart.totalPrice,
+    paymentStatus: "pending",
+    shippingAddress: {
+      name: user.name,
+      phone: user.phone,
+      addressLine: user.homeAddress || (user.preferences as any)?.address,
+      city: user.city || (user.preferences as any)?.city,
+      state: user.state || (user.preferences as any)?.state,
+    },
+  });
+
+  /** ------------------ 6. Mark Cart checked_out ------------------ */
+  await Cart.findByIdAndUpdate(cart._id, {
+    status: "checked_out",
+    orderId: localOrder._id,
+  });
+
+  /** ------------------ 7. Respond ------------------ */
+  res.status(201).json({
+    success: true,
+    message: "Checkout successful",
+    localOrder,
+    partnerUserId,
+    user: {
+      id: user._id,
+      isAnonymous: user.isAnonymous,
+      partnerId: user.partnerId,
+    },
+  });
 });
 
-/** ------------------ 6. Mark Cart checked_out ------------------ */
-await Cart.findByIdAndUpdate(cart._id, {
-  status: "checked_out",
-  orderId: localOrder._id,
-});
-
-/** ------------------ 7. Respond ------------------ */
-res.status(201).json({
-  success: true,
-  message: "Checkout successful",
-  localOrder,
-  partnerUserId, // frontend needs this for confirm step
-  user: {
-    id: user._id,
-    isAnonymous: user.isAnonymous,
-    partnerId: user.partnerId,
-  },
-});
-
-});
-
-/** ------------------ CONFIRM ORDER (creates partner order + initiates payment) ------------------ */
+/** ------------------ CONFIRM ORDER ------------------ */
 export const confirmOrder = asyncHandler(async (req: Request, res: Response) => {
   const { orderId } = req.body;
   const authUserId = req.auth?.id;
 
-    console.log("[ConfirmOrder] START — orderId:", orderId, "authUserId:", authUserId);
-
+  console.log("[ConfirmOrder] START — orderId:", orderId, "authUserId:", authUserId);
 
   if (!orderId) {
     return res.status(400).json({ success: false, message: "orderId is required" });
@@ -617,32 +433,27 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
     return res.status(404).json({ success: false, message: "Order not found" });
   }
 
-    console.log("[ConfirmOrder] order.partnerOrderId:", order.partnerOrderId);
-
+  console.log("[ConfirmOrder] order.partnerOrderId:", order.partnerOrderId);
 
   if (order.userId?.toString() !== authUserId) {
     return res.status(403).json({ success: false, message: "Forbidden" });
   }
 
-if (order.partnerOrderId) {
-  const existingPayment = await Payment.findOne({ 
-    orderId: order._id.toString(),
-  });
-  
-  console.log("[ConfirmOrder] Idempotency — payment found:", !!existingPayment, "checkoutUrl:", existingPayment?.checkoutUrl);
+  if (order.partnerOrderId) {
+    const existingPayment = await Payment.findOne({ orderId: order._id.toString() });
+    console.log("[ConfirmOrder] Idempotency — payment found:", !!existingPayment, "checkoutUrl:", existingPayment?.checkoutUrl);
 
-  // If no payment found, proceed to create one instead of returning null checkoutUrl
-  if (!existingPayment) {
-    console.warn("[ConfirmOrder] Partner order exists but no payment record — will re-initiate payment");
-    // fall through to payment initiation below by NOT returning here
-  } else {
-    return res.status(200).json({ 
-      success: true, 
-      checkoutUrl: existingPayment.checkoutUrl,
-      orderId: order._id,
-    });
+    if (!existingPayment) {
+      console.warn("[ConfirmOrder] Partner order exists but no payment record — will re-initiate payment");
+      // fall through
+    } else {
+      return res.status(200).json({
+        success: true,
+        checkoutUrl: existingPayment.checkoutUrl,
+        orderId: order._id,
+      });
+    }
   }
-}
 
   const user = await User.findById(authUserId);
   if (!user || !user.partnerId) {
@@ -671,11 +482,10 @@ if (order.partnerOrderId) {
     return res.status(502).json({ success: false, message: "Failed to create partner order" });
   }
 
-  // Save partner order ID to local order
   order.partnerOrderId = partnerOrder?.orderId;
   await order.save();
 
- /** --- Initiate Payment --- */
+  /** --- Initiate Payment --- */
   const PARTNER_API_KEY = process.env.PARTNER_API_KEY;
   const partnerReferenceCode = `PAW-${order.orderNumber}`;
   const mobileRedirectUrl = `${process.env.APP_URL}/api/v1/payment/redirect?orderId=${order._id}`;
@@ -705,25 +515,33 @@ if (order.partnerOrderId) {
       throw new Error("No checkout URL returned from partner");
     }
 
-    await Payment.create({
-      orderId: order._id.toString(),
-      userId: user._id.toString(),
-      paymentMethod: "card",
-      partnerReferenceCode,
-      paymentReference,
-      transactionId,
-      checkoutUrl,
-      amount: order.total,
-      status: "pending",
-    });
+    // ✅ Guard against duplicate key crash on retry
+    const existingPayment = await Payment.findOne({ orderId: order._id.toString() });
+    if (!existingPayment) {
+      try {
+        await Payment.create({
+          orderId: order._id.toString(),
+          userId: user._id.toString(),
+          paymentMethod: "card",
+          partnerReferenceCode,
+          paymentReference,
+          transactionId,
+          checkoutUrl,
+          amount: order.total,
+          status: "pending",
+        });
+        console.log("[ConfirmOrder] Payment record saved ✅");
+      } catch (saveErr: any) {
+        if (saveErr.code === 11000) {
+          console.warn("[ConfirmOrder] Duplicate payment record — already exists, continuing");
+        } else {
+          throw saveErr;
+        }
+      }
+    }
 
-    const responsePayload = {
-  success: true,
-  checkoutUrl,
-  orderId: order._id,
-};
-console.log("[ConfirmOrder] Sending response:", JSON.stringify(responsePayload));
-    // ✅ Moved inside try — checkoutUrl guaranteed defined here
+    console.log("[ConfirmOrder] Sending response:", JSON.stringify({ success: true, checkoutUrl, orderId: order._id }));
+
     return res.status(200).json({
       success: true,
       checkoutUrl,
