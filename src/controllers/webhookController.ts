@@ -111,34 +111,33 @@ export const handleDeliveryWebhook = asyncHandler(
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
+    console.log("[DeliveryWebhook] Received:", JSON.stringify(req.body, null, 2));
+
     const { orderId, status } = req.body;
 
     if (!orderId || !status) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid delivery webhook payload",
-      });
+      return res.status(400).json({ success: false, message: "Invalid delivery webhook payload" });
     }
 
     const normalizedStatus = String(status).toLowerCase();
     if (!VALID_DELIVERY_STATUSES.includes(normalizedStatus)) {
-      console.warn(`[DeliveryWebhook] Invalid status value: ${status}`);
+      console.warn(`[DeliveryWebhook] Invalid status: ${status}`);
       return res.status(400).json({ success: false, message: "Invalid status value" });
     }
 
-    // ⚠️ orderId here is partner order ID or orderCode
-    const order = await Order.findOne({ partnerOrderId: orderId });
+    // ✅ Try partnerOrderCode first, then partnerOrderId
+    let order = await Order.findOne({ partnerOrderCode: orderId });
+    if (!order) order = await Order.findOne({ partnerOrderId: orderId });
 
     if (!order) {
-      console.warn(
-        `[DeliveryWebhook] Order not found for partnerOrderId=${orderId}`
-      );
-      return res.status(200).json({ received: true });
+      console.warn(`[DeliveryWebhook] Order not found for orderId=${orderId}`);
+      return res.status(200).json({ received: true }); // ACK anyway
     }
 
     order.deliveryStatus = normalizedStatus as any;
     await order.save();
 
+    console.log(`[DeliveryWebhook] Order ${order._id} delivery updated to: ${normalizedStatus}`);
     return res.status(200).json({ received: true });
   }
 );

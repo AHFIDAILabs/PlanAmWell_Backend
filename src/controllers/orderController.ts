@@ -276,22 +276,34 @@ export const refreshDeliveryStatus = asyncHandler(
   async (req: Request, res: Response) => {
     const order = await Order.findById(req.params.id);
 
-    if (!order || !order.partnerOrderId) {
+    if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    const response = await axios.get(
-      `${API_BASE}/v1/PlanAmWell/delivery/${order.partnerOrderId}`
-    );
-
-    // Validate status from partner before storing
-    const incomingStatus = String(response.data.status).toLowerCase();
-    if (!VALID_DELIVERY_STATUSES.includes(incomingStatus)) {
-      return res.status(502).json({ message: "Invalid delivery status from partner API" });
+    if (!order.partnerOrderCode) {
+      return res.status(404).json({ message: "Partner order code not found" });
     }
-    order.deliveryStatus = incomingStatus as any;
-    await order.save();
 
-    res.json({ success: true, data: order.deliveryStatus });
+    try {
+      const response = await axios.get(
+        `${API_BASE}/v1/PlanAmWell/delivery/${order.partnerOrderCode}`
+      );
+
+      console.log("[refreshDeliveryStatus] Partner response:", JSON.stringify(response.data, null, 2));
+
+      const incomingStatus = String(
+        response.data.status || response.data.deliveryStatus || "pending"
+      ).toLowerCase();
+
+      if (VALID_DELIVERY_STATUSES.includes(incomingStatus)) {
+        order.deliveryStatus = incomingStatus as any;
+        await order.save();
+      }
+
+      res.json({ success: true, deliveryStatus: order.deliveryStatus, data: response.data });
+    } catch (err: any) {
+      console.error("[refreshDeliveryStatus] Failed:", err.response?.data || err.message);
+      return res.status(502).json({ message: "Could not fetch delivery status from partner" });
+    }
   }
 );

@@ -17,8 +17,9 @@ export interface IOrder extends Document {
     partnerId?: Types.ObjectId; // optional, for API
   orderNumber: string;
   sessionId?: string;
-  userId?: Types.ObjectId;
+  userId?: string;
   partnerOrderId?: string;         // partner order mapping
+  partnerOrderCode?: string; 
   isThirdPartyOrder?: boolean;     // true if created via partner API
   platform?: string;               // e.g., "PlanAmWell" or "mymedicine"
   items: IOrderItem[];
@@ -56,10 +57,11 @@ const OrderSchema = new Schema<IOrder>(
   {
     orderNumber: { type: String, required: true, unique: true, default: uuidv4 },
     sessionId: String,
-    userId: { type: Schema.Types.ObjectId, ref: "User" },
+    userId: { type: String, ref: "User" },
     partnerOrderId: { type: String },         // partner system order ID
     isThirdPartyOrder: { type: Boolean, default: false },
     platform: { type: String, default: "PlanAmWell" },
+    partnerOrderCode: { type: String }, 
     items: { type: [OrderItemSchema], required: true },
     subtotal: { type: Number, required: true },
     shippingFee: { type: Number, default: 0 },

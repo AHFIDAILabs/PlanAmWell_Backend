@@ -483,6 +483,8 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
   }
 
   order.partnerOrderId = partnerOrder?.orderId;
+  order.partnerOrderCode = partnerOrder?.orderCode; 
+
   await order.save();
 
   /** --- Initiate Payment --- */
