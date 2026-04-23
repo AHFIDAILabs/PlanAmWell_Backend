@@ -5,6 +5,7 @@ import {
   createOrder,
   updateOrder,
   deleteOrder,
+  refreshDeliveryStatus
 } from "../controllers/orderController";
 import { verifyToken, authorize } from "../middleware/auth";
 import { User } from "../models/user";
@@ -30,6 +31,7 @@ orderRouter.get("/:id", verifyToken, authorize("Admin", "User"), getOrder);
  * USER/SESSION OWNER - update their own order if not paid
  */
 orderRouter.put("/:id",  updateOrder);
+orderRouter.get("/:id/delivery-status", refreshDeliveryStatus);
 
 /**
  * ADMIN ONLY - delete order
