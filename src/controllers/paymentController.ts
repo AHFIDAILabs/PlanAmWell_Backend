@@ -251,19 +251,21 @@ export const verifyPayment = asyncHandler(async (req: Request, res: Response) =>
     const verifiedData = response.data;
     console.log("[verifyPayment] Status from partner:", verifiedData.status);
 
-    const isSuccess = ["success", "paid", "completed"].includes(
+    const isSuccess = ["success", "paid", "completed", "successful"].includes(
       verifiedData.status?.toLowerCase()
     );
 
     console.log("[verifyPayment] isSuccess:", isSuccess);
 
     // Update our payment record status
-    const updatedPayment = await Payment.findOneAndUpdate(
-      { paymentReference },
-      { status: verifiedData.status },
-      { new: true },
-    );
+ const normalizedStatus = isSuccess ? "success" : 
+  ["failed", "cancelled"].includes(verifiedData.status?.toLowerCase()) ? "failed" : "pending";
 
+const updatedPayment = await Payment.findOneAndUpdate(
+  { paymentReference },
+  { status: normalizedStatus }, // ← normalized, not raw partner status
+  { new: true },
+);
     console.log("[verifyPayment] updatedPayment:", updatedPayment ? updatedPayment._id : "NOT FOUND");
 
     if (isSuccess && updatedPayment) {
