@@ -181,6 +181,47 @@ cron.schedule("*\/30 * * * *", async () => {
 });
 
 
+// ── JOB: Remind users of pending payments every 4 hours ──────────────────────
+cron.schedule("0 */4 * * *", async () => {
+  try {
+    const { Order } = await import("../models/order");
+    const { NotificationService } = await import("../services/NotificationService");
+
+    // Find orders pending payment for more than 30 minutes but less than 24 hours
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const pendingOrders = await Order.find({
+      paymentStatus: "pending",
+      partnerOrderId: { $exists: true }, // only confirmed orders awaiting payment
+      createdAt: { $lt: thirtyMinutesAgo, $gt: twentyFourHoursAgo },
+    });
+
+    if (pendingOrders.length === 0) return;
+
+    console.log(`💳 [PaymentReminderJob] Found ${pendingOrders.length} pending payment orders`);
+
+    for (const order of pendingOrders) {
+      if (!order.userId) continue;
+      try {
+        await NotificationService.notifyPaymentPending(
+          order.userId.toString(),
+          order._id.toString(),
+          order.orderNumber,
+          order.total,
+        );
+        console.log(`✅ [PaymentReminderJob] Reminded user ${order.userId} for order ${order._id}`);
+      } catch (err) {
+        console.error(`❌ [PaymentReminderJob] Failed for order ${order._id}:`, err);
+      }
+    }
+  } catch (error) {
+    console.error("❌ [PaymentReminderJob] Error:", error);
+  }
+});
+
+
 
 
 console.log("✅ Appointment reminder + auto-expiry cron jobs started");
+

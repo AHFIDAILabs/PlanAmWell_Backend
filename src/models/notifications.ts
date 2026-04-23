@@ -11,7 +11,9 @@ export interface INotification {
   isRead: boolean;
   metadata?: {
     patientId?: Types.ObjectId;
-    type: "record_access_response" | "record_access_request" | "record_accessed"
+    type: "record_access_response" | "record_access_request" | "record_accessed" | "payment_pending"   | "payment_success"
+    | "payment_pending"
+    | "delivery_update";
     approved?: boolean;
     orderId?: string;
     appointmentId?: string;
@@ -56,6 +58,9 @@ const notificationSchema = new Schema<INotification>(
       authorId: String,
       authorUsername: String,
       contentPreview: String,
+      type: String,
+      approved: Boolean,
+      patientId: String,
     },
   },
   { timestamps: true }

@@ -11,7 +11,7 @@ export interface ICartItem {
 }
 
 export interface ICart extends Document {
-  userId?: Types.ObjectId;
+  userId?: string;
   sessionId?: string;
   items: ICartItem[];
   totalItems: number;
@@ -22,7 +22,7 @@ export interface ICart extends Document {
 
 const CartSchema = new Schema<ICart>(
   {
-    userId: { type: Schema.Types.ObjectId, ref: "User" },
+    userId: { type: String },
     sessionId: { type: String },
     items: [
       {

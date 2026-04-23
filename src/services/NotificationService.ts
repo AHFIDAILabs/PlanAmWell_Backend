@@ -16,7 +16,7 @@ export interface NotificationPayload {
 
 export class NotificationService {
   /**
-   * ✅ CORE: Create notification with deduplication
+   *  CORE: Create notification with deduplication
    */
   static async create(payload: NotificationPayload) {
     try {
@@ -84,7 +84,7 @@ export class NotificationService {
   }
 
   /**
-   * ✅ DEDUPLICATION: Check for duplicate notifications within time window
+   *  DEDUPLICATION: Check for duplicate notifications within time window
    */
   private static async isDuplicateNotification(
     userId: string,
@@ -113,7 +113,7 @@ export class NotificationService {
   }
 
   /**
-   * ✅ APPOINTMENT: Notification sent to patient
+   *  APPOINTMENT: Notification sent to patient
    */
   static async notifyAppointmentRequestSent(
     userId: string,
@@ -137,7 +137,7 @@ export class NotificationService {
   }
 
   /**
-   * ✅ APPOINTMENT: Notification sent to doctor
+   *  APPOINTMENT: Notification sent to doctor
    */
   static async notifyDoctorNewRequest(
     doctorId: string,
@@ -165,7 +165,7 @@ export class NotificationService {
   }
 
   /**
-   * ✅ APPOINTMENT: Confirmed by doctor
+   *  APPOINTMENT: Confirmed by doctor
    */
 static async notifyAppointmentConfirmed(
   userId: string,
@@ -455,7 +455,7 @@ static async notifyVideoCallRequest(
 
 
 /**
- * ✅ APPOINTMENT: Ended by doctor (sent to both patient AND doctor)
+ *  APPOINTMENT: Ended by doctor (sent to both patient AND doctor)
  */
 static async notifyAppointmentEnded(
   userId: string,
@@ -481,7 +481,7 @@ static async notifyAppointmentEnded(
 }
  
 /**
- * ✅ APPOINTMENT: Auto-expired (sent to both parties by the cron job)
+ * APPOINTMENT: Auto-expired (sent to both parties by the cron job)
  */
 static async notifyAppointmentExpired(
   userId: string,
@@ -568,4 +568,67 @@ static async notifyAppointmentExpired(
       },
     });
   }
+
+
+static async notifyPaymentSuccessful(
+  userId: string,
+  orderId: string,
+  orderNumber: string,
+  amount: number
+) {
+  return this.create({
+    userId,
+    userType: "User",
+    title: "Payment Successful ✅",
+    message: `Your payment of ₦${amount.toLocaleString()} for order #${orderNumber.slice(0, 8).toUpperCase()} was successful.`,
+    type: "order",
+    metadata: { orderId, orderNumber, type: "payment_success" },
+  });
+}
+
+static async notifyPaymentPending(
+  userId: string,
+  orderId: string,
+  orderNumber: string,
+  amount: number
+) {
+  return this.create({
+    userId,
+    userType: "User",
+    title: "Complete Your Payment 🛒",
+    message: `You have an unpaid order #${orderNumber.slice(0, 8).toUpperCase()} for ₦${amount.toLocaleString()}. Tap to complete payment.`,
+    type: "order",
+    metadata: { orderId, orderNumber, amount, type: "payment_pending" },
+  });
+}
+
+static async notifyDeliveryUpdate(
+  userId: string,
+  orderId: string,
+  orderNumber: string,
+  status: string
+) {
+  const messages: Record<string, string> = {
+    shipped: `Your order #${orderNumber.slice(0, 8).toUpperCase()} has been shipped and is on its way!`,
+    delivered: `Your order #${orderNumber.slice(0, 8).toUpperCase()} has been delivered. Enjoy!`,
+    cancelled: `Your order #${orderNumber.slice(0, 8).toUpperCase()} has been cancelled.`,
+    processing: `Your order #${orderNumber.slice(0, 8).toUpperCase()} is being processed.`,
+  };
+
+  const titles: Record<string, string> = {
+    shipped: "Order Shipped 🚚",
+    delivered: "Order Delivered 🎉",
+    cancelled: "Order Cancelled",
+    processing: "Order Processing ⏳",
+  };
+
+  return this.create({
+    userId,
+    userType: "User",
+    title: titles[status] || "Order Update",
+    message: messages[status] || `Your order status has been updated to ${status}.`,
+    type: "order",
+    metadata: { orderId, orderNumber, status, type: "delivery_update" },
+  });
+}
 }

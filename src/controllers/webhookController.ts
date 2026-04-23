@@ -137,6 +137,21 @@ export const handleDeliveryWebhook = asyncHandler(
     order.deliveryStatus = normalizedStatus as any;
     await order.save();
 
+    // ✅ Notify user of delivery update
+if (order.userId) {
+  try {
+    const { NotificationService } = await import("../services/NotificationService");
+    await NotificationService.notifyDeliveryUpdate(
+      order.userId.toString(),
+      order._id.toString(),
+      order.orderNumber,
+      normalizedStatus,
+    );
+  } catch (err) {
+    console.error("[DeliveryWebhook] Notification failed:", err);
+  }
+}
+
     console.log(`[DeliveryWebhook] Order ${order._id} delivery updated to: ${normalizedStatus}`);
     return res.status(200).json({ received: true });
   }
