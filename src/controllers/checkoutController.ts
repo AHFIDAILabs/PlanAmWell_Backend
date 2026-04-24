@@ -238,6 +238,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
   /** ------------------ 2 & 3. Fetch Cart + Migrate sessionId → userId ------------------ */
   let cart;
+  
 cart = await Cart.findOne({ 
   userId: new Types.ObjectId(authUserId!),
   status: { $in: ["active", null] }
@@ -254,6 +255,22 @@ if (!cart && req.auth?.sessionId) {
     status: { $in: ["active", null] }
   });
 }
+
+// ADD right before: if (!cart || cart.items.length === 0)
+console.log("[Checkout] Cart lookup result:", cart ? `found: ${cart._id} status: ${cart.status} items: ${cart.items.length}` : "NOT FOUND");
+console.log("[Checkout] Looking for userId:", authUserId);
+
+// Also log ALL carts for this user:
+const allCarts = await Cart.find({ userId: authUserId }).lean();
+console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => ({ 
+  id: c._id, 
+  status: c.status, 
+  items: c.items.length,
+  userId: c.userId,
+  totalPrice: c.totalPrice
+})), null, 2));
+
+
   if (!cart || cart.items.length === 0) throw new Error("Cart is empty or not found");
 
   console.log("[Checkout] Cart drugIds:", cart.items.map((i) => i.drugId));
