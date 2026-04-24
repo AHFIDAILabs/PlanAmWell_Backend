@@ -16,6 +16,8 @@ const orderRouter = Router();
  * PUBLIC - anyone can create an order (guest or registered user)
  */
 orderRouter.post("/", createOrder);
+orderRouter.get("/:id/delivery-status", refreshDeliveryStatus);
+
 
 /**
  * ADMIN - get all orders
@@ -31,7 +33,6 @@ orderRouter.get("/:id", verifyToken, authorize("Admin", "User"), getOrder);
  * USER/SESSION OWNER - update their own order if not paid
  */
 orderRouter.put("/:id",  updateOrder);
-orderRouter.get("/:id/delivery-status", refreshDeliveryStatus);
 
 /**
  * ADMIN ONLY - delete order

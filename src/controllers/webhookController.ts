@@ -126,8 +126,9 @@ export const handleDeliveryWebhook = asyncHandler(
     }
 
     // ✅ Try partnerOrderCode first, then partnerOrderId
-    let order = await Order.findOne({ partnerOrderCode: orderId });
-    if (!order) order = await Order.findOne({ partnerOrderId: orderId });
+   let order = await Order.findOne({ partnerOrderCode: orderId });
+if (!order) order = await Order.findOne({ partnerOrderId: orderId });
+if (!order) order = await Order.findById(orderId).catch(() => null);
 
     if (!order) {
       console.warn(`[DeliveryWebhook] Order not found for orderId=${orderId}`);

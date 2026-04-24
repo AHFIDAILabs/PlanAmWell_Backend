@@ -280,14 +280,16 @@ export const refreshDeliveryStatus = asyncHandler(
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (!order.partnerOrderCode) {
-      return res.status(404).json({ message: "Partner order code not found" });
-    }
+ const code = order.partnerOrderCode || order.partnerOrderId;
 
-    try {
-      const response = await axios.get(
-        `${API_BASE}/v1/PlanAmWell/delivery/${order.partnerOrderCode}`
-      );
+if (!code) {
+  return res.status(404).json({ message: "Partner order code not found" });
+}
+
+try {
+  const response = await axios.get(
+    `${API_BASE}/v1/PlanAmWell/delivery/${code}`
+  );
 
       console.log("[refreshDeliveryStatus] Partner response:", JSON.stringify(response.data, null, 2));
 
