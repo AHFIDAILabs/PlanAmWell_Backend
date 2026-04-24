@@ -50,9 +50,11 @@ export const handlePaymentWebhook = asyncHandler(
     }
 
     /** ------------------ 2. Find payment by partner reference ------------------ */
-    const payment = await Payment.findOne({
-      paymentReference: paymentId,
-    });
+   let payment = await Payment.findOne({ paymentReference: paymentId });
+if (!payment) payment = await Payment.findOne({ transactionId: paymentId });
+
+console.log("[Webhook] Payment lookup result:", payment ? payment._id : "NOT FOUND");
+console.log("[Webhook] Searched paymentId:", paymentId);
 
     // Always ACK partner even if we can't find the payment
     if (!payment) {

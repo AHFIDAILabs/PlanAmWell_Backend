@@ -18,6 +18,7 @@ export interface ICart extends Document {
   totalPrice: number;
   partnerCartId?: string;
   isAbandoned?: boolean;
+  status?: string
 }
 
 const CartSchema = new Schema<ICart>(
@@ -39,6 +40,7 @@ const CartSchema = new Schema<ICart>(
     totalPrice: { type: Number, default: 0 },
     partnerCartId: { type: String },
     isAbandoned: { type: Boolean, default: false },
+    status: { type: String, enum: ["active", "checked_out"], default: "active" },
   },
   { timestamps: true },
 );

@@ -238,10 +238,10 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
   /** ------------------ 2 & 3. Fetch Cart + Migrate sessionId → userId ------------------ */
   let cart;
-  cart = await Cart.findOne({ userId: new Types.ObjectId(authUserId) });
-  if (!cart && sessionGuestId) cart = await Cart.findOne({ sessionId: sessionGuestId });
-  if (!cart && req.auth?.sessionId) cart = await Cart.findOne({ sessionId: req.auth.sessionId });
-
+ // REPLACE all three cart lookup lines in checkout():
+cart = await Cart.findOne({ userId: new Types.ObjectId(authUserId), status: { $ne: "checked_out" } });
+if (!cart && sessionGuestId) cart = await Cart.findOne({ sessionId: sessionGuestId, status: { $ne: "checked_out" } });
+if (!cart && req.auth?.sessionId) cart = await Cart.findOne({ sessionId: req.auth.sessionId, status: { $ne: "checked_out" } });
   if (!cart || cart.items.length === 0) throw new Error("Cart is empty or not found");
 
   console.log("[Checkout] Cart drugIds:", cart.items.map((i) => i.drugId));
