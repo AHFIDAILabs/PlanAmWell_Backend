@@ -238,10 +238,22 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
   /** ------------------ 2 & 3. Fetch Cart + Migrate sessionId → userId ------------------ */
   let cart;
- // REPLACE all three cart lookup lines in checkout():
-cart = await Cart.findOne({ userId: new Types.ObjectId(authUserId), status: { $ne: "checked_out" } });
-if (!cart && sessionGuestId) cart = await Cart.findOne({ sessionId: sessionGuestId, status: { $ne: "checked_out" } });
-if (!cart && req.auth?.sessionId) cart = await Cart.findOne({ sessionId: req.auth.sessionId, status: { $ne: "checked_out" } });
+cart = await Cart.findOne({ 
+  userId: new Types.ObjectId(authUserId!),
+  status: { $in: ["active", null] }
+});
+if (!cart && sessionGuestId) {
+  cart = await Cart.findOne({ 
+    sessionId: sessionGuestId,
+    status: { $in: ["active", null] }
+  });
+}
+if (!cart && req.auth?.sessionId) {
+  cart = await Cart.findOne({ 
+    sessionId: req.auth.sessionId,
+    status: { $in: ["active", null] }
+  });
+}
   if (!cart || cart.items.length === 0) throw new Error("Cart is empty or not found");
 
   console.log("[Checkout] Cart drugIds:", cart.items.map((i) => i.drugId));
@@ -402,6 +414,8 @@ if (!cart && req.auth?.sessionId) cart = await Cart.findOne({ sessionId: req.aut
     orderId: localOrder._id,
   });
 
+await Cart.findByIdAndDelete(cart._id);
+console.log("[Checkout] Cart deleted after checkout");
 
   /** ------------------ 7. Respond ------------------ */
   res.status(201).json({
