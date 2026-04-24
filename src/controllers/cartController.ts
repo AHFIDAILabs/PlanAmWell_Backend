@@ -87,27 +87,23 @@ const syncCartToPartner = async (cart: any, partnerId: string) => {
   try {
     const payload = {
       userId: partnerId,
-      platform: "paw", // ✅ add this
+      platform: "paw",
       items: cart.items.map(mapCartItemForPartner),
     };
     const response = await axios.post(
       `${PARTNER_API_URL}${PARTNER_PREFIX}/cart`,
       payload,
     );
-    const partnerCart = response.data.cart; // ✅ response shape is { results, cart } not { updatedCart }
+    const partnerCart = response.data.cart;
+    
     if (partnerCart) {
+      // ✅ Only save the partner cart ID — never overwrite local totals
       cart.partnerCartId = partnerCart.id;
-      cart.isAbandoned = partnerCart.isAbandoned;
-      cart.totalItems = partnerCart.totalItems;
-      cart.totalPrice = parseFloat(partnerCart.totalPrice);
       await cart.save();
     }
     console.log("[Cart] Partner cart synced");
   } catch (err: any) {
-    console.error(
-      "[Cart] Partner sync failed:",
-      err.response?.data || err.message,
-    );
+    console.error("[Cart] Partner sync failed:", err.response?.data || err.message);
   }
 };
 
