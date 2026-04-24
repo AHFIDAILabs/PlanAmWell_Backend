@@ -77,7 +77,7 @@ const OrderSchema = new Schema<IOrder>(
     },
     deliveryStatus: {
       type: String,
-      enum: ["pending", "shipped", "delivered", "cancelled"],
+  enum: ["pending", "processing", "shipped", "delivered", "cancelled", "failed"],
       default: "pending",
     },
     shippingAddress: {

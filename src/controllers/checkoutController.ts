@@ -374,7 +374,6 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   const localOrder = await Order.create({
     orderNumber: uuidv4(),
     userId: authUserId,
-    partnerUserId: partnerUserId,
     isThirdPartyOrder: true,
     platform: "PlanAmWell",
     items: cart.items.map((i) => ({

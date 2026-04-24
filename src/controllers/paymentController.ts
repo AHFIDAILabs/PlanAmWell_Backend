@@ -375,8 +375,8 @@ export const getPaymentByOrder = asyncHandler(async (req: Request, res: Response
   console.log("[getPaymentByOrder] Looking up orderId:", orderId, "| type:", typeof orderId);
 
   // Debug: show ALL payments to confirm record exists
-  const allPayments = await Payment.find({}).select("orderId paymentReference status").lean();
-  console.log("[getPaymentByOrder] All payments in DB:", JSON.stringify(allPayments, null, 2));
+  // const allPayments = await Payment.find({}).select("orderId paymentReference status").lean();
+  // console.log("[getPaymentByOrder] All payments in DB:", JSON.stringify(allPayments, null, 2));
 
   const payment = await Payment.findOne({ orderId });
   console.log("[getPaymentByOrder] Result:", payment ? payment._id : "NOT FOUND");

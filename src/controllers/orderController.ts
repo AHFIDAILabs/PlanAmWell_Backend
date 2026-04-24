@@ -129,7 +129,7 @@ const apiPayload = {
   lga: shippingAddress?.city || "",
   isHomeAddress: true,
   isThirdPartyOrder: true,
-  platform: "PlanAmWell",
+  platform: "paw",
   items: apiItems, // ✅ now has correct partner UUIDs
 };
 
