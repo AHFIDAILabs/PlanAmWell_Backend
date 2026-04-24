@@ -402,6 +402,9 @@ if (!cart && req.auth?.sessionId) cart = await Cart.findOne({ sessionId: req.aut
     orderId: localOrder._id,
   });
 
+  await Cart.findByIdAndDelete(cart._id);
+console.log("[Checkout] Cart deleted after checkout ✅");
+
   /** ------------------ 7. Respond ------------------ */
   res.status(201).json({
     success: true,
