@@ -139,7 +139,7 @@ export const convertGuestToUser = asyncHandler(async (req: Request, res: Respons
   // Link cart to user
   const cart = await Cart.findOne({ sessionId });
   if (cart) {
-    cart.userId = newUser._id as Types.ObjectId;
+    cart.userId = newUser._id as any;
     cart.sessionId = undefined; // Clear sessionId to avoid confusion/conflicts
     await cart.save();
   }
