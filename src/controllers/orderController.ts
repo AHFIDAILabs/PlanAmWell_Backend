@@ -113,7 +113,7 @@ const apiItems = await Promise.all(
       throw new Error(`Product not found for id: ${item.productId}`);
     }
     return {
-      drug_id: product.partnerProductId, // ✅ Partner UUID, not Mongo ObjectId
+      drugId: product.partnerProductId, // ✅ Partner UUID, not Mongo ObjectId
       quantity: item.qty,
       dosage: item.dosage || "",
       special_instructions: item.specialInstructions || "",
@@ -139,9 +139,12 @@ const apiPayload = {
   try {
     const response = await axios.post(`${API_BASE}/v1/PlanAmWell/orders`, apiPayload);
     partnerResponse = response.data;
+console.log("[createOrder] Partner response data:", JSON.stringify(response.data, null, 2));
+console.log("[createOrder] partnerOrderId being saved:", response.data?.id);
 
     // Save partner order ID
-    order.partnerOrderId = response.data?.id;
+order.partnerOrderId = response.data?.data?.orderId;
+order.partnerOrderCode = response.data?.data?.orderCode; 
     await order.save();
   } catch (err: any) {
     console.error("[OrderController] Partner sync failed:", err.response?.data || err.message);

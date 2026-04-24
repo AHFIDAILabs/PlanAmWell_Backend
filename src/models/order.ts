@@ -27,7 +27,11 @@ export interface IOrder extends Document {
   shippingFee?: number;
   total: number;
   paymentStatus: "pending" | "paid" | "failed" | "refunded";
-  deliveryStatus?: "pending" | "shipped" | "delivered" | "cancelled";
+ deliveryStatus: {
+  type: String,
+  enum: ["pending", "processing", "shipped", "delivered", "cancelled", "failed"],
+  default: "pending",
+},
   shippingAddress?: {
     name?: string;
     phone?: string;
