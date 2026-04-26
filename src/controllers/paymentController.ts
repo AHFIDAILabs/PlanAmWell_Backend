@@ -280,7 +280,7 @@ const updatedPayment = await Payment.findOneAndUpdate(
       await NotificationService.notifyPaymentSuccessful(
         order.userId.toString(),
         order._id.toString(),
-        order.orderNumber,
+        order.orderNumber.slice(0, 8).toUpperCase(),
         order.total,
       );
     } catch (err) {

@@ -9,17 +9,26 @@ async function fixCartStatus() {
     await mongoose.connect(process.env.MONGODB_URI as string);
     console.log("✅ Connected to MongoDB");
 
+    // Reset all checked_out carts back to active
     const result = await mongoose.connection.collection("carts").updateMany(
+      { status: "checked_out" },
+      { $set: { status: "active" } }
+    );
+
+    console.log(`✅ Reset ${result.modifiedCount} checked_out carts to active`);
+
+    // Also fix any with no status
+    const result2 = await mongoose.connection.collection("carts").updateMany(
       { status: { $exists: false } },
       { $set: { status: "active" } }
     );
 
-    console.log(`✅ Updated ${result.modifiedCount} carts`);
+    console.log(`✅ Fixed ${result2.modifiedCount} carts with no status`);
+
   } catch (err) {
     console.error("❌ Error:", err);
   } finally {
     await mongoose.disconnect();
-    console.log("✅ Disconnected");
     process.exit(0);
   }
 }

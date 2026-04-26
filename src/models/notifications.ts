@@ -20,6 +20,9 @@ export interface INotification {
     conversationId?: String;
     articleId?: string;
     time?: string;
+     status: String,   
+  amount?: Number,   
+    orderNumber?: String,    
   };
   createdAt?: Date;
 }
