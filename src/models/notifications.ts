@@ -22,7 +22,22 @@ export interface INotification {
     time?: string;
      status: String,   
   amount?: Number,   
-    orderNumber?: String,    
+    orderNumber?: String, 
+  senderName?: string;
+  doctorName?: string;
+  patientName?: string;
+  scheduledAt?: string;
+  otherPartyName?: string;
+  requesterName?: string;
+  recordId?: string;
+  accessRequestId?: string;
+  callDuration?: number;
+  minutesRemaining?: number;
+  autoEnded?: boolean;
+  autoJoin?: boolean;
+  fromNotification?: boolean;
+  expired?: boolean;
+  doctorSpecialization?: string;   
   };
   createdAt?: Date;
 }
@@ -51,20 +66,38 @@ const notificationSchema = new Schema<INotification>(
     message: { type: String, required: true },
     isRead: { type: Boolean, default: false },
     metadata: {
-      orderId: String,
-      appointmentId: String,
-      conversationId: String,
-      articleId: String,
-      time: String,
-      commentId: String,
-      reason: String,
-      authorId: String,
-      authorUsername: String,
-      contentPreview: String,
-      type: String,
-      approved: Boolean,
-      patientId: String,
-    },
+  orderId: String,
+  appointmentId: String,
+  conversationId: String,
+  articleId: String,
+  time: String,
+  commentId: String,
+  reason: String,
+  authorId: String,
+  authorUsername: String,
+  contentPreview: String,
+  type: String,
+  approved: Boolean,
+  patientId: String,
+   status: String,
+  amount: Number,
+  orderNumber: String,
+  senderName: String,
+  doctorName: String,
+  patientName: String,
+  scheduledAt: String,
+  otherPartyName: String,
+  requesterName: String,
+  recordId: String,
+  accessRequestId: String,
+  callDuration: Number,
+  minutesRemaining: Number,
+  autoEnded: Boolean,
+  autoJoin: Boolean,
+  fromNotification: Boolean,
+  expired: Boolean,
+  doctorSpecialization: String,
+},
   },
   { timestamps: true }
 );
