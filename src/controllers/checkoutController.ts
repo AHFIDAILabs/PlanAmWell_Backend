@@ -597,3 +597,40 @@ order.total = partnerOrder?.totalPrice || order.total; // ← use partner's tota
     return res.status(502).json({ success: false, message: "Failed to initiate payment" });
   }
 });
+
+
+export const getDeliveryFee = asyncHandler(async (req: Request, res: Response) => {
+  const { state, lga } = req.query;
+
+  if (!state || !lga) {
+    return res.status(400).json({ success: false, message: "state and lga are required" });
+  }
+
+  try {
+    const response = await axios.get(
+      `${PARTNER_API_URL}${PARTNER_PREFIX}/delivery/fee`,
+      { params: { state, lga } }
+    );
+
+    const deliveryFee = response.data?.deliveryFee ?? 0;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        state,
+        lga,
+        deliveryFee,
+      },
+    });
+  } catch (err: any) {
+    if (err.response?.status === 404) {
+      return res.status(200).json({
+        success: true,
+        data: { state, lga, deliveryFee: 0 },
+        message: "Delivery zone not found — defaulting to free delivery",
+      });
+    }
+    console.error("[getDeliveryFee] Failed:", err.response?.data || err.message);
+    return res.status(502).json({ success: false, message: "Could not fetch delivery fee" });
+  }
+});
