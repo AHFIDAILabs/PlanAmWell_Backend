@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from "uuid";
 import { Types } from "mongoose";
 import { randomBytes } from "crypto";
 import { Payment } from "../models/initiatedPayment";
+import { delimiter } from "path";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 const PARTNER_PREFIX = "/v1/PlanAmWell";
@@ -584,6 +585,9 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
       success: true,
       checkoutUrl,
       orderId: order._id,
+       shippingFee: order.shippingFee,  
+  total: order.total,  
+  deliveryMethod: order.deliveryMethod,
     });
 
   } catch (err: any) {
