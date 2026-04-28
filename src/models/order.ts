@@ -27,17 +27,14 @@ export interface IOrder extends Document {
   shippingFee?: number;
   total: number;
   paymentStatus: "pending" | "paid" | "failed" | "refunded";
- deliveryStatus: {
-  type: String,
-  enum: ["pending", "processing", "shipped", "delivered", "cancelled", "failed"],
-  default: "pending",
-},
+deliveryStatus?: "pending" | "processing" | "shipped" | "delivered" | "cancelled" | "failed";
   shippingAddress?: {
     name?: string;
     phone?: string;
     addressLine?: string;
     city?: string;
     state?: string;
+    lga?: string;
   };
   discreetPackaging?: boolean;
   createdAt?: Date;
@@ -86,6 +83,7 @@ const OrderSchema = new Schema<IOrder>(
       addressLine: String,
       city: String,
       state: String,
+      lga: String,
     },
     partnerId: { type: Schema.Types.ObjectId, ref: "Partner", required: false }, // optional for third-party orders
 

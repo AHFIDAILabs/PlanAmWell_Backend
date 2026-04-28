@@ -422,6 +422,7 @@ console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => (
       addressLine: user.homeAddress || (user.preferences as any)?.address,
       city: user.city || (user.preferences as any)?.city,
       state: user.state || (user.preferences as any)?.state,
+      lga: user.lga || (user.preferences as any)?.lga,
     },
   });
 
@@ -495,17 +496,19 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
   let partnerOrder;
   try {
     const orderRes = await axios.post(
-      `${PARTNER_API_URL}${PARTNER_PREFIX}/orders`,
-      {
-        userId: user.partnerId,
-        telephone: user.phone,
-        platform: "PlanAmWell",
-        items: order.items.map((item) => ({
-          drugId: item.productId,
-          quantity: item.qty,
-        })),
-      },
-    );
+  `${PARTNER_API_URL}${PARTNER_PREFIX}/orders`,
+  {
+    userId: user.partnerId,
+    telephone: user.phone,
+    platform: "PlanAmWell",
+    state: user.state || (user.preferences as any)?.state || "",   
+    lga: user.lga || (user.preferences as any)?.lga || "",         
+    items: order.items.map((item) => ({
+      drugId: item.productId,
+      quantity: item.qty,
+    })),
+  },
+);
     partnerOrder = orderRes.data.data;
     console.log("[ConfirmOrder] Partner order created:", JSON.stringify(partnerOrder, null, 2));
   } catch (err: any) {
