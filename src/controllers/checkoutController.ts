@@ -521,6 +521,8 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
 
   order.partnerOrderId = partnerOrder?.orderId;
   order.partnerOrderCode = partnerOrder?.orderCode; 
+  order.shippingFee = partnerOrder?.deliveryFee || partnerOrder?.shippingFee || 0; // ← add
+order.total = partnerOrder?.totalPrice || order.total; // ← use partner's total
 
   await order.save();
 
