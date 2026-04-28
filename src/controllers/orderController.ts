@@ -86,6 +86,7 @@ if (userId) {
     shippingAddress,
     paymentStatus: "pending",
     deliveryStatus: "pending",
+    deliveryMethod: "delivery",
   });
 
   // ✅ Send order placed notification (only for registered users)
