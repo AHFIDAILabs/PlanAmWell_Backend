@@ -416,6 +416,7 @@ console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => (
     subtotal: cart.totalPrice,
     total: cart.totalPrice,
     paymentStatus: "pending",
+    deliveryMethod: "delivery",
     shippingAddress: {
       name: user.name,
       phone: user.phone,
