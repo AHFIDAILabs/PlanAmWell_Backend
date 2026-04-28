@@ -503,7 +503,8 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
     telephone: user.phone,
     platform: "PlanAmWell",
     state: user.state || (user.preferences as any)?.state || "",   
-    lga: user.lga || (user.preferences as any)?.lga || "",         
+    lga: user.lga || (user.preferences as any)?.lga || "",
+    deliveryMethod: "delivery",       
     items: order.items.map((item) => ({
       drugId: item.productId,
       quantity: item.qty,
