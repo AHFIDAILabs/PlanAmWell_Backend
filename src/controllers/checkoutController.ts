@@ -603,6 +603,10 @@ order.total = partnerOrder?.totalPrice || order.total; // ← use partner's tota
 export const getDeliveryFee = asyncHandler(async (req: Request, res: Response) => {
   const { state, lga } = req.query;
 
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+
+
   if (!state || !lga) {
     return res.status(400).json({ success: false, message: "state and lga are required" });
   }
@@ -612,7 +616,7 @@ export const getDeliveryFee = asyncHandler(async (req: Request, res: Response) =
       `${PARTNER_API_URL}${PARTNER_PREFIX}/delivery/fee`,
       { params: { state, lga } }
     );
-log("[getDeliveryFee] Response:", JSON.stringify(response.data, null, 2));
+console.log("[getDeliveryFee] Response:", JSON.stringify(response.data, null, 2));
     const deliveryFee = response.data?.deliveryFee ?? 0;
 
     console.log("Partner delivery fee", deliveryFee);
