@@ -11,6 +11,7 @@ import { Types } from "mongoose";
 import { randomBytes } from "crypto";
 import { Payment } from "../models/initiatedPayment";
 import { delimiter } from "path";
+import { log } from "console";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 const PARTNER_PREFIX = "/v1/PlanAmWell";
@@ -611,9 +612,10 @@ export const getDeliveryFee = asyncHandler(async (req: Request, res: Response) =
       `${PARTNER_API_URL}${PARTNER_PREFIX}/delivery/fee`,
       { params: { state, lga } }
     );
-
+log("[getDeliveryFee] Response:", JSON.stringify(response.data, null, 2));
     const deliveryFee = response.data?.deliveryFee ?? 0;
 
+    console.log("Partner delivery fee", deliveryFee);
     return res.status(200).json({
       success: true,
       data: {
