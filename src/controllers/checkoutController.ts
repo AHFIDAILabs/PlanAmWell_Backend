@@ -98,12 +98,17 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     state,
     lga,
     preferences,
+    deliveryFee,
   } = req.body;
 
   // Validate email format if provided
   if (email && !EMAIL_REGEX.test(String(email).trim())) {
     return res.status(400).json({ success: false, message: "Invalid email address." });
   }
+
+  // Validate deliveryFee
+const safeDeliveryFee =
+  typeof deliveryFee === "number" && deliveryFee >= 0 ? deliveryFee : 0;
 
   // Validate gender if provided
   const normalizedGender = gender ? String(gender).toLowerCase().trim() : undefined;
@@ -416,7 +421,8 @@ console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => (
       specialInstructions: i.specialInstructions || "",
     })),
     subtotal: cart.totalPrice,
-    total: cart.totalPrice,
+     shippingFee: safeDeliveryFee,                       
+  total: cart.totalPrice + safeDeliveryFee,  
     paymentStatus: "pending",
     deliveryMethod: "delivery",
     shippingAddress: {
