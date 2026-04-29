@@ -629,13 +629,14 @@ console.log("[getDeliveryFee] Response:", JSON.stringify(response.data, null, 2)
       },
     });
   } catch (err: any) {
-    if (err.response?.status === 404) {
-      return res.status(200).json({
-        success: true,
-        data: { state, lga, deliveryFee: 0 },
-        message: "Delivery zone not found — defaulting to free delivery",
-      });
-    }
+  if (err.response?.status === 404) {
+  console.log("[getDeliveryFee] Zone not found for state:", state, "lga:", lga);
+  return res.status(200).json({
+    success: true,
+    data: { state, lga, deliveryFee: 0 },
+    message: "Delivery zone not found — defaulting to free delivery",
+  });
+}
     console.error("[getDeliveryFee] Failed:", err.response?.data || err.message);
     return res.status(502).json({ success: false, message: "Could not fetch delivery fee" });
   }
