@@ -4,7 +4,13 @@ import { Doctor, IDoctor } from "../models/doctor";
 import asyncHandler from "../middleware/asyncHandler";
 import { Admin, GrowthData } from "../models/admin";
 import { User } from "../models/user";
-import { signAdminJwt } from "../middleware/auth"; // ✅ Use signAdminJwt instead
+import { Order } from "../models/order";
+import { signAdminJwt } from "../middleware/auth";
+import axios from "axios";
+
+const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
+const PARTNER_PREFIX = "/v1/PlanAmWell";
+const VALID_DELIVERY_STATUSES = ["pending", "processing", "shipped", "delivered", "cancelled", "failed"];
 
 // ------------------- Admin Registration -------------------
 export const registerAdmin = asyncHandler(async (req: Request, res: Response) => {
@@ -272,4 +278,66 @@ export const getCombinedGrowth = asyncHandler(async (req: Request, res: Response
       weeklyGrowth,
     }
   });
+});
+
+// ------------------- Get All Orders (Admin) -------------------
+export const getAdminOrders = asyncHandler(async (_req: Request, res: Response) => {
+  const orders = await Order.find().sort({ createdAt: -1 }).lean();
+  res.status(200).json({ success: true, data: orders });
+});
+
+// ------------------- Refresh Delivery Status from Partner (Admin) -------------------
+export const getAdminOrderDelivery = asyncHandler(async (req: Request, res: Response) => {
+  const { orderId } = req.params;
+
+  const order = await Order.findById(orderId);
+  if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+  const code = order.partnerOrderCode || order.partnerOrderId;
+  if (!code) return res.status(404).json({ success: false, message: "No partner order code on this order" });
+
+  try {
+    const response = await axios.get(`${PARTNER_API_URL}${PARTNER_PREFIX}/delivery/${code}`);
+    const incomingStatus = String(response.data?.status || "pending").toLowerCase();
+
+    if (VALID_DELIVERY_STATUSES.includes(incomingStatus)) {
+      order.deliveryStatus = incomingStatus as any;
+      await order.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      deliveryStatus: order.deliveryStatus,
+      data: response.data,
+    });
+  } catch (err: any) {
+    console.error("[getAdminOrderDelivery] Partner error:", err.response?.data || err.message);
+    return res.status(502).json({ success: false, message: "Could not fetch delivery status from partner" });
+  }
+});
+
+// ------------------- Commission Report from Partner (Admin) -------------------
+export const getAdminCommissionReport = asyncHandler(async (req: Request, res: Response) => {
+  const { year, month } = req.query;
+
+  if (!year || !month) {
+    return res.status(400).json({ success: false, message: "year and month query params are required" });
+  }
+
+  const y = Number(year);
+  const m = Number(month);
+  if (isNaN(y) || isNaN(m) || m < 1 || m > 12) {
+    return res.status(400).json({ success: false, message: "Invalid year or month" });
+  }
+
+  try {
+    const response = await axios.get(
+      `${PARTNER_API_URL}${PARTNER_PREFIX}/reports/commission`,
+      { params: { year: y, month: m } }
+    );
+    return res.status(200).json({ success: true, data: response.data });
+  } catch (err: any) {
+    console.error("[getAdminCommissionReport] Partner error:", err.response?.data || err.message);
+    return res.status(502).json({ success: false, message: "Could not fetch commission report" });
+  }
 });
