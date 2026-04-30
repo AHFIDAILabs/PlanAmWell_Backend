@@ -527,9 +527,11 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
   }
 
   order.partnerOrderId = partnerOrder?.orderId;
-  order.partnerOrderCode = partnerOrder?.orderCode; 
-  order.shippingFee = partnerOrder?.deliveryFee || partnerOrder?.shippingFee || 0; // ← add
-order.total = partnerOrder?.totalPrice || order.total; // ← use partner's total
+  order.partnerOrderCode = partnerOrder?.orderCode;
+  // Partner returns the field as "deliveryFee". Wrap in Number() so a string
+  // value like "1500" doesn't turn the addition below into string concatenation.
+  order.shippingFee = Number(partnerOrder?.deliveryFee ?? partnerOrder?.shippingFee ?? order.shippingFee ?? 0);
+  order.total = order.subtotal + order.shippingFee;
 
   await order.save();
 

@@ -13,22 +13,21 @@ export interface IOrderItem {
 
 export interface IOrder extends Document {
   _id: Types.ObjectId;
-  productId: string; // local reference to Product
-    partnerId?: Types.ObjectId; // optional, for API
+  partnerId?: Types.ObjectId;
   orderNumber: string;
   sessionId?: string;
   userId?: string;
-  partnerOrderId?: string;         // partner order mapping
-  partnerOrderCode?: string; 
-  isThirdPartyOrder?: boolean;     // true if created via partner API
-  platform?: string;               // e.g., "PlanAmWell" or "mymedicine"
+  partnerOrderId?: string;
+  partnerOrderCode?: string;
+  isThirdPartyOrder?: boolean;
+  platform?: string;
   items: IOrderItem[];
   subtotal: number;
-  shippingFee?: number;
+  shippingFee: number;
   total: number;
   paymentStatus: "pending" | "paid" | "failed" | "refunded";
-deliveryStatus?: "pending" | "processing" | "shipped" | "delivered" | "cancelled" | "failed";
-deliveryMethod?: string;
+  deliveryStatus?: "pending" | "processing" | "shipped" | "delivered" | "cancelled" | "failed";
+  deliveryMethod?: string;
   shippingAddress?: {
     name?: string;
     phone?: string;
@@ -39,6 +38,7 @@ deliveryMethod?: string;
   };
   discreetPackaging?: boolean;
   createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const OrderItemSchema = new Schema<IOrderItem>(
@@ -90,7 +90,6 @@ const OrderSchema = new Schema<IOrder>(
     partnerId: { type: Schema.Types.ObjectId, ref: "Partner", required: false }, // optional for third-party orders
 
     discreetPackaging: { type: Boolean, default: false },
-    createdAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );

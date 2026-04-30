@@ -127,11 +127,11 @@ const apiPayload = {
   telephone: shippingAddress?.phone || "",
   address: shippingAddress?.addressLine || "",
   state: shippingAddress?.state || "",
-  lga: shippingAddress?.city || "",
+  lga: shippingAddress?.lga || "",
   isHomeAddress: true,
   isThirdPartyOrder: true,
   platform: "paw",
-  items: apiItems, // ✅ now has correct partner UUIDs
+  items: apiItems,
 };
 
   // --- Sync with Partner API ---
@@ -143,9 +143,13 @@ const apiPayload = {
 console.log("[createOrder] Partner response data:", JSON.stringify(response.data, null, 2));
 console.log("[createOrder] partnerOrderId being saved:", response.data?.id);
 
-    // Save partner order ID
-order.partnerOrderId = response.data?.data?.orderId;
-order.partnerOrderCode = response.data?.data?.orderCode; 
+    // Save partner order data and update totals with the partner's confirmed delivery fee
+    const partnerData = response.data?.data;
+    order.partnerOrderId = partnerData?.orderId;
+    order.partnerOrderCode = partnerData?.orderCode;
+    const partnerDeliveryFee = Number(partnerData?.deliveryFee ?? partnerData?.shippingFee ?? 0);
+    order.shippingFee = partnerDeliveryFee;
+    order.total = Number(order.subtotal) + partnerDeliveryFee;
     await order.save();
   } catch (err: any) {
     console.error("[OrderController] Partner sync failed:", err.response?.data || err.message);

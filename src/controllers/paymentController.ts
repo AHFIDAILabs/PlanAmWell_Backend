@@ -109,7 +109,9 @@ if (existingPayment) {
 }
 
     /** ------------------ 6. Derive secure server-side values ------------------ */
-    const amount = order.total;
+    // order.shippingFee was stored from the partner's "deliveryFee" field in confirmOrder.
+    // Number() guards against any string coercion that slipped through before the DB save.
+    const amount = Number(order.subtotal) + Number(order.shippingFee ?? 0);
 
     // ✅ Use the actual partner order UUID returned during checkout
     const partnerOrderUuid = order.partnerOrderId;
