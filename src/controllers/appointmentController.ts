@@ -37,6 +37,37 @@ function getMissingAppointmentFields(user: any): string[] {
 }
 
 /**
+ * @desc Check if authenticated user's profile is complete enough to book an appointment
+ * @route GET /api/v1/appointments/profile-check
+ * @access User
+ */
+export const profileCheck = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.auth?.id;
+  if (!userId) {
+    res.status(401);
+    throw new Error("Not authenticated");
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  const missing = getMissingAppointmentFields(user);
+  if (missing.length > 0) {
+    res.status(400).json({
+      success: false,
+      message: "Profile incomplete",
+      missingFields: missing,
+    });
+    return;
+  }
+
+  res.status(200).json({ success: true, message: "Profile is complete" });
+});
+
+/**
  * @desc Create Appointment (Users)
  * @route POST /api/v1/appointments
  * @access User

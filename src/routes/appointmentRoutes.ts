@@ -9,6 +9,7 @@ import {
   deleteAppointment,
   getAppointmentById,
   endAppointment,
+  profileCheck,
 } from "../controllers/appointmentController";
 
 import {
@@ -24,6 +25,7 @@ const appointmentRouter = express.Router();
 appointmentRouter.post("/", guestAuth, createAppointment);
 
 // Protected routes
+appointmentRouter.get("/profile-check", verifyToken, authorize("User"), profileCheck);
 appointmentRouter.get("/my", verifyToken, authorize("User"), getMyAppointments);
 appointmentRouter.get("/appointment/:id", verifyToken, getAppointmentById);
 appointmentRouter.get(
