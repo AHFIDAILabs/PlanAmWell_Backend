@@ -450,7 +450,7 @@ export const deleteMyAccount = asyncHandler(async (req: Request, res: Response) 
     await RefreshToken.deleteMany({ userId: authId });
   } else {
     const user = await User.findById(authId);
-    if (!user) { res.status(404); throw new Error("Account not found"); }
+    if (!user || !user.password) { res.status(404); throw new Error("Account not found"); }
 
     const match = await bcrypt.compare(password, user.password);
     if (!match) { res.status(401); throw new Error("Incorrect password"); }
