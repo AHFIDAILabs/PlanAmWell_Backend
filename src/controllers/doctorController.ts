@@ -236,6 +236,32 @@ export const updateDoctor = asyncHandler(async (req: Request, res: Response) => 
   res.status(200).json({ success: true, data: updatedDoctor });
 });
 
+// COMPLETE PROFILE — doctor marks their onboarding as done
+export const completeDoctorProfile = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.auth || req.auth.role !== "Doctor") {
+    return res.status(403).json({ message: "Unauthorized" });
+  }
+
+  const doctor = await Doctor.findById(req.auth.id);
+  if (!doctor) {
+    res.status(404);
+    throw new Error("Doctor not found");
+  }
+
+  if (doctor.status !== "approved") {
+    return res.status(400).json({ message: "Only approved doctors can complete their profile." });
+  }
+
+  doctor.profileComplete = true;
+  await doctor.save();
+
+  res.status(200).json({
+    success: true,
+    message: "Profile marked as complete. Welcome to PlanAmWell!",
+    data: { profileComplete: true },
+  });
+});
+
 // DELETE doctor — only admin
 export const deleteDoctor = asyncHandler(async (req: Request, res: Response) => {
   if (req.auth?.role !== "Admin") {

@@ -18,8 +18,10 @@ export interface IDoctor extends Document {
   ratings?: number;
   reviews?: Array<{ userId: string; rating: number; comment: string }>;
   status: "submitted" | "reviewing" | "approved" | "rejected";
+  profileComplete: boolean;
   expoPushTokens?: string[];
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 const DoctorSchema = new Schema<IDoctor>(
@@ -51,8 +53,8 @@ const DoctorSchema = new Schema<IDoctor>(
       default: "submitted",
       required: true,
     },
+    profileComplete: { type: Boolean, default: false },
     expoPushTokens: { type: [String], default: [] },
-    createdAt: { type: Date },
   },
   { timestamps: true }
 );

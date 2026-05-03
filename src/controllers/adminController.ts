@@ -7,6 +7,7 @@ import { User } from "../models/user";
 import { Order } from "../models/order";
 import { signAdminJwt } from "../middleware/auth";
 import axios from "axios";
+import { NotificationService } from "../services/NotificationService";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 const PARTNER_PREFIX = "/v1/PlanAmWell";
@@ -111,6 +112,15 @@ export const updateDoctorStatus = asyncHandler(async (req: Request, res: Respons
     { status },
     { new: true, runValidators: true }
   ).select("-passwordHash");
+
+  // Notify doctor of status change (non-blocking)
+  NotificationService.notifyDoctorStatusChanged(
+    doctorId,
+    status as "submitted" | "reviewing" | "approved" | "rejected",
+    req.body.reason
+  ).catch((err) =>
+    console.error("[adminController] Failed to notify doctor of status change:", err)
+  );
 
   res.status(200).json({
     success: true,

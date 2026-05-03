@@ -9,6 +9,7 @@ import {
   updateDoctorAvailability,
   updateDoctorPushToken,
   deleteDoctor,
+  completeDoctorProfile,
 } from "../controllers/doctorController";
 import { verifyToken, authorize, guestAuth } from "../middleware/auth";
 import multer from "multer";
@@ -51,6 +52,7 @@ doctorRouter.get("/profile", guestAuth, verifyToken, getMyDoctorProfile);
 doctorRouter.put("/availability", guestAuth, verifyToken, authorize("Doctor"), updateDoctorAvailability);
 
 doctorRouter.put("/update-push-token", guestAuth, verifyToken, authorize("Doctor"), updateDoctorPushToken);
+doctorRouter.post("/complete-profile", guestAuth, verifyToken, authorize("Doctor"), completeDoctorProfile);
 
 
 // NOW the /:id routes

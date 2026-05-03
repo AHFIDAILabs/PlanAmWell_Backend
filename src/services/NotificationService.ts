@@ -631,4 +631,42 @@ static async notifyDeliveryUpdate(
     metadata: { orderId, orderNumber, status, type: "delivery_update" },
   });
 }
+
+  /**
+   * DOCTOR: Notify doctor when admin changes their application status
+   */
+  static async notifyDoctorStatusChanged(
+    doctorId: string,
+    newStatus: "submitted" | "reviewing" | "approved" | "rejected",
+    reason?: string
+  ) {
+    const messages: Record<string, { title: string; message: string }> = {
+      reviewing: {
+        title: "Application Under Review 🔍",
+        message: "Great news! Your application is now being reviewed by our team. We'll get back to you shortly.",
+      },
+      approved: {
+        title: "Application Approved! 🎉",
+        message: "Congratulations! Your doctor account has been approved. Please complete your profile and set your availability to start seeing patients.",
+      },
+      rejected: {
+        title: "Application Update",
+        message: reason
+          ? `Your application was not approved. Reason: ${reason}`
+          : "Your application was not approved at this time. Please contact support for more information.",
+      },
+    };
+
+    const content = messages[newStatus];
+    if (!content) return null;
+
+    return this.create({
+      userId: doctorId,
+      userType: "Doctor",
+      title: content.title,
+      message: content.message,
+      type: "system",
+      metadata: { status: newStatus, reason: reason ?? null, type: "doctor_status_update" },
+    });
+  }
 }
