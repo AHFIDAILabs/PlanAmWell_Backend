@@ -418,3 +418,46 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
     throw new Error("Invalid or expired refresh token");
   }
 });
+
+
+// ─────────────────────────────────────────────
+// DELETE /auth/me  — Self-service account deletion
+// Requires the user to confirm with their password
+// ─────────────────────────────────────────────
+export const deleteMyAccount = asyncHandler(async (req: Request, res: Response) => {
+  const { password } = req.body;
+  const authId = req.auth?.id;
+  const role = req.auth?.role;
+
+  if (!authId) {
+    res.status(401);
+    throw new Error("Not authenticated");
+  }
+
+  if (!password) {
+    res.status(400);
+    throw new Error("Password is required to delete your account");
+  }
+
+  if (role === "Doctor") {
+    const doctor = await Doctor.findById(authId);
+    if (!doctor) { res.status(404); throw new Error("Account not found"); }
+
+    const match = await bcrypt.compare(password, doctor.passwordHash);
+    if (!match) { res.status(401); throw new Error("Incorrect password"); }
+
+    await Doctor.findByIdAndDelete(authId);
+    await RefreshToken.deleteMany({ userId: authId });
+  } else {
+    const user = await User.findById(authId);
+    if (!user) { res.status(404); throw new Error("Account not found"); }
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) { res.status(401); throw new Error("Incorrect password"); }
+
+    await User.findByIdAndDelete(authId);
+    await RefreshToken.deleteMany({ userId: authId });
+  }
+
+  res.status(200).json({ success: true, message: "Account deleted successfully." });
+});

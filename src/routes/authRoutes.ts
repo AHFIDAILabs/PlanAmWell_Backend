@@ -1,14 +1,15 @@
 import { Router } from "express";
-import { 
-  createGuestSession, 
-  convertGuestToUser, 
-  getCurrentUser, 
-  createUser, 
-  loginUser, 
+import {
+  createGuestSession,
+  convertGuestToUser,
+  getCurrentUser,
+  createUser,
+  loginUser,
   doctorLogin,
   registerPushToken,
   removePushToken,
-  refreshToken
+  refreshToken,
+  deleteMyAccount,
 } from "../controllers/authController";
 import { guestAuth, verifyToken } from "../middleware/auth"; // Make sure you have this middleware
 
@@ -57,6 +58,9 @@ authRouter.post("/remove-push-token", guestAuth, verifyToken, removePushToken);
 
 authRouter.post("/refreshToken", refreshToken);
 
-
+/**
+ * PROTECTED - self-service account deletion (requires password confirmation)
+ */
+authRouter.delete("/me", guestAuth, verifyToken, deleteMyAccount);
 
 export default authRouter;
