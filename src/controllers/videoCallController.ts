@@ -2,7 +2,6 @@
 import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import mongoose from "mongoose";
-import { RtcTokenBuilder, RtcRole } from "agora-access-token";
 import { Appointment } from "../models/appointment";
 import { NotificationService } from "../services/NotificationService";
 import { emitRejoinCallAlert, emitCallEnded, emitCallRinging } from "../index";
@@ -22,13 +21,6 @@ import { sendIncomingCallPushNotification } from "../util/sendPushNotification";
 //   it never completes the appointment — that still requires the doctor.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const AGORA_APP_ID          = process.env.AGORA_APP_ID!;
-const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE!;
-
-if (!AGORA_APP_ID || !AGORA_APP_CERTIFICATE) {
-  console.error("❌ Agora credentials are missing");
-}
-
 const extractId = (field: any): string => {
   if (!field) return "";
   if (typeof field === "string") return field;
@@ -36,13 +28,10 @@ const extractId = (field: any): string => {
   return String(field);
 };
 
-const generateUid = (id: string): number => {
-  const hex = id.replace(/[^a-f0-9]/gi, "").slice(-8);
-  return parseInt(hex || "12345678", 16) % 2147483647;
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Generate / Join Video Call Token
+// Start / Join Video Call Session
+// Returns session info needed by the client to initiate WebRTC signaling.
+// No Agora token is generated — peer connection is established via Socket.IO.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const generateVideoToken = asyncHandler(
@@ -55,13 +44,6 @@ export const generateVideoToken = asyncHandler(
       return res.status(400).json({
         success: false,
         message: "Invalid request: Missing required fields",
-      });
-    }
-
-    if (!AGORA_APP_ID || !AGORA_APP_CERTIFICATE) {
-      return res.status(500).json({
-        success: false,
-        message: "Video service not configured",
       });
     }
 
@@ -87,7 +69,6 @@ export const generateVideoToken = asyncHandler(
       return res.status(400).json({ success: false, message: "This appointment has been cancelled" });
     }
 
-    // Appointment is completed (doctor pressed End Appointment) — no rejoining
     if (appointment.status === "completed") {
       return res.status(400).json({
         success: false,
@@ -98,7 +79,7 @@ export const generateVideoToken = asyncHandler(
     if (appointment.callStatus === "ended") {
       // Call ended but appointment still open — allow rejoin by resetting call
       console.log(`🔄 Resetting ended call for appointment ${appointmentId} — appointment still open`);
-      appointment.callStatus    = "idle";
+      appointment.callStatus       = "idle";
       appointment.callParticipants = [];
       await appointment.save();
     }
@@ -116,11 +97,10 @@ export const generateVideoToken = asyncHandler(
       });
     }
 
-    const isDoctor           = role === "Doctor";
+    const isDoctor            = role === "Doctor";
     const participantObjectId = new mongoose.Types.ObjectId(userId);
-    const uid                = generateUid(userId);
-    const recipientUserId    = isDoctor ? patientId : doctorId;
-    const callerName         = isDoctor
+    const recipientUserId     = isDoctor ? patientId : doctorId;
+    const callerName          = isDoctor
       ? `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`
       : ((appointment.userId as any).firstName || (appointment.userId as any).name);
 
@@ -134,7 +114,6 @@ export const generateVideoToken = asyncHandler(
             callInitiatedBy: role,
             callChannelName: `appt_${appointmentId}`,
             status:          "in-progress",
-            [`agoraUidMap.${isDoctor ? "doctor" : "user"}`]: uid,
           },
           $addToSet: { callParticipants: participantObjectId },
         },
@@ -187,10 +166,6 @@ export const generateVideoToken = asyncHandler(
       appointment.callStatus === "ringing" &&
       !appointment.callParticipants.some((id) => id.equals(participantObjectId))
     ) {
-      if (!appointment.agoraUidMap) appointment.agoraUidMap = {};
-      if (isDoctor) appointment.agoraUidMap.doctor = uid;
-      else          appointment.agoraUidMap.user   = uid;
-
       appointment.callParticipants.push(participantObjectId);
       appointment.callStatus    = "in-progress";
       appointment.callStartedAt = new Date();
@@ -205,10 +180,6 @@ export const generateVideoToken = asyncHandler(
 
     // ── Rejoin in-progress call ────────────────────────────────────────────────
     if (appointment.callStatus === "in-progress") {
-      if (!appointment.agoraUidMap) appointment.agoraUidMap = {};
-      if (isDoctor && !appointment.agoraUidMap.doctor) appointment.agoraUidMap.doctor = uid;
-      else if (!isDoctor && !appointment.agoraUidMap.user) appointment.agoraUidMap.user = uid;
-
       if (!appointment.callParticipants.some((id) => id.equals(participantObjectId))) {
         appointment.callParticipants.push(participantObjectId);
       }
@@ -221,42 +192,20 @@ export const generateVideoToken = asyncHandler(
       }
     }
 
-    // ── Generate Agora token ───────────────────────────────────────────────────
-    try {
-      const channelName = appointment.callChannelName || `appt_${appointmentId}`;
-      const expireAt    = Math.floor(Date.now() / 1000) + 60 * 60;
+    const channelName = appointment.callChannelName || `appt_${appointmentId}`;
 
-      const token = RtcTokenBuilder.buildTokenWithUid(
-        AGORA_APP_ID,
-        AGORA_APP_CERTIFICATE,
+    return res.status(200).json({
+      success: true,
+      data: {
         channelName,
-        uid,
-        RtcRole.PUBLISHER,
-        expireAt
-      );
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          token,
-          channelName,
-          uid,
-          appId:            AGORA_APP_ID,
-          callStatus:       appointment.callStatus,
-          participantCount: appointment.callParticipants.length,
-          isInitiator:      appointment.callInitiatedBy === role,
-          doctorName:       `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
-          patientName:      (appointment.userId as any).firstName || (appointment.userId as any).name,
-        },
-        message: "Token generated successfully",
-      });
-    } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to generate video token",
-        error: error.message,
-      });
-    }
+        callStatus:       appointment.callStatus,
+        participantCount: appointment.callParticipants.length,
+        isInitiator:      appointment.callInitiatedBy === role,
+        doctorName:       `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
+        patientName:      (appointment.userId as any).firstName || (appointment.userId as any).name,
+      },
+      message: "Call session ready",
+    });
   }
 );
 
@@ -347,9 +296,6 @@ export const updateParticipantHeartbeat = asyncHandler(async (req: Request, res:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Handle Call Disconnect
-//
-// When someone disconnects: mark the CALL as ended if both leave.
-// The APPOINTMENT remains open — doctor must explicitly end it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const handleCallDisconnect = asyncHandler(async (req: Request, res: Response) => {
@@ -383,12 +329,10 @@ export const handleCallDisconnect = asyncHandler(async (req: Request, res: Respo
     if (callDuration > 30) {
       console.log(`⏹️ Both participants left — ending CALL only (appointment remains open)`);
 
-      // ── Only end the CALL, not the appointment ────────────────────────────
       appointment.callStatus  = "ended";
       appointment.callEndedAt = new Date();
       appointment.callEndedBy = "system";
       appointment.callDuration = callDuration;
-      // appointment.status stays as-is — never set to 'completed' here
 
       const lastAttempt = appointment.callAttempts[appointment.callAttempts.length - 1];
       if (lastAttempt && !lastAttempt.endedAt) {
@@ -411,7 +355,6 @@ export const handleCallDisconnect = asyncHandler(async (req: Request, res: Respo
       callStatus:        appointment.callStatus,
       activeParticipants: activeCount,
       callEnded:         appointment.callStatus === "ended",
-      // Remind the client the appointment is still active
       appointmentStatus: appointment.status,
     },
     message: "Disconnect handled",
@@ -420,10 +363,6 @@ export const handleCallDisconnect = asyncHandler(async (req: Request, res: Respo
 
 // ─────────────────────────────────────────────────────────────────────────────
 // End Video Call
-//
-// Called when a participant taps "End Call" in the video UI.
-// Ends the CALL session only — appointment stays open.
-// Doctor must tap "End Appointment" to complete the appointment.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const endVideoCall = asyncHandler(async (req: Request, res: Response) => {
@@ -454,12 +393,10 @@ export const endVideoCall = asyncHandler(async (req: Request, res: Response) => 
       ? Math.floor((Date.now() - appointment.callStartedAt.getTime()) / 1000)
       : 0);
 
-  // ── End the CALL only ─────────────────────────────────────────────────────
   appointment.callStatus   = "ended";
   appointment.callEndedAt  = new Date();
   appointment.callEndedBy  = role as any;
   appointment.callDuration = finalDuration;
-  // ✅ appointment.status is intentionally NOT changed here
 
   if (callQuality) appointment.callQuality = callQuality;
 
@@ -484,7 +421,7 @@ export const endVideoCall = asyncHandler(async (req: Request, res: Response) => 
       callQuality:       appointment.callQuality,
       endedBy:           role,
       endedAt:           appointment.callEndedAt,
-      appointmentStatus: appointment.status,  // still 'in-progress' or 'confirmed'
+      appointmentStatus: appointment.status,
     },
   });
 });
@@ -520,7 +457,6 @@ export const getCallStatus = asyncHandler(async (req: Request, res: Response) =>
   const scheduled  = new Date(appointment.scheduledAt);
   const diffMinutes = Math.floor((scheduled.getTime() - now.getTime()) / 60000);
 
-  // Can join if: appointment not completed AND within 15-min window
   const canJoinNow =
     appointment.status !== "completed" &&
     diffMinutes <= 15;

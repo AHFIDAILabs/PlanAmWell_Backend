@@ -165,6 +165,34 @@ io.on("connection", (socket) => {
     socket.emit("pong", { timestamp: Date.now() });
   });
 
+  // ─── WebRTC signaling relay ──────────────────────────────────────────────
+  // All four events are relayed to everyone ELSE in the appointment room.
+  // socket.to() excludes the sender, so there is no echo back.
+
+  socket.on("webrtc-ready", ({ appointmentId }: { appointmentId: string }) => {
+    const roomName = `appointment:${appointmentId}`;
+    socket.to(roomName).emit("webrtc-ready", { appointmentId });
+    console.log(`🎥 webrtc-ready relayed for appointment ${appointmentId} by user ${userId}`);
+  });
+
+  socket.on("webrtc-offer", ({ appointmentId, offer }: { appointmentId: string; offer: any }) => {
+    const roomName = `appointment:${appointmentId}`;
+    socket.to(roomName).emit("webrtc-offer", { appointmentId, offer });
+    console.log(`🎥 webrtc-offer relayed for appointment ${appointmentId}`);
+  });
+
+  socket.on("webrtc-answer", ({ appointmentId, answer }: { appointmentId: string; answer: any }) => {
+    const roomName = `appointment:${appointmentId}`;
+    socket.to(roomName).emit("webrtc-answer", { appointmentId, answer });
+    console.log(`🎥 webrtc-answer relayed for appointment ${appointmentId}`);
+  });
+
+  socket.on("webrtc-ice-candidate", ({ appointmentId, candidate }: { appointmentId: string; candidate: any }) => {
+    const roomName = `appointment:${appointmentId}`;
+    socket.to(roomName).emit("webrtc-ice-candidate", { appointmentId, candidate });
+  });
+  // ────────────────────────────────────────────────────────────────────────
+
   // ✅ Handle disconnect
   socket.on("disconnect", (reason) => {
     connectedUsers.delete(userId);
