@@ -248,10 +248,6 @@ export const completeDoctorProfile = asyncHandler(async (req: Request, res: Resp
     throw new Error("Doctor not found");
   }
 
-  if (doctor.status !== "approved") {
-    return res.status(400).json({ message: "Only approved doctors can complete their profile." });
-  }
-
   doctor.profileComplete = true;
   await doctor.save();
 
