@@ -17,6 +17,8 @@ export async function sendIncomingCallPushNotification(
     callerImage?: string;
     callerType: "Doctor" | "User" | string;
     channelName: string;
+    conversationId?: string; // ← Link to conversation for response
+    videoRequestId?: string; // ← Video request ID to respond to
   }
 ) {
   try {
@@ -56,16 +58,18 @@ export async function sendIncomingCallPushNotification(
         callerImage: callData.callerImage,
         callerType: callData.callerType,
         channelName: callData.channelName,
+        conversationId: callData.conversationId, // ← Include for response
+        videoRequestId: callData.videoRequestId, // ← Include for response
         timestamp: new Date().toISOString(),
       },
       priority: "high" as const, // High priority for immediate delivery
       channelId: "incoming-calls", // Android notification channel
       categoryIdentifier: "INCOMING_CALL", // iOS category for call UI
-      
+
       // ✅ iOS specific settings for call-like behavior
       badge: 1,
       ttl: 60, // Time to live: 60 seconds
-      
+
       // ✅ Android specific settings
       ...(process.env.NODE_ENV === "production" && {
         android: {

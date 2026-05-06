@@ -106,6 +106,12 @@ export const generateVideoToken = asyncHandler(
 
     // ── Initiate call (atomic) ────────────────────────────────────────────────
     if (!appointment.callStatus || appointment.callStatus === "idle") {
+      // Get conversation linked to this appointment for video request info
+      const Conversation = require("../models/conversation").default;
+      const conversation = await Conversation.findOne({
+        appointmentId: appointmentId,
+      });
+
       const updatedAppointment = await Appointment.findOneAndUpdate(
         { _id: appointmentId, callStatus: { $in: ["idle", null] } },
         {
@@ -136,6 +142,8 @@ export const generateVideoToken = asyncHandler(
             callerImage,
             callerType:  role,
             channelName: appointment.callChannelName || `appt_${appointmentId}`,
+            conversationId: conversation?._id?.toString(), // ← Include conversation for response
+            videoRequestId: conversation?.activeVideoRequest?._id?.toString(), // ← Include request ID
           });
 
           emitCallRinging(appointmentId.toString(), role);
@@ -176,10 +184,9 @@ export const generateVideoToken = asyncHandler(
       } catch (e) {
         console.error("⚠️ Failed to send rejoin alert:", e);
       }
-    }
-
     // ── Rejoin in-progress call ────────────────────────────────────────────────
-    if (appointment.callStatus === "in-progress") {
+    // else if prevents the ringing→in-progress block from immediately triggering this
+    } else if (appointment.callStatus === "in-progress") {
       if (!appointment.callParticipants.some((id) => id.equals(participantObjectId))) {
         appointment.callParticipants.push(participantObjectId);
       }
@@ -481,6 +488,46 @@ export const getCallStatus = asyncHandler(async (req: Request, res: Response) =>
       patientName:        (appointment.userId as any).firstName || (appointment.userId as any).name,
     },
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Decline Incoming Call
+// Called by the recipient when they dismiss the IncomingCallScreen without
+// joining.  Resets callStatus to idle and notifies the initiator via socket.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const declineCall = asyncHandler(async (req: Request, res: Response) => {
+  const { appointmentId } = req.body;
+  const userId = req.auth?.id;
+
+  if (!appointmentId || !userId) {
+    return res.status(400).json({ success: false, message: "Missing required fields" });
+  }
+
+  const appointment = await Appointment.findById(appointmentId);
+  if (!appointment) {
+    return res.status(404).json({ success: false, message: "Appointment not found" });
+  }
+
+  if (appointment.callStatus !== "ringing") {
+    return res.json({ success: true, message: "Call already handled" });
+  }
+
+  appointment.callStatus      = "idle";
+  appointment.callParticipants = [];
+  await appointment.save();
+
+  // Notify the appointment room — the initiator is waiting there
+  const { io } = require("../index");
+  io.to(`appointment:${appointmentId}`).emit("call-declined", {
+    appointmentId,
+    declinedBy: userId,
+    timestamp: new Date().toISOString(),
+  });
+
+  console.log(`📵 Call declined for appointment ${appointmentId} by user ${userId}`);
+
+  res.json({ success: true, message: "Call declined" });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

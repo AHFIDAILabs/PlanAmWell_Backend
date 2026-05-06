@@ -8,6 +8,7 @@ import {
   endVideoCall,
   getCallStatus,
   reportCallIssue,
+  declineCall,
 } from '../controllers/videoCallController';
 import { verifyToken, authorize, guestAuth } from '../middleware/auth';
 
@@ -89,6 +90,19 @@ videoRouter.get(
   verifyToken,
   authorize('Doctor', 'User'),
   getCallStatus
+);
+
+/**
+ * @route   POST /api/v1/video/decline
+ * @desc    Decline an incoming ringing call — resets status and notifies initiator
+ * @access  Private (Doctor | User)
+ */
+videoRouter.post(
+  '/decline',
+  guestAuth,
+  verifyToken,
+  authorize('Doctor', 'User'),
+  declineCall
 );
 
 /**
