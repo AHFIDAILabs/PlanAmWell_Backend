@@ -136,24 +136,28 @@ export const generateVideoToken = asyncHandler(
             ? (appointment.doctorId as any).doctorImage
             : (appointment.userId  as any).userImage;
 
-          await sendIncomingCallPushNotification(recipientUserId, {
-            appointmentId: appointmentId.toString(),
-            callerName,
-            callerImage,
-            callerType:  role,
-            channelName: appointment.callChannelName || `appt_${appointmentId}`,
-            conversationId: conversation?._id?.toString(), // ← Include conversation for response
-            videoRequestId: conversation?.activeVideoRequest?._id?.toString(), // ← Include request ID
-          });
+       sendIncomingCallPushNotification(recipientUserId, {
+  appointmentId: appointmentId.toString(),
+  callerName,
+  callerImage,
+  callerType:  role,
+  channelName: appointment.callChannelName || `appt_${appointmentId}`,
+  conversationId: conversation?._id?.toString(),
+  videoRequestId: conversation?.activeVideoRequest?._id?.toString(),
+}).catch((err) =>
+  console.error("⚠️ Push notification failed (non-fatal):", err.message)
+);
 
           emitCallRinging(appointmentId.toString(), role);
 
-          await NotificationService.notifyCallStarted(
-            recipientUserId,
-            isDoctor ? "User" : "Doctor",
-            appointmentId.toString(),
-            callerName
-          );
+        NotificationService.notifyCallStarted(
+  recipientUserId,
+  isDoctor ? "User" : "Doctor",
+  appointmentId.toString(),
+  callerName
+).catch((err) =>
+  console.error("⚠️ Notification failed (non-fatal):", err.message)
+);
         } catch (notifError) {
           console.error("⚠️ Failed to send call notification:", notifError);
         }

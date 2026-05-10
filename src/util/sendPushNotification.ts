@@ -103,7 +103,6 @@ export async function sendIncomingCallPushNotification(
     
   } catch (error) {
     console.error("[IncomingCall] Failed to send push notification:", error);
-    throw error;
   }
 }
 
