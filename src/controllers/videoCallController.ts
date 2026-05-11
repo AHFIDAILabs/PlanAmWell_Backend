@@ -79,14 +79,12 @@ export const generateVideoToken = asyncHandler(
       });
     }
 
-    // Reset any ended/expired call state so a fresh call can be established.
-    // This handles: system-auto-expired, call dropped before fully starting,
-    // or any case where callStatus="ended" but the appointment is still usable.
+    // Reset in-memory only — the atomic findOneAndUpdate below handles the DB write.
+    // Calling appointment.save() on a populated document causes ValidationError (500).
     if (appointment.callStatus === "ended" || appointment.status === "completed") {
       console.log(`🔄 Resetting call state for appointment ${appointmentId} (status=${appointment.status}, callEndedBy=${appointment.callEndedBy})`);
       appointment.callStatus       = "idle";
       appointment.callParticipants = [];
-      await appointment.save();
     }
 
     // 15-min window check
@@ -126,15 +124,15 @@ export const generateVideoToken = asyncHandler(
       }
 
       const updatedAppointment = await Appointment.findOneAndUpdate(
-        { _id: appointmentId, callStatus: { $in: ["idle", null] } },
+        { _id: appointmentId, callStatus: { $in: ["idle", null, "ended"] } },
         {
           $set: {
-            callStatus:      "ringing",
-            callInitiatedBy: role,
-            callChannelName: `appt_${appointmentId}`,
-            status:          "in-progress",
+            callStatus:       "ringing",
+            callInitiatedBy:  role,
+            callChannelName:  `appt_${appointmentId}`,
+            status:           "in-progress",
+            callParticipants: [participantObjectId],
           },
-          $addToSet: { callParticipants: participantObjectId },
         },
         { new: true }
       )
