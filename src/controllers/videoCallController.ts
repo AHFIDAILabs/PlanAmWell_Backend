@@ -69,16 +69,21 @@ export const generateVideoToken = asyncHandler(
       return res.status(400).json({ success: false, message: "This appointment has been cancelled" });
     }
 
-    if (appointment.status === "completed") {
+    // Only permanently block when the doctor explicitly ended the appointment.
+    // System-auto-expired (callEndedBy = "system") and never-called "completed"
+    // appointments are reset below so a new call can begin.
+    if (appointment.status === "completed" && appointment.callEndedBy === "Doctor") {
       return res.status(400).json({
         success: false,
         message: "This appointment has been ended by the doctor and cannot be rejoined",
       });
     }
 
-    if (appointment.callStatus === "ended") {
-      // Call ended but appointment still open — allow rejoin by resetting call
-      console.log(`🔄 Resetting ended call for appointment ${appointmentId} — appointment still open`);
+    // Reset any ended/expired call state so a fresh call can be established.
+    // This handles: system-auto-expired, call dropped before fully starting,
+    // or any case where callStatus="ended" but the appointment is still usable.
+    if (appointment.callStatus === "ended" || appointment.status === "completed") {
+      console.log(`🔄 Resetting call state for appointment ${appointmentId} (status=${appointment.status}, callEndedBy=${appointment.callEndedBy})`);
       appointment.callStatus       = "idle";
       appointment.callParticipants = [];
       await appointment.save();
@@ -106,11 +111,19 @@ export const generateVideoToken = asyncHandler(
 
     // ── Initiate call (atomic) ────────────────────────────────────────────────
     if (!appointment.callStatus || appointment.callStatus === "idle") {
-      // Get conversation linked to this appointment for video request info
+      // Resolve the conversation for this appointment.
+      // Priority 1: use the conversationId stored on the appointment itself —
+      //   this is set when the doctor confirms, and is the only reliable link
+      //   for returning patients whose conversation still has the OLD appointmentId.
+      // Priority 2: fall back to appointmentId field lookup (first-time patients
+      //   whose conversation was just created and shares the same appointmentId).
       const Conversation = require("../models/conversation").default;
-      const conversation = await Conversation.findOne({
-        appointmentId: appointmentId,
-      });
+      let conversation = appointment.conversationId
+        ? await Conversation.findById(appointment.conversationId)
+        : null;
+      if (!conversation) {
+        conversation = await Conversation.findOne({ appointmentId });
+      }
 
       const updatedAppointment = await Appointment.findOneAndUpdate(
         { _id: appointmentId, callStatus: { $in: ["idle", null] } },
