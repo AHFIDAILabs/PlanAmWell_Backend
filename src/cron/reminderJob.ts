@@ -96,12 +96,18 @@ cron.schedule("*/15 * * * *", async () => {
         const patientId = appointment.userId?.toString();
         const doctorId  = appointment.doctorId?.toString();
 
-        // ── Mark appointment completed ──────────────────────────────────────
-        appointment.status      = "completed";
-        appointment.callStatus  = "ended";
-        appointment.callEndedAt = now;
-        appointment.callEndedBy = "system";
-        await appointment.save();
+        // ── Mark appointment completed (atomic — no .save() on populated doc) ─
+        await Appointment.updateOne(
+          { _id: appointment._id },
+          {
+            $set: {
+              status:      "completed",
+              callStatus:  "ended",
+              callEndedAt: now,
+              callEndedBy: "system",
+            },
+          }
+        );
 
         // ── Lock the conversation ───────────────────────────────────────────
         await Conversation.findOneAndUpdate(
