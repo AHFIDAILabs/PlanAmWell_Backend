@@ -441,6 +441,36 @@ export const handleCallDisconnect = asyncHandler(async (req: Request, res: Respo
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /api/v1/video/ice-servers
+// Returns ICE server config from environment variables so TURN credentials can
+// be rotated on the backend without ever rebuilding the mobile app.
+//
+// Env vars (all optional — app falls back to Google STUN if none are set):
+//   STUN_SERVER_URL       e.g. stun:stun.relay.metered.ca:80
+//   TURN_SERVER_URL_1..4  e.g. turn:global.relay.metered.ca:80
+//   TURN_USERNAME_1..4    matching username
+//   TURN_CREDENTIAL_1..4  matching credential
+// ─────────────────────────────────────────────────────────────────────────────
+export const getIceServers = asyncHandler(async (_req: Request, res: Response) => {
+  const servers: any[] = [];
+
+  // Custom STUN (Metered) — falls back to Google STUN if not set
+  const stunUrl = process.env.STUN_SERVER_URL || "stun:stun.l.google.com:19302";
+  servers.push({ urls: stunUrl });
+  servers.push({ urls: "stun:stun1.l.google.com:19302" });
+
+  // Up to 4 TURN entries — add each one that has a URL configured
+  for (let i = 1; i <= 4; i++) {
+    const url        = process.env[`TURN_SERVER_URL_${i}`];
+    const username   = process.env[`TURN_USERNAME_${i}`]   || "";
+    const credential = process.env[`TURN_CREDENTIAL_${i}`] || "";
+    if (url) servers.push({ urls: url, username, credential });
+  }
+
+  return res.json({ success: true, data: { iceServers: servers } });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /api/v1/video/report-issue
 // ─────────────────────────────────────────────────────────────────────────────
 export const reportCallIssue = asyncHandler(async (req: Request, res: Response) => {

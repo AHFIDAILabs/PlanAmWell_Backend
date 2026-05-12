@@ -9,6 +9,7 @@ import {
   getCallStatus,
   reportCallIssue,
   declineCall,
+  getIceServers,
 } from '../controllers/videoCallController';
 import { verifyToken, authorize, guestAuth } from '../middleware/auth';
 
@@ -116,6 +117,20 @@ videoRouter.post(
   verifyToken,
   authorize('Doctor', 'User'),
   reportCallIssue
+);
+
+/**
+ * @route   GET /api/v1/video/ice-servers
+ * @desc    Return ICE server config (STUN + TURN credentials from env vars)
+ *          Allows TURN rotation without rebuilding the mobile app.
+ * @access  Private (Doctor | User)
+ */
+videoRouter.get(
+  '/ice-servers',
+  guestAuth,
+  verifyToken,
+  authorize('Doctor', 'User'),
+  getIceServers
 );
 
 export default videoRouter;
