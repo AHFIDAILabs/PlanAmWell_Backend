@@ -1,10 +1,11 @@
 import express from 'express';
-import { 
-  sendMessage, 
+import {
+  sendMessage,
   getConversationHistory,
   clearConversation,
   getUserConversations,
-  transcribeAudio
+  transcribeAudio,
+  uploadChatbotFile,
 } from '../controllers/chatbotController';
 import { guestAuth, verifyToken } from '../middleware/auth';
 
@@ -15,6 +16,9 @@ chatBotRouter.post('/message', guestAuth, sendMessage);
 
 // Transcribe audio - PUBLIC
 chatBotRouter.post('/transcribe', guestAuth, transcribeAudio);
+
+// Upload image or document from chatbot UI - PUBLIC
+chatBotRouter.post('/upload', guestAuth, uploadChatbotFile);
 
 // Get conversation history by sessionId - PUBLIC
 chatBotRouter.get('/conversation/:sessionId', guestAuth, getConversationHistory);

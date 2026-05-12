@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import { Product } from '../models/product';
 import { ChatConversation, IMessage } from '../models/ChatConversation';
 import { Intent, ChatbotRequest } from '../types/chatbot.types';
-import { uploadVideoToCloudinary } from '../middleware/claudinary';
+import { uploadToCloudinary, uploadDocumentToCloudinary, uploadVideoToCloudinary } from '../middleware/claudinary';
 import multer from 'multer';
 
 // --- CONFIGURATION ---
@@ -28,9 +28,24 @@ const openaiWhisper = new OpenAI({
 export const getGPTResponse = async (userPrompt: string, history: any[] = []): Promise<string> => {
     const systemMessage: OpenAI.Chat.ChatCompletionMessageParam = {
         role: 'system',
-        content: `You are "Ask AmWell", a professional reproductive health assistant. 
-        Provide medically-sound info on periods, fertility, and contraception. 
-        Be empathetic and confidential. If there's an emergency, advise seeing a doctor.`
+        content: `You are "Ask AmWell", a warm and trustworthy sexual & reproductive health (SRH) assistant built into the PlanAmWell app.
+
+TONE & STYLE:
+- Use plain, everyday language. Avoid medical jargon. If you must use a medical term, explain it immediately in brackets.
+- Keep responses short: 2–4 sentences max for simple questions. Use bullet points only when listing steps or options.
+- Be empathetic and non-judgmental — users may be asking sensitive questions about their bodies or relationships.
+- Always end with one short follow-up prompt such as "Would you like more detail on any of these?" or "Is there anything else I can help you with?"
+
+CONFIDENTIALITY:
+- Remind users their conversation is private and confidential if they seem hesitant.
+- Never share or reference personal information beyond the current conversation.
+
+SCOPE:
+- Answer questions about menstrual health, contraception, STIs, fertility, pregnancy, intimate relationships, and consent.
+- For product questions, suggest relevant PlanAmWell products when appropriate.
+- For appointment needs, guide users to book a consultation with a doctor on the app.
+- If there is a medical emergency, say: "Please call emergency services or visit a hospital immediately."
+- Do not provide diagnoses — always recommend seeing a doctor for diagnosis and treatment.`
     };
 
     const formattedHistory: OpenAI.Chat.ChatCompletionMessageParam[] = history.slice(-6).map(msg => ({
@@ -427,3 +442,41 @@ export const getUserConversations = async (req: Request, res: Response): Promise
     return res.status(500).json({ success:false, message:'Error fetching conversations', error:error.message });
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/v1/chatbot/upload
+// Upload an image or document from the chatbot UI to Cloudinary.
+// Public — works for both guests and authenticated users.
+// ─────────────────────────────────────────────────────────────────────────────
+export const uploadChatbotFile = [
+  upload.single('file'),
+  async (req: Request, res: Response): Promise<Response> => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No file uploaded' });
+      }
+
+      const { mimetype, buffer, originalname } = req.file;
+      let url: string;
+      let fileType: 'image' | 'document';
+
+      if (mimetype.startsWith('image/')) {
+        const result = await uploadToCloudinary(buffer, 'chatbot-attachments');
+        url = result.secure_url;
+        fileType = 'image';
+      } else {
+        const result = await uploadDocumentToCloudinary(buffer, 'chatbot-attachments', mimetype);
+        url = result.fileUrl;
+        fileType = 'document';
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: { url, fileType, fileName: originalname, mimeType: mimetype },
+      });
+    } catch (error: any) {
+      console.error('Chatbot file upload error:', error);
+      return res.status(500).json({ success: false, message: 'Error uploading file' });
+    }
+  },
+];
