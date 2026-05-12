@@ -12,7 +12,40 @@ if (!PARTNER_API_KEY) {
 const VALID_DELIVERY_STATUSES = ["pending", "processing", "shipped", "delivered", "cancelled", "failed"];
 
 function verifyWebhookSecret(req: Request): boolean {
-  return true; // TEMPORARY: bypass for testing
+  if (process.env.WEBHOOK_BYPASS_VERIFICATION === "true") {
+    console.warn("[Webhook] ⚠️  Signature verification bypassed — disable in production");
+    return true;
+  }
+
+  if (!PARTNER_API_KEY) return false;
+
+  const rawSig =
+    req.headers["x-webhook-signature"] ||
+    req.headers["x-partner-signature"] ||
+    req.headers["x-webhook-secret"] ||
+    req.headers["x-api-key"];
+
+  const sig = Array.isArray(rawSig) ? rawSig[0] : rawSig;
+  if (!sig) return false;
+
+  // Support raw key comparison (partner sends key directly)
+  if (sig === PARTNER_API_KEY) return true;
+
+  // Support HMAC-SHA256 signature (partner sends sha256=<hex>)
+  try {
+    const expected = createHmac("sha256", PARTNER_API_KEY)
+      .update(JSON.stringify(req.body))
+      .digest("hex");
+
+    const sigHex = sig.replace(/^sha256=/, "");
+    const sigBuf = Buffer.from(sigHex, "hex");
+    const expBuf = Buffer.from(expected, "hex");
+
+    if (sigBuf.length !== expBuf.length) return false;
+    return timingSafeEqual(sigBuf, expBuf);
+  } catch {
+    return false;
+  }
 }
 
 /**

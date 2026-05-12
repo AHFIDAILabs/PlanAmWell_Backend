@@ -40,13 +40,32 @@ import hospitalRouter from "./routes/hospitalRoutes";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
+import rateLimit from "express-rate-limit";
 
 const app = express();
 const server = http.createServer(app);
 
+// Build CORS origin list from env (comma-separated). Mobile apps have no Origin header,
+// so we always allow requests with no origin (React Native / Expo / Postman).
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : [];
+
+function isCorsAllowed(origin: string | undefined): boolean {
+  if (!origin) return true; // mobile apps, curl, etc.
+  if (ALLOWED_ORIGINS.length === 0) return true; // env not set — allow all (dev)
+  return ALLOWED_ORIGINS.includes(origin);
+}
+
 export const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: (origin, callback) => {
+      if (isCorsAllowed(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+      }
+    },
     methods: ["GET", "POST"],
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
@@ -541,7 +560,13 @@ export const getAppointmentRoomMembers = (appointmentId: string): string[] => {
 // Middleware
 app.use(
   cors({
-    origin: "*",
+    origin: (origin, callback) => {
+      if (isCorsAllowed(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+      }
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
@@ -555,9 +580,18 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "25mb" }));
-app.use(express.urlencoded({ limit: "25mb", extended: true }));
-app.use(morgan("dev"));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ limit: "10mb", extended: true }));
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many requests. Please try again later." },
+});
+app.use("/api/", globalLimiter);
 
 // Health check
 app.get("/", (req, res) => {
@@ -571,15 +605,11 @@ app.get("/", (req, res) => {
   });
 });
 
-// Socket.IO status endpoint
+// Socket.IO status endpoint — counts only, no user IDs exposed
 app.get("/api/v1/socket/status", (req, res) => {
   res.json({
     activeConnections: connectedUsers.size,
-    connectedUserIds: Array.from(connectedUsers.keys()),
-    appointmentRooms: Array.from(appointmentRooms.keys()).map((id) => ({
-      appointmentId: id,
-      members: getAppointmentRoomMembers(id),
-    })),
+    activeAppointmentRooms: appointmentRooms.size,
     timestamp: new Date().toISOString(),
   });
 });

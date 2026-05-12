@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import {
   createGuestSession,
   convertGuestToUser,
@@ -11,9 +12,25 @@ import {
   refreshToken,
   deleteMyAccount,
 } from "../controllers/authController";
-import { guestAuth, verifyToken } from "../middleware/auth"; // Make sure you have this middleware
+import { guestAuth, verifyToken } from "../middleware/auth";
 
 const authRouter = Router();
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many login attempts. Please try again in 15 minutes." },
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many registration attempts. Please try again in 1 hour." },
+});
 
 /**
  * PUBLIC - create a guest session
@@ -23,17 +40,17 @@ authRouter.post("/guest", createGuestSession);
 /**
  * PUBLIC - register a new user
  */
-authRouter.post("/register", createUser);
+authRouter.post("/register", registerLimiter, createUser);
 
 /**
  * PUBLIC - login user
  */
-authRouter.post("/login", loginUser);  
+authRouter.post("/login", loginLimiter, loginUser);
 
 /**
  *  PUBLIC -login doctor
  */
-authRouter.post("/doctor/login", doctorLogin);
+authRouter.post("/doctor/login", loginLimiter, doctorLogin);
 
 /**
  * GUEST USER - convert guest session to registered user
