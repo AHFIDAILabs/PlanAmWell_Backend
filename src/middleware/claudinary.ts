@@ -18,7 +18,10 @@ export const uploadToCloudinary = async (
     const base64 = buffer.toString("base64");
     const dataURI = `data:image/jpeg;base64,${base64}`;
 
-    const { secure_url, public_id } = await cloudinary.uploader.upload(dataURI, { folder });
+    const { secure_url, public_id } = await cloudinary.uploader.upload(dataURI, {
+      folder,
+      timeout: 30000,
+    });
     return { secure_url, public_id };
   } catch (error: any) {
     console.error("Cloudinary Upload Error (Image):", error.message);
