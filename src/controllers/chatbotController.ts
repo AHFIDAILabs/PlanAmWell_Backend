@@ -9,18 +9,16 @@ import { uploadToCloudinary, uploadDocumentToCloudinary, uploadVideoToCloudinary
 import multer from 'multer';
 
 // --- CONFIGURATION ---
-const upload = multer({ 
+const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 25 * 1024 * 1024 } 
+    limits: { fileSize: 25 * 1024 * 1024 }
 });
 
-const openrouter = new OpenAI({ 
-    apiKey: process.env.OPENAI_API_KEY, 
-    baseURL: "https://openrouter.ai/api/v1" 
-});
-
-const openaiWhisper = new OpenAI({ 
-    apiKey: process.env.WHISPER_API_KEY 
+// Groq — free tier: chat (Llama 3.3 70B) + transcription (Whisper large-v3-turbo)
+// The OpenAI SDK is fully compatible with Groq's API
+const groq = new OpenAI({
+    apiKey: process.env.GROQ_API_KEY || '',
+    baseURL: 'https://api.groq.com/openai/v1',
 });
 
 // --- HELPER FUNCTIONS ---
@@ -28,24 +26,33 @@ const openaiWhisper = new OpenAI({
 export const getGPTResponse = async (userPrompt: string, history: any[] = []): Promise<string> => {
     const systemMessage: OpenAI.Chat.ChatCompletionMessageParam = {
         role: 'system',
-        content: `You are "Ask AmWell", a warm and trustworthy sexual & reproductive health (SRH) assistant built into the PlanAmWell app.
+        content: `You are "Ask AmWell", a warm and trustworthy sexual & reproductive health (SRH) assistant built into the PlanAmWell app — a Nigerian telehealth platform.
+
+LANGUAGE (CRITICAL):
+- You understand and speak English, Yoruba, Hausa, and Nigerian Pidgin English fluently.
+- Detect the language the user writes in and ALWAYS respond in that SAME language.
+- If the user mixes languages (e.g. English + Pidgin), match their style.
+- Nigerian Pidgin: use natural expressions — "wetin", "no worry", "e go better", "how far", "abeg", "oga", "make you", "I no go lie".
+- Yoruba: respond in clear, simple Yoruba; embed English medical terms in parentheses e.g. "àárùn abẹ́ (STI)".
+- Hausa: respond in clear, simple Hausa; embed English medical terms in parentheses e.g. "cutar jima'i (STI)".
+- If language is unclear, default to warm Nigerian English.
 
 TONE & STYLE:
-- Use plain, everyday language. Avoid medical jargon. If you must use a medical term, explain it immediately in brackets.
-- Keep responses short: 2–4 sentences max for simple questions. Use bullet points only when listing steps or options.
-- Be empathetic and non-judgmental — users may be asking sensitive questions about their bodies or relationships.
-- Always end with one short follow-up prompt such as "Would you like more detail on any of these?" or "Is there anything else I can help you with?"
+- Use plain, everyday language — no medical jargon without explanation.
+- Keep responses short: 2–4 sentences for simple questions; use bullet points only for steps or lists.
+- Be empathetic and non-judgmental — users may ask sensitive questions about their bodies or relationships.
+- End with one short follow-up prompt like "You wan know more?" (Pidgin) / "Ṣé o fẹ́ mọ̀ síi?" (Yoruba) / "Kana so ƙari?" (Hausa) / "Would you like more detail?" (English).
 
 CONFIDENTIALITY:
 - Remind users their conversation is private and confidential if they seem hesitant.
-- Never share or reference personal information beyond the current conversation.
+- Never reference personal information outside the current conversation.
 
 SCOPE:
 - Answer questions about menstrual health, contraception, STIs, fertility, pregnancy, intimate relationships, and consent.
-- For product questions, suggest relevant PlanAmWell products when appropriate.
-- For appointment needs, guide users to book a consultation with a doctor on the app.
-- If there is a medical emergency, say: "Please call emergency services or visit a hospital immediately."
-- Do not provide diagnoses — always recommend seeing a doctor for diagnosis and treatment.`
+- Suggest relevant PlanAmWell products for product questions.
+- Guide users to book a doctor consultation on the app for appointment needs.
+- Medical emergency: tell them to call emergency services or go to a hospital immediately.
+- Never provide diagnoses — always recommend seeing a doctor.`
     };
 
     const formattedHistory: OpenAI.Chat.ChatCompletionMessageParam[] = history.slice(-6).map(msg => ({
@@ -59,14 +66,14 @@ SCOPE:
         { role: 'user' as const, content: userPrompt }
     ];
 
-    const completion = await openrouter.chat.completions.create({
-        model: 'openai/gpt-4o-mini',
-        messages: messages,
+    const completion = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages,
         temperature: 0.7,
-        max_tokens: 300,
+        max_tokens: 500,
     });
 
-    return completion.choices[0].message?.content || 'I am having trouble connecting right now.';
+    return completion.choices[0].message?.content || 'I am having trouble connecting right now. Please try again.';
 };
 
 export const transcribeAudio = [
@@ -84,9 +91,10 @@ export const transcribeAudio = [
 
             // console.log('✅ Audio uploaded to Cloudinary as media:', videoUrl);
 
-            const transcription = await openaiWhisper.audio.transcriptions.create({
+            // whisper-large-v3-turbo: free on Groq, auto-detects Yoruba/Hausa/Pidgin/English
+            const transcription = await groq.audio.transcriptions.create({
                 file: await OpenAI.toFile(req.file.buffer, 'speech.m4a'),
-                model: 'whisper-1',
+                model: 'whisper-large-v3-turbo',
             });
 
             return res.status(200).json({
@@ -119,13 +127,32 @@ export const transcribeAudio = [
 
 const detectIntent = (message: string): Intent => {
     const m = message.toLowerCase().trim();
-    if (['hi', 'hello', 'hey'].some(k => m.startsWith(k)) && m.split(' ').length <= 3) return 'greeting';
-    if (['buy', 'order', 'purchase', 'add to cart', 'price'].some(k => m.includes(k))) return 'buy';
-    if (['appointment', 'book', 'doctor'].some(k => m.includes(k))) return 'appointment';
-    
-    const healthKeywords = ['period', 'menstrual', 'fertility', 'pregnant', 'contraception', 'postinor', 'infection'];
+
+    // Greetings — English + Yoruba + Hausa + Pidgin
+    const greetings = ['hi', 'hello', 'hey', 'bawo ni', 'e kaaro', 'e kaasan', 'e kaale',
+        'sannu', 'ina kwana', 'barka', 'how far', 'how body', 'whasup', 'sup'];
+    if (greetings.some(k => m.startsWith(k)) && m.split(' ').length <= 5) return 'greeting';
+
+    // Buy intent — English + Pidgin
+    const buyKeywords = ['buy', 'order', 'purchase', 'add to cart', 'price', 'how much',
+        'i wan buy', 'make i get', 'abeg give me', 'i need to get'];
+    if (buyKeywords.some(k => m.includes(k))) return 'buy';
+
+    // Appointment intent — English + Yoruba (dokita, ile iwosan) + Hausa (likita, asibiti) + Pidgin
+    const appointmentKeywords = ['appointment', 'book', 'doctor', 'consult',
+        'dokita', 'ile iwosan', 'likita', 'asibiti', 'see doctor', 'book appointment'];
+    if (appointmentKeywords.some(k => m.includes(k))) return 'appointment';
+
+    // Health intent — English + Yoruba + Hausa + Pidgin
+    const healthKeywords = [
+        'period', 'menstrual', 'fertility', 'pregnant', 'contraception', 'postinor', 'infection',
+        'condom', 'pill', 'sti', 'std', 'discharge', 'cramp', 'ovulation',
+        'oyún', 'àárùn', 'ìbímọ', // Yoruba: pregnancy, illness, childbirth
+        'ciki', 'haila', 'haihuwa', // Hausa: pregnancy, menstruation, childbirth
+        'my body', 'i dey feel', 'dey pain', 'my tummy', 'period pain', // Pidgin
+    ];
     if (healthKeywords.some(k => m.includes(k))) return 'health';
-    
+
     return 'general';
 };
 
@@ -138,7 +165,7 @@ const extractProductKeywords = (message: string): string => {
         'i want to order', 'i need to order', 'i would like to buy', 'i would like to purchase',
         'can i buy', 'can i get', 'can i order', 'can i purchase',
         'i want', 'i need', 'i require', 'get me', 'buy me',
-        'buy', 'order', 'purchase', 'get'
+        'buy', 'order', 'purchase', 'get', 'ina son siya', 'abeg give me', 'make i get', 'i wan buy', 'i need to get'
     ];
     
     // Sort by length (longest first) to match longer phrases first
@@ -229,9 +256,9 @@ export const sendMessage = [
                     'whisper-audio'
                 );
                 
-                const transcription = await openaiWhisper.audio.transcriptions.create({
+                const transcription = await groq.audio.transcriptions.create({
                     file: await OpenAI.toFile(req.file.buffer, 'speech.m4a'),
-                    model: 'whisper-1',
+                    model: 'whisper-large-v3-turbo',
                 });
 
                 userText = transcription.text || '';
