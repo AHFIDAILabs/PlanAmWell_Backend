@@ -149,8 +149,7 @@ export const generateVideoToken = asyncHandler(
           ? await Conversation.findById(appointment.conversationId)
           : await Conversation.findOne({ appointmentId });
 
-        sendIncomingCallPushNotification(recipientId, {
-          appointmentId: appointmentId.toString(),
+        const callData = {
           callerName,
           callerImage: isDoctor
             ? (appointment.doctorId as any).doctorImage
@@ -159,11 +158,16 @@ export const generateVideoToken = asyncHandler(
           channelName,
           conversationId: conversation?._id?.toString(),
           videoRequestId: conversation?.activeVideoRequest?._id?.toString(),
+        };
+
+        sendIncomingCallPushNotification(recipientId, {
+          appointmentId: appointmentId.toString(),
+          ...callData,
         }).catch((err: any) =>
           console.error("⚠️ Push notification failed (non-fatal):", err.message)
         );
 
-        emitCallRinging(appointmentId.toString(), role);
+        emitCallRinging(appointmentId.toString(), role, recipientId, callData);
 
         NotificationService.notifyCallStarted(
           recipientId,

@@ -328,18 +328,39 @@ export const emitCallStarted = (appointmentId: string, startedBy: string) => {
   }
 };
 
-// ✅ NEW: Emit call ringing to appointment room
-export const emitCallRinging = (appointmentId: string, initiatedBy: string) => {
+// ✅ Emit call ringing to appointment room AND recipient's personal room
+export const emitCallRinging = (
+  appointmentId: string,
+  initiatedBy: string,
+  recipientId?: string,
+  callData?: {
+    callerName?: string;
+    callerImage?: string;
+    callerType?: string;
+    channelName?: string;
+    conversationId?: string;
+    videoRequestId?: string;
+  }
+) => {
   try {
-    const roomName = `appointment:${appointmentId}`;
-
-    io.to(roomName).emit("call-ringing", {
+    const payload = {
       appointmentId,
       initiatedBy,
       timestamp: new Date().toISOString(),
-    });
+      ...(callData || {}),
+    };
 
-    console.log(`📞 Call ringing notification sent to appointment room ${appointmentId}`);
+    // Always emit to appointment room (catches anyone already viewing that appointment)
+    io.to(`appointment:${appointmentId}`).emit("call-ringing", payload);
+
+    // Also emit to the recipient's personal room so it fires regardless of which screen they're on
+    if (recipientId) {
+      io.to(`user_${recipientId}`).emit("call-ringing", payload);
+      console.log(`📞 Call ringing sent to appointment room + user_${recipientId}`);
+    } else {
+      console.log(`📞 Call ringing sent to appointment room ${appointmentId}`);
+    }
+
     return true;
   } catch (error) {
     console.error(`❌ Failed to emit call ringing:`, error);

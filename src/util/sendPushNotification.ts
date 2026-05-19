@@ -245,7 +245,12 @@ export async function sendPushNotification(
         sound: "default" as const,
         title: notification.title,
         body: notification.message,
-        data: notification.metadata ?? {},
+        priority: "high" as const,
+        channelId: "default",
+        data: {
+          type: notification.type,
+          ...(notification.metadata ?? {}),
+        },
       }));
 
     if (!messages.length) {
