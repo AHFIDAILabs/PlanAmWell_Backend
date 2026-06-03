@@ -37,6 +37,9 @@ import chatRouter from "./routes/chatRoutes";
 import medicalRecordRouter from "./routes/medicalRecordRoutes";
 import webhookRouter from "./routes/webhookRoutes";
 import hospitalRouter from "./routes/hospitalRoutes";
+import medicationReminderRouter from "./routes/medicationReminderRoutes";
+import familyMemberRouter from "./routes/familyMemberRoutes";
+import reviewRouter from "./routes/reviewRoutes";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
@@ -659,6 +662,9 @@ app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/medical-records", medicalRecordRouter);
 app.use("/api/v1/hospitals", hospitalRouter);
 app.use("/api/v1/webhooks", webhookRouter);
+app.use("/api/v1/medication-reminders", medicationReminderRouter);
+app.use("/api/v1/family", familyMemberRouter);
+app.use("/api/v1/reviews", reviewRouter);
 
 app.use(errorHandler);
 

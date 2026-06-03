@@ -14,6 +14,14 @@ export interface IMessage {
   status: MessageStatus;
   createdAt: Date;
   readAt?: Date;
+  isEdited?: boolean;
+  editedAt?: Date;
+  isDeleted?: boolean;
+  replyTo?: {
+    messageId: Types.ObjectId;
+    content: string;
+    senderType: "User" | "Doctor";
+  };
 }
 
 export interface IVideoCallRequest {
@@ -75,6 +83,14 @@ const MessageSchema = new Schema<IMessage>(
       default: "sent",
     },
     readAt: Date,
+    isEdited:  { type: Boolean, default: false },
+    editedAt:  Date,
+    isDeleted: { type: Boolean, default: false },
+    replyTo: {
+      messageId: Schema.Types.ObjectId,
+      content: String,
+      senderType: { type: String, enum: ["User", "Doctor"] },
+    },
   },
   { timestamps: true }
 );

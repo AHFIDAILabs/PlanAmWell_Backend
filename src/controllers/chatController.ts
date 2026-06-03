@@ -279,7 +279,7 @@ export const unlockConversation = asyncHandler(
 export const sendMessage = asyncHandler(
   async (req: Request, res: Response) => {
     const { conversationId } = req.params;
-    const { content, messageType = "text", mediaUrl } = req.body;
+    const { content, messageType = "text", mediaUrl, replyTo } = req.body;
     const userId = req.auth?.id;
     const role = req.auth?.role as "User" | "Doctor";
 
@@ -332,6 +332,7 @@ export const sendMessage = asyncHandler(
       mediaUrl,
       status: "sent",
       createdAt: new Date(),
+      ...(replyTo ? { replyTo } : {}),
     };
 
     conversation.messages.push(newMessage);
@@ -800,3 +801,110 @@ export const getUserConversations = asyncHandler(
     res.status(200).json({ success: true, data: conversations });
   }
 );
+
+/**
+ * Edit a message (sender only, text messages only)
+ */
+export const editMessage = asyncHandler(async (req: Request, res: Response) => {
+  const { conversationId, messageId } = req.params;
+  const { content } = req.body;
+  const userId = req.auth?.id;
+  const role = req.auth?.role as "User" | "Doctor";
+
+  if (!content?.trim()) {
+    return res.status(400).json({ success: false, message: "Content is required" });
+  }
+
+  const conversation = await Conversation.findById(conversationId);
+  if (!conversation) {
+    return res.status(404).json({ success: false, message: "Conversation not found" });
+  }
+
+  const message = conversation.messages.find(m => m._id?.toString() === messageId) ?? null;
+  if (!message) {
+    return res.status(404).json({ success: false, message: "Message not found" });
+  }
+
+  if (String(message.senderId) !== String(userId)) {
+    return res.status(403).json({ success: false, message: "Cannot edit another user's message" });
+  }
+
+  if (message.messageType !== "text") {
+    return res.status(400).json({ success: false, message: "Only text messages can be edited" });
+  }
+
+  if (message.isDeleted) {
+    return res.status(400).json({ success: false, message: "Cannot edit a deleted message" });
+  }
+
+  message.content = content.trim();
+  message.isEdited = true;
+  message.editedAt = new Date();
+  await conversation.save();
+
+  const recipientId =
+    role === "Doctor"
+      ? String(conversation.participants.userId)
+      : String(conversation.participants.doctorId);
+
+  const { io } = require("../index");
+  // Notify both parties
+  io.to(`user_${recipientId}`).emit("message-edited", {
+    conversationId,
+    messageId,
+    content: message.content,
+    editedAt: message.editedAt,
+  });
+  io.to(`user_${userId}`).emit("message-edited", {
+    conversationId,
+    messageId,
+    content: message.content,
+    editedAt: message.editedAt,
+  });
+
+  return res.json({ success: true, data: message });
+});
+
+/**
+ * Delete a message (sender only — soft delete)
+ */
+export const deleteMessage = asyncHandler(async (req: Request, res: Response) => {
+  const { conversationId, messageId } = req.params;
+  const userId = req.auth?.id;
+  const role = req.auth?.role as "User" | "Doctor";
+
+  const conversation = await Conversation.findById(conversationId);
+  if (!conversation) {
+    return res.status(404).json({ success: false, message: "Conversation not found" });
+  }
+
+  const message = conversation.messages.find(m => m._id?.toString() === messageId) ?? null;
+  if (!message) {
+    return res.status(404).json({ success: false, message: "Message not found" });
+  }
+
+  if (String(message.senderId) !== String(userId)) {
+    return res.status(403).json({ success: false, message: "Cannot delete another user's message" });
+  }
+
+  if (message.isDeleted) {
+    return res.json({ success: true }); // idempotent
+  }
+
+  message.isDeleted = true;
+  message.content = "This message was deleted";
+  message.mediaUrl = undefined;
+  await conversation.save();
+
+  const recipientId =
+    role === "Doctor"
+      ? String(conversation.participants.userId)
+      : String(conversation.participants.doctorId);
+
+  const { io } = require("../index");
+  const payload = { conversationId, messageId };
+  io.to(`user_${recipientId}`).emit("message-deleted", payload);
+  io.to(`user_${userId}`).emit("message-deleted", payload);
+
+  return res.json({ success: true });
+});

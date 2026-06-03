@@ -6,6 +6,7 @@ import {
   getUserConversations,
   transcribeAudio,
   uploadChatbotFile,
+  symptomCheck,
 } from '../controllers/chatbotController';
 import { guestAuth, verifyToken } from '../middleware/auth';
 
@@ -19,6 +20,9 @@ chatBotRouter.post('/transcribe', guestAuth, transcribeAudio);
 
 // Upload image or document from chatbot UI - PUBLIC
 chatBotRouter.post('/upload', guestAuth, uploadChatbotFile);
+
+// Symptom checker - PUBLIC
+chatBotRouter.post('/symptom-check', guestAuth, symptomCheck);
 
 // Get conversation history by sessionId - PUBLIC
 chatBotRouter.get('/conversation/:sessionId', guestAuth, getConversationHistory);

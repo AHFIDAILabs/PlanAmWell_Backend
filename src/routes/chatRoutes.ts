@@ -12,7 +12,9 @@ import {
   getUserConversations,
   uploadChatMedia,
   uploadMiddleware,
-  unlockConversation
+  unlockConversation,
+  editMessage,
+  deleteMessage,
 } from "../controllers/chatController";
 import { verifyToken } from "../middleware/auth";
 
@@ -32,6 +34,8 @@ chatRouter.get("/conversation/:appointmentId", getOrCreateConversation);
 chatRouter.post("/conversation/:conversationId/message", sendMessage);
 chatRouter.get("/conversation/:conversationId/messages", getMessages);
 chatRouter.post("/conversation/:conversationId/read", markAsRead);
+chatRouter.put("/conversation/:conversationId/messages/:messageId", editMessage);
+chatRouter.delete("/conversation/:conversationId/messages/:messageId", deleteMessage);
 chatRouter.patch("/conversation/:conversationId/unlock", verifyToken, unlockConversation);
 // Typing indicator
 chatRouter.post("/conversation/:conversationId/typing", updateTyping);
