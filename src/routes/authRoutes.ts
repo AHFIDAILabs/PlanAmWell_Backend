@@ -11,6 +11,7 @@ import {
   removePushToken,
   refreshToken,
   deleteMyAccount,
+  requestAccountDeletionByCredentials,
 } from "../controllers/authController";
 import { guestAuth, verifyToken } from "../middleware/auth";
 
@@ -79,5 +80,11 @@ authRouter.post("/refreshToken", refreshToken);
  * PROTECTED - self-service account deletion (requires password confirmation)
  */
 authRouter.delete("/me", guestAuth, verifyToken, deleteMyAccount);
+
+/**
+ * PUBLIC - web-based account deletion (email + password), for the
+ * account-deletion page reachable without installing the app
+ */
+authRouter.post("/delete-by-credentials", loginLimiter, requestAccountDeletionByCredentials);
 
 export default authRouter;

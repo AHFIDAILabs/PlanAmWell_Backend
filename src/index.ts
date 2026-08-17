@@ -40,6 +40,7 @@ import hospitalRouter from "./routes/hospitalRoutes";
 import medicationReminderRouter from "./routes/medicationReminderRoutes";
 import familyMemberRouter from "./routes/familyMemberRoutes";
 import reviewRouter from "./routes/reviewRoutes";
+import legalRouter from "./routes/legalRoutes";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
@@ -628,6 +629,10 @@ app.get("/", (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// Public legal pages — Privacy Policy, Terms of Service, web account deletion.
+// Reachable without installing the app, per Google Play Store requirements.
+app.use("/", legalRouter);
 
 // Socket.IO status endpoint — counts only, no user IDs exposed
 app.get("/api/v1/socket/status", (req, res) => {

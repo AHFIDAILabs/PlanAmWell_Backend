@@ -461,3 +461,41 @@ export const deleteMyAccount = asyncHandler(async (req: Request, res: Response) 
 
   res.status(200).json({ success: true, message: "Account deleted successfully." });
 });
+
+// ─────────────────────────────────────────────
+// POST /auth/delete-by-credentials — Public, web-based account deletion.
+// Lets someone delete their account from a browser, without the app
+// installed, as required by Google Play's account deletion policy.
+// Identity is confirmed with email + password — the same trust level as
+// logging in — since a browser session has no app-issued JWT to present.
+// ─────────────────────────────────────────────
+export const requestAccountDeletionByCredentials = asyncHandler(async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    res.status(400);
+    throw new Error("Email and password are required.");
+  }
+
+  const trimmedEmail = String(email).trim();
+
+  const user = await User.findOne({ email: trimmedEmail }).select("+password");
+  if (user && user.password && (await bcrypt.compare(password, user.password))) {
+    await User.findByIdAndDelete(user._id);
+    await RefreshToken.deleteMany({ userId: user._id });
+    res.status(200).json({ success: true, message: "Account deleted successfully." });
+    return;
+  }
+
+  const doctor = await Doctor.findOne({ email: trimmedEmail });
+  if (doctor && (await bcrypt.compare(password, doctor.passwordHash))) {
+    await Doctor.findByIdAndDelete(doctor._id);
+    await RefreshToken.deleteMany({ userId: doctor._id });
+    res.status(200).json({ success: true, message: "Account deleted successfully." });
+    return;
+  }
+
+  // Same generic error either way — don't reveal whether the email exists.
+  res.status(401);
+  throw new Error("Invalid email or password.");
+});
