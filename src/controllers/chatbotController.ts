@@ -67,74 +67,13 @@ SCOPE:
     ];
 
     const completion = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
         messages,
         temperature: 0.7,
         max_tokens: 500,
     });
 
     return completion.choices[0].message?.content || 'I am having trouble connecting right now. Please try again.';
-};
-
-export const symptomCheck = async (req: Request, res: Response): Promise<Response> => {
-    try {
-        const { messages } = req.body as { messages: { role: 'user' | 'assistant'; content: string }[] };
-
-        if (!messages || !Array.isArray(messages) || messages.length === 0) {
-            return res.status(400).json({ success: false, message: 'messages array is required' });
-        }
-
-        const systemPrompt = `You are a medical triage assistant for PlanAmWell, a Nigerian telehealth platform. Your job is to help users understand their symptoms and guide them to appropriate care.
-
-LANGUAGE: Detect the user's language (English, Yoruba, Hausa, Nigerian Pidgin) and respond in the same language. Use plain, everyday language — no medical jargon without explanation.
-
-BEHAVIOR:
-- Ask one clarifying question at a time to gather information (symptom onset, severity 1–10, location, duration, associated symptoms).
-- Be empathetic and non-judgmental.
-- NEVER diagnose. Always recommend professional care.
-- If symptoms suggest a life-threatening emergency (chest pain, difficulty breathing, stroke signs, heavy bleeding), immediately instruct the user to call emergency services or go to the nearest hospital.
-
-RECOMMENDATION FORMAT:
-After you have gathered enough information (usually 3–5 exchanges), end your message with a structured recommendation block EXACTLY like this (valid JSON, no extra text inside the block):
-[RECOMMENDATION]{"specialist":"General Practitioner","urgency":"routine","summary":"Your symptoms suggest a mild upper respiratory infection. Rest and hydration are recommended."}[/RECOMMENDATION]
-
-urgency values: "emergency" | "urgent" | "soon" | "routine"
-specialist examples: "General Practitioner", "Cardiologist", "Gynecologist", "Dermatologist", "Neurologist", "Pediatrician", "Psychiatrist", "ENT Specialist"
-
-Only include the [RECOMMENDATION] block when you have sufficient information to make a triage decision. Do not include it in every message.`;
-
-        const formattedMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-            { role: 'system', content: systemPrompt },
-            ...messages.slice(-10).map(m => ({ role: m.role, content: m.content })),
-        ];
-
-        const completion = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
-            messages: formattedMessages,
-            temperature: 0.4,
-            max_tokens: 600,
-        });
-
-        const rawResponse = completion.choices[0].message?.content || 'I am having trouble connecting right now. Please try again.';
-
-        const recommendationMatch = rawResponse.match(/\[RECOMMENDATION\]([\s\S]*?)\[\/RECOMMENDATION\]/);
-        let recommendation: { specialist: string; urgency: string; summary: string } | null = null;
-        let cleanResponse = rawResponse;
-
-        if (recommendationMatch) {
-            try {
-                recommendation = JSON.parse(recommendationMatch[1].trim());
-                cleanResponse = rawResponse.replace(/\[RECOMMENDATION\][\s\S]*?\[\/RECOMMENDATION\]/, '').trim();
-            } catch (_) {
-                // JSON parse failed — return full response without recommendation
-            }
-        }
-
-        return res.json({ success: true, data: { content: cleanResponse, recommendation } });
-    } catch (error: any) {
-        console.error('[SymptomCheck] Error:', error?.message);
-        return res.status(500).json({ success: false, message: 'Failed to process symptom check' });
-    }
 };
 
 export const transcribeAudio = [

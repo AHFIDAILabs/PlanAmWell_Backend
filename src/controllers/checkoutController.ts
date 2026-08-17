@@ -608,6 +608,65 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
 });
 
 
+// ─────────────────────────────────────────────
+// GET /checkout/delivery-zones — states + LGAs the delivery partner actually
+// services, grouped and priced. Used to preload the checkout location picker
+// so users can only select an address the partner can deliver to, instead of
+// picking any Nigerian state/LGA and silently getting "free" delivery when
+// the partner has no coverage there.
+// Cached in-memory for 15 minutes — the zone list changes rarely and this
+// keeps checkout screen opens from hitting the partner API every time.
+// ─────────────────────────────────────────────
+interface DeliveryZoneLga {
+  name: string;
+  price: number;
+}
+interface DeliveryZoneState {
+  state: string;
+  lgas: DeliveryZoneLga[];
+}
+
+const ZONES_CACHE_TTL_MS = 15 * 60 * 1000;
+let zonesCache: { data: DeliveryZoneState[]; expiresAt: number } | null = null;
+
+export const getDeliveryZones = asyncHandler(async (req: Request, res: Response) => {
+  if (zonesCache && zonesCache.expiresAt > Date.now()) {
+    return res.status(200).json({ success: true, data: zonesCache.data, cached: true });
+  }
+
+  try {
+    const response = await axios.get(`${PARTNER_API_URL}/v1/delivery-zones`);
+    const rawZones: { state: string; lga: string; price: number }[] = response.data || [];
+
+    const byState = new Map<string, DeliveryZoneLga[]>();
+    for (const zone of rawZones) {
+      if (!zone?.state || !zone?.lga) continue;
+      if (!byState.has(zone.state)) byState.set(zone.state, []);
+      byState.get(zone.state)!.push({ name: zone.lga, price: zone.price ?? 0 });
+    }
+
+    const zones: DeliveryZoneState[] = Array.from(byState.entries())
+      .map(([state, lgas]) => ({
+        state,
+        lgas: lgas.sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .sort((a, b) => a.state.localeCompare(b.state));
+
+    zonesCache = { data: zones, expiresAt: Date.now() + ZONES_CACHE_TTL_MS };
+
+    return res.status(200).json({ success: true, data: zones, cached: false });
+  } catch (err: any) {
+    console.error("[getDeliveryZones] Failed:", err.response?.data || err.message);
+
+    // Serve stale cache rather than fail the checkout screen outright, if we have one
+    if (zonesCache) {
+      return res.status(200).json({ success: true, data: zonesCache.data, cached: true, stale: true });
+    }
+
+    return res.status(502).json({ success: false, message: "Could not fetch delivery zones" });
+  }
+});
+
 export const getDeliveryFee = asyncHandler(async (req: Request, res: Response) => {
   const { state, lga } = req.query;
 
