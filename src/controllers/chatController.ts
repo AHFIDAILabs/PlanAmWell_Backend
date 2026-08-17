@@ -565,6 +565,7 @@ export const requestVideoCall = asyncHandler(
     const { conversationId } = req.params;
     const userId = req.auth?.id;
     const role = req.auth?.role as "User" | "Doctor";
+    const callType: "audio" | "video" = req.body?.callType === "audio" ? "audio" : "video";
 
     const conversation = await Conversation.findById(conversationId)
       .populate("appointmentId")
@@ -592,6 +593,7 @@ export const requestVideoCall = asyncHandler(
       requestedBy: new mongoose.Types.ObjectId(userId),
       requestedByType: role,
       status: "pending" as const,
+      callType,
       requestedAt: new Date(),
       expiresAt: new Date(Date.now() + 60 * 1000),
     };
@@ -696,15 +698,27 @@ export const respondToVideoCall = asyncHandler(
 
     const requesterId = String(conversation.activeVideoRequest.requestedBy);
     const responseStatus = conversation.activeVideoRequest.status;
+    const callType = conversation.activeVideoRequest.callType || "video";
     conversation.activeVideoRequest = undefined;
 
     await conversation.save();
+
+    // Ad-hoc chat call, accepted — let generateVideoToken bypass the
+    // scheduled-time window for the next few minutes so both sides can join,
+    // and record the call type so both joiners open the same UI.
+    if (accept && conversation.appointmentId) {
+      await Appointment.updateOne(
+        { _id: conversation.appointmentId },
+        { $set: { adHocCallApprovedAt: new Date(), callType } }
+      );
+    }
 
     emitVideoCallResponse(
       conversationId,
       requesterId,
       responseStatus,
-      requestId
+      requestId,
+      callType
     );
 
     res.status(200).json({
@@ -712,6 +726,7 @@ export const respondToVideoCall = asyncHandler(
       data: {
         accepted: accept,
         appointmentId: (conversation.appointmentId as any)._id,
+        callType,
       },
       message: accept
         ? "Video call accepted. Redirecting to call..."

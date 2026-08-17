@@ -40,6 +40,9 @@ export const generateVideoToken = asyncHandler(
     const { appointmentId } = req.body;
     const userId = req.auth?.id;
     const role   = req.auth?.role as "Doctor" | "User";
+    // Only meaningful when initiating a new call (Case A) — joiners always
+    // get the authoritative value back from the appointment, never from here.
+    const requestedCallType: "audio" | "video" = req.body?.callType === "audio" ? "audio" : "video";
 
     if (!appointmentId || !userId || !role) {
       return res.status(400).json({ success: false, message: "Missing required fields" });
@@ -68,8 +71,15 @@ export const generateVideoToken = asyncHandler(
     }
 
     // ── 15-minute window check ──────────────────────────────────────────────
+    // Bypassed for a few minutes right after an ad-hoc chat video-call request
+    // was accepted (see chatController.respondToVideoCall) — that flow is
+    // meant to work any time, not just near the appointment's scheduled slot.
+    const adHocApprovedRecently =
+      !!appointment.adHocCallApprovedAt &&
+      Date.now() - new Date(appointment.adHocCallApprovedAt).getTime() < 5 * 60 * 1000;
+
     const minutesDiff = (new Date(appointment.scheduledAt).getTime() - Date.now()) / 60000;
-    if (minutesDiff > 15) {
+    if (minutesDiff > 15 && !adHocApprovedRecently) {
       return res.status(400).json({
         success: false,
         message: `Call available 15 minutes before scheduled time. ${Math.ceil(minutesDiff - 15)} minute(s) remaining.`,
@@ -106,6 +116,7 @@ export const generateVideoToken = asyncHandler(
             callStatus:      "ringing",
             callInitiatedBy: role,
             callChannelName: channelName,
+            callType:        requestedCallType,
             status:          "in-progress",
             // Reset participant list — fresh call, fresh slate.
             callParticipants: [participantObjectId],
@@ -134,6 +145,7 @@ export const generateVideoToken = asyncHandler(
           data: {
             channelName:      current.callChannelName || channelName,
             callStatus:       current.callStatus,
+            callType:         current.callType || "video",
             isInitiator:      current.callInitiatedBy === role,
             doctorName:       `Dr. ${(current.doctorId as any).firstName} ${(current.doctorId as any).lastName}`,
             patientName:      (current.userId as any).name || "",
@@ -156,6 +168,7 @@ export const generateVideoToken = asyncHandler(
             : (appointment.userId  as any).userImage,
           callerType:     role,
           channelName,
+          callType:       requestedCallType,
           conversationId: conversation?._id?.toString(),
           videoRequestId: conversation?.activeVideoRequest?._id?.toString(),
         };
@@ -186,6 +199,7 @@ export const generateVideoToken = asyncHandler(
         data: {
           channelName,
           callStatus:  "ringing",
+          callType:    requestedCallType,
           isInitiator: true,
           doctorName:  `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
           patientName: (appointment.userId as any).name || "",
@@ -216,6 +230,7 @@ export const generateVideoToken = asyncHandler(
         data: {
           channelName:  appointment.callChannelName || channelName,
           callStatus:   "in-progress",
+          callType:     appointment.callType || "video",
           // The original initiator is determined by callInitiatedBy stored in DB.
           // The second joiner is never the initiator.
           isInitiator:  false,
@@ -240,6 +255,7 @@ export const generateVideoToken = asyncHandler(
         data: {
           channelName:  appointment.callChannelName || channelName,
           callStatus:   "in-progress",
+          callType:     appointment.callType || "video",
           // Preserve original initiator role so WebRTC offer/answer logic stays correct.
           isInitiator:  appointment.callInitiatedBy === role,
           doctorName:   `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
@@ -378,6 +394,7 @@ export const getCallStatus = asyncHandler(async (req: Request, res: Response) =>
       appointmentId:       appointment._id,
       status:              appointment.status,
       callStatus:          appointment.callStatus,
+      callType:            appointment.callType || "video",
       isActive:            appointment.callStatus === "ringing" || appointment.callStatus === "in-progress",
       canJoin,
       canRejoin:           appointment.status !== "cancelled" && appointment.callStatus === "ended",

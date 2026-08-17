@@ -75,6 +75,7 @@ export interface IAppointment extends Document {
   // ✅ Call state
   callStatus: CallStatus;
   callChannelName?: string;
+  callType?: "audio" | "video";
   callInitiatedBy?: CallEndedBy;
   callParticipants: Types.ObjectId[];
 
@@ -86,6 +87,10 @@ export interface IAppointment extends Document {
     doctor?: number;
     user?: number;
   };
+
+  // Set when a chat-based ad-hoc video call request is accepted — lets
+  // generateVideoToken bypass the scheduled-time window for a short while.
+  adHocCallApprovedAt?: Date;
 
   // Call timing & quality
   callStartedAt?: Date;
@@ -204,6 +209,7 @@ const AppointmentSchema = new Schema<IAppointment>(
       default: "idle",
     },
     callChannelName: { type: String, default: "" },
+    callType: { type: String, enum: ["audio", "video"], default: "video" },
     callInitiatedBy: {
       type: String,
       enum: ["Doctor", "User", "system"],
@@ -231,6 +237,8 @@ const AppointmentSchema = new Schema<IAppointment>(
 
     // ✅ Agora metadata
     agoraUidMap: { doctor: Number, user: Number, _id: false },
+
+    adHocCallApprovedAt: Date,
 
     callStartedAt: Date,
     callEndedAt: Date,

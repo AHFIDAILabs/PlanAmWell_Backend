@@ -29,6 +29,7 @@ export interface IVideoCallRequest {
   requestedBy: Types.ObjectId;
   requestedByType: "User" | "Doctor";
   status: "pending" | "accepted" | "declined" | "expired" | "cancelled";
+  callType?: "audio" | "video";
   requestedAt: Date;
   respondedAt?: Date;
   expiresAt: Date;
@@ -104,6 +105,7 @@ const VideoCallRequestSchema = new Schema<IVideoCallRequest>(
       enum: ["pending", "accepted", "declined", "expired", "cancelled"],
       default: "pending",
     },
+    callType: { type: String, enum: ["audio", "video"], default: "video" },
     requestedAt: { type: Date, default: Date.now },
     respondedAt: Date,
     expiresAt: { type: Date, required: true },

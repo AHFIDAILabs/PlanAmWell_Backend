@@ -16,11 +16,12 @@ const VALID_DELIVERY_STATUSES = ["pending", "processing", "shipped", "delivered"
 // ------------------- Admin Registration -------------------
 export const registerAdmin = asyncHandler(async (req: Request, res: Response) => {
   const { firstName, lastName, email, password } = req.body;
+  const normalizedEmail = String(email || "").trim().toLowerCase();
 
-  const existing = await Admin.findOne({ email });
+  const existing = await Admin.findOne({ email: normalizedEmail });
   if (existing) return res.status(400).json({ message: "Admin already exists" });
 
-  const admin = await Admin.create({ firstName, lastName, email, password });
+  const admin = await Admin.create({ firstName, lastName, email: normalizedEmail, password });
   
   // ✅ Use signAdminJwt to ensure role is set to "Admin"
   const token = signAdminJwt(admin);
@@ -43,8 +44,8 @@ export const registerAdmin = asyncHandler(async (req: Request, res: Response) =>
 // ------------------- Admin Login -------------------
 export const loginAdmin = asyncHandler(async (req: Request, res: Response) => {
   const { email, password } = req.body;
-  
-  const admin = await Admin.findOne({ email });
+
+  const admin = await Admin.findOne({ email: String(email || "").trim().toLowerCase() });
   if (!admin || !(await admin.comparePassword(password))) {
     return res.status(401).json({ message: "Invalid credentials" });
   }

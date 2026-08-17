@@ -342,6 +342,7 @@ export const emitCallRinging = (
     callerImage?: string;
     callerType?: string;
     channelName?: string;
+    callType?: "audio" | "video";
     conversationId?: string;
     videoRequestId?: string;
   }
@@ -486,15 +487,17 @@ export const emitVideoCallResponse = (
   conversationId: string,
   requesterId: string,
   status: "accepted" | "declined" | "expired" | "cancelled",
-  requestId: string
+  requestId: string,
+  callType?: "audio" | "video"
 ) => {
   try {
     const roomName = `user_${requesterId}`;
-    
+
     io.to(roomName).emit("video-call-response", {
       conversationId,
       status,
       requestId,
+      callType,
       timestamp: new Date().toISOString(),
     });
     

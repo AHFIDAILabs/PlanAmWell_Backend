@@ -17,6 +17,7 @@ export async function sendIncomingCallPushNotification(
     callerImage?: string;
     callerType: "Doctor" | "User" | string;
     channelName: string;
+    callType?: "audio" | "video";
     conversationId?: string; // ← Link to conversation for response
     videoRequestId?: string; // ← Video request ID to respond to
   }
@@ -58,6 +59,7 @@ export async function sendIncomingCallPushNotification(
         callerImage: callData.callerImage,
         callerType: callData.callerType,
         channelName: callData.channelName,
+        callType: callData.callType || "video",
         conversationId: callData.conversationId, // ← Include for response
         videoRequestId: callData.videoRequestId, // ← Include for response
         timestamp: new Date().toISOString(),
