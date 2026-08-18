@@ -47,10 +47,11 @@ export async function sendIncomingCallPushNotification(
 
     // ✅ CRITICAL: Configure push notification for INCOMING CALL
     // This will trigger the phone's native ringtone and show full-screen call UI
+    const isVoiceCall = callData.callType === "audio";
     const messages = validTokens.map((token: string) => ({
       to: token,
       sound: "default", // Use system default ringtone
-      title: "📞 Incoming Call",
+      title: isVoiceCall ? "📞 Incoming Voice Call" : "📹 Incoming Video Call",
       body: `${callData.callerName} is calling you`,
       data: {
         type: "incoming_call",
@@ -66,7 +67,10 @@ export async function sendIncomingCallPushNotification(
       },
       priority: "high" as const, // High priority for immediate delivery
       channelId: "incoming-calls", // Android notification channel
-      categoryIdentifier: "INCOMING_CALL", // iOS category for call UI
+      categoryIdentifier: "INCOMING_CALL", // iOS category for call UI — actions registered client-side
+      // Breaks through Focus/silent mode and shows prominently on the lock
+      // screen — the real "ring" behavior iOS allows without full CallKit.
+      interruptionLevel: "time-sensitive" as const,
 
       // ✅ iOS specific settings for call-like behavior
       badge: 1,

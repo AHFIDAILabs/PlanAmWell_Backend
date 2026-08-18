@@ -15,6 +15,7 @@ import {
   emitConversationUnlocked,
 } from "../index";
 import { NotificationService } from "../services/NotificationService";
+import { sendIncomingCallPushNotification } from "../util/sendPushNotification";
 import multer from "multer";
 import {
   uploadToCloudinary,
@@ -627,6 +628,26 @@ export const requestVideoCall = asyncHandler(
       );
     } catch (error) {
       console.error("Failed to send video call request notification:", error);
+    }
+
+    // Also send the special "incoming-calls" channel push (full-screen ringing
+    // on Android, time-sensitive on iOS) — notifyVideoCallRequest above only
+    // sends a generic notification, which doesn't ring the recipient's phone
+    // when backgrounded. Same treatment as the formal appointment-call flow
+    // in videoCallController.generateVideoToken.
+    try {
+      const appointmentId = String((conversation.appointmentId as any)?._id || conversation.appointmentId);
+      await sendIncomingCallPushNotification(recipientId, {
+        appointmentId,
+        callerName: requesterName,
+        callerType: role,
+        channelName: `appt_${appointmentId}`,
+        callType,
+        conversationId,
+        videoRequestId: videoRequest._id.toString(),
+      });
+    } catch (error: any) {
+      console.error("⚠️ Incoming-call push failed for chat video request (non-fatal):", error.message);
     }
 
     // Auto-expire after 60 seconds
