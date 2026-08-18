@@ -62,8 +62,16 @@ export const getOrCreateConversation = asyncHandler(
 
     // Fetch appointment and verify access
     const appointment = await Appointment.findById(appointmentId)
-      .populate("userId", "name userImage email")
-      .populate("doctorId", "firstName lastName doctorImage email");
+      .populate({
+        path: "userId",
+        select: "name userImage email",
+        populate: { path: "userImage", select: "imageUrl secure_url" },
+      })
+      .populate({
+        path: "doctorId",
+        select: "firstName lastName doctorImage email",
+        populate: { path: "doctorImage", select: "imageUrl secure_url" },
+      });
 
     if (!appointment) {
       return res.status(404).json({
@@ -119,8 +127,16 @@ export const getOrCreateConversation = asyncHandler(
       //   - updateAppointment    → sets true on new confirmation (auto-unlock)
       //   - unlockConversation   → sets true on manual unlock
       conversation = await (
-        await conversation.populate("participants.userId", "name userImage")
-      ).populate("participants.doctorId", "firstName lastName doctorImage");
+        await conversation.populate({
+          path: "participants.userId",
+          select: "name userImage",
+          populate: { path: "userImage", select: "imageUrl secure_url" },
+        })
+      ).populate({
+        path: "participants.doctorId",
+        select: "firstName lastName doctorImage",
+        populate: { path: "doctorImage", select: "imageUrl secure_url" },
+      });
     } else {
       // ── Not found: first-ever conversation for this doctor-patient pair ───────
       const doctorName = `Dr. ${(appointment.doctorId as any).firstName} ${
@@ -156,8 +172,16 @@ export const getOrCreateConversation = asyncHandler(
 
       // Populate participants
       conversation = await (
-        await conversation.populate("participants.userId", "name userImage")
-      ).populate("participants.doctorId", "firstName lastName doctorImage");
+        await conversation.populate({
+          path: "participants.userId",
+          select: "name userImage",
+          populate: { path: "userImage", select: "imageUrl secure_url" },
+        })
+      ).populate({
+        path: "participants.doctorId",
+        select: "firstName lastName doctorImage",
+        populate: { path: "doctorImage", select: "imageUrl secure_url" },
+      });
 
       // Link conversation to appointment
       appointment.conversationId =
@@ -292,11 +316,16 @@ export const sendMessage = asyncHandler(
     }
 
     const conversation = await Conversation.findById(conversationId)
-      .populate("participants.userId", "name userImage expoPushTokens")
-      .populate(
-        "participants.doctorId",
-        "firstName lastName doctorImage expoPushTokens"
-      );
+      .populate({
+        path: "participants.userId",
+        select: "name userImage expoPushTokens",
+        populate: { path: "userImage", select: "imageUrl secure_url" },
+      })
+      .populate({
+        path: "participants.doctorId",
+        select: "firstName lastName doctorImage expoPushTokens",
+        populate: { path: "doctorImage", select: "imageUrl secure_url" },
+      });
 
     if (!conversation) {
       return res.status(404).json({
@@ -830,8 +859,16 @@ export const getUserConversations = asyncHandler(
 
     const conversations = await Conversation.find(query)
       .populate("appointmentId", "_id scheduledAt status callStatus")
-      .populate("participants.userId", "name userImage")
-      .populate("participants.doctorId", "firstName lastName doctorImage")
+      .populate({
+        path: "participants.userId",
+        select: "name userImage",
+        populate: { path: "userImage", select: "imageUrl secure_url" },
+      })
+      .populate({
+        path: "participants.doctorId",
+        select: "firstName lastName doctorImage",
+        populate: { path: "doctorImage", select: "imageUrl secure_url" },
+      })
       .sort({ lastActivityAt: -1 });
 
     res.status(200).json({ success: true, data: conversations });
