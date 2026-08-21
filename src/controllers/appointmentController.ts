@@ -68,6 +68,43 @@ export const profileCheck = asyncHandler(async (req: Request, res: Response) => 
 });
 
 /**
+ * @desc Already-booked appointment times for a doctor within a date range, so
+ *       the booking screen can hide slots other patients have already taken.
+ *       Public — no auth needed to view a doctor's booked-out times, and
+ *       nothing patient-identifying is returned.
+ * @route GET /api/v1/appointments/booked-slots?doctorId=&from=&to=
+ * @access Public
+ */
+export const getBookedSlots = asyncHandler(async (req: Request, res: Response) => {
+  const { doctorId, from, to } = req.query as { doctorId?: string; from?: string; to?: string };
+
+  if (!doctorId || !from || !to) {
+    res.status(400);
+    throw new Error("doctorId, from, and to are required.");
+  }
+
+  const fromDate = new Date(from);
+  const toDate = new Date(to);
+  if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+    res.status(400);
+    throw new Error("Invalid from/to date.");
+  }
+
+  const booked = await Appointment.find({
+    doctorId,
+    scheduledAt: { $gte: fromDate, $lt: toDate },
+    status: { $nin: ["cancelled", "rejected", "expired"] },
+  })
+    .select("scheduledAt duration")
+    .lean();
+
+  res.status(200).json({
+    success: true,
+    data: booked.map((a) => ({ scheduledAt: a.scheduledAt, duration: a.duration || 30 })),
+  });
+});
+
+/**
  * @desc Create Appointment (Users)
  * @route POST /api/v1/appointments
  * @access User
@@ -140,24 +177,40 @@ export const createAppointment = asyncHandler(
       throw new Error("Invalid scheduledAt date.");
     }
  
-    const appointment = await Appointment.create({
-      userId: req.auth.id,
-      doctorId,
-      scheduledAt,
-      duration,
-      notes,
-      reason,
-      shareUserInfo: !!shareUserInfo,
-      patientSnapshot,
-      consultationType,
-      notificationsSent: {
-        reminder: false,
-        expiryWarning: false,
-        callStarted: false,
-        callEnded: false,
-      },
-    });
- 
+    let appointment;
+    try {
+      appointment = await Appointment.create({
+        userId: req.auth.id,
+        doctorId,
+        scheduledAt: scheduledDate,
+        duration,
+        notes,
+        reason,
+        shareUserInfo: !!shareUserInfo,
+        patientSnapshot,
+        consultationType,
+        notificationsSent: {
+          reminder: false,
+          expiryWarning: false,
+          callStarted: false,
+          callEnded: false,
+        },
+      });
+    } catch (err: any) {
+      // E11000 from the doctorId+scheduledAt partial unique index — someone
+      // else (or this same request, retried) already holds this exact slot.
+      // MongoDB enforces this atomically, so it's the real guard against
+      // double-booking; this catch just turns it into a clean response.
+      if (err?.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          code: "SLOT_TAKEN",
+          message: "This time slot was just booked by someone else. Please pick another time.",
+        });
+      }
+      throw err;
+    }
+
     const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
     const patientName = user?.name || "A patient";
  
@@ -392,8 +445,11 @@ export const updateAppointment = asyncHandler(
 
           // Always link the new appointment to this conversation so
           // getOrCreateConversation Step 1 (appointmentId lookup) works next time.
-          updatedAppointment.conversationId = conversation._id;
-          await updatedAppointment.save();
+          updatedAppointment.conversationId = conversation._id; // in-memory only, for the rest of this handler
+          await Appointment.updateOne(
+            { _id: updatedAppointment._id },
+            { $set: { conversationId: conversation._id } }
+          );
 
           conversationId = String(conversation._id);
 
@@ -431,8 +487,11 @@ export const updateAppointment = asyncHandler(
             isActive: true,
           });
 
-          updatedAppointment.conversationId = conversation._id;
-          await updatedAppointment.save();
+          updatedAppointment.conversationId = conversation._id; // in-memory only, for the rest of this handler
+          await Appointment.updateOne(
+            { _id: updatedAppointment._id },
+            { $set: { conversationId: conversation._id } }
+          );
 
           conversationId = String(conversation._id);
           console.log(`✅ New conversation created for first-time patient`);
@@ -717,17 +776,18 @@ export const sendAppointmentReminders = async () => {
           ),
         ]);
 
-        if (!appt.notificationsSent) {
-          appt.notificationsSent = {
-            reminder: false,
-            expiryWarning: false,
-            callStarted: false,
-            callEnded: false,
-          };
-        }
-        appt.notificationsSent.reminder = true;
-        appt.reminderSent = true;
-        await appt.save();
+        // appt was fetched with .populate() — never call .save() on it (see
+        // the golden rules documented in videoCallController.ts); use an
+        // atomic update instead.
+        await Appointment.updateOne(
+          { _id: appt._id },
+          {
+            $set: {
+              "notificationsSent.reminder": true,
+              reminderSent: true,
+            },
+          }
+        );
         sentCount++;
       } catch (err) {
         console.error(`❌ Failed to send reminder for ${appt._id}:`, err);
@@ -798,11 +858,24 @@ export const endAppointment = asyncHandler(
     }
 
     // ── 1. Mark appointment as completed ─────────────────────────────────────
+    // appointment was fetched with .populate() — never call .save() on it
+    // (see the golden rules documented in videoCallController.ts); update the
+    // in-memory object for the rest of this handler, persist atomically.
     appointment.status = "completed";
     appointment.callStatus = "ended";
     appointment.callEndedAt = new Date();
     appointment.callEndedBy = "Doctor";
-    await appointment.save();
+    await Appointment.updateOne(
+      { _id: appointment._id },
+      {
+        $set: {
+          status: "completed",
+          callStatus: "ended",
+          callEndedAt: appointment.callEndedAt,
+          callEndedBy: "Doctor",
+        },
+      }
+    );
 
     // ── 2. Lock the conversation ───────────────────────────────────────────────
     // Find by doctor-patient pair (more reliable than appointmentId alone since

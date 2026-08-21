@@ -51,20 +51,27 @@ export const registerPushToken = asyncHandler(async (req: Request, res: Response
     throw new Error("Unauthorized - User not found");
   }
 
-  const user = await User.findById(userId);
-  if (!user) {
+  // handleLogin calls this endpoint for both User and Doctor accounts —
+  // without this fallback, doctor logins 404 here (silently swallowed by
+  // the frontend), leaving Doctor.expoPushTokens permanently empty and
+  // every call placed to that doctor rings nobody.
+  const account = (await User.findById(userId)) || (await Doctor.findById(userId));
+  if (!account) {
     res.status(404);
     throw new Error("User not found");
   }
 
-  // Use the helper method from your User model
-  await user.addExpoPushToken(token);
+  if (typeof (account as any).addExpoPushToken === "function") {
+    await (account as any).addExpoPushToken(token);
+  } else if (!account.expoPushTokens?.includes(token)) {
+    account.expoPushTokens = account.expoPushTokens || [];
+    account.expoPushTokens.push(token);
+    await account.save();
+  }
 
-  // console.log(`[PushToken] Registered token for user ${userId}`);
-  
-  res.status(200).json({ 
-    success: true, 
-    message: "Push token registered successfully" 
+  res.status(200).json({
+    success: true,
+    message: "Push token registered successfully"
   });
 });
 
@@ -86,21 +93,83 @@ export const removePushToken = asyncHandler(async (req: Request, res: Response) 
     throw new Error("Unauthorized - User not found");
   }
 
-  const user = await User.findById(userId);
-  if (!user) {
+  const account = (await User.findById(userId)) || (await Doctor.findById(userId));
+  if (!account) {
     res.status(404);
     throw new Error("User not found");
   }
 
-  // Use the helper method from your User model
-  await user.removeExpoPushToken(token);
+  if (typeof (account as any).removeExpoPushToken === "function") {
+    await (account as any).removeExpoPushToken(token);
+  } else if (account.expoPushTokens) {
+    account.expoPushTokens = account.expoPushTokens.filter((t: string) => t !== token);
+    await account.save();
+  }
 
-  // console.log(`[PushToken] Removed token for user ${userId}`);
-  
-  res.status(200).json({ 
-    success: true, 
-    message: "Push token removed successfully" 
+  res.status(200).json({
+    success: true,
+    message: "Push token removed successfully"
   });
+});
+
+/**
+ *  Register raw FCM device token (separate from the Expo push token above —
+ *  used only to wake the background/foreground handlers for incoming-call
+ *  ringing when the app is backgrounded or killed)
+ * POST /auth/register-fcm-token
+ */
+export const registerFcmToken = asyncHandler(async (req: Request, res: Response) => {
+  const { token } = req.body;
+  const userId = req.auth?.id;
+
+  if (!token) {
+    res.status(400);
+    throw new Error("FCM token is required");
+  }
+
+  if (!userId) {
+    res.status(401);
+    throw new Error("Unauthorized - User not found");
+  }
+
+  const account = (await User.findById(userId)) || (await Doctor.findById(userId));
+  if (!account) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  await (account as any).addFcmToken(token);
+
+  res.status(200).json({ success: true, message: "FCM token registered successfully" });
+});
+
+/**
+ *  Remove raw FCM device token (on logout)
+ * POST /auth/remove-fcm-token
+ */
+export const removeFcmToken = asyncHandler(async (req: Request, res: Response) => {
+  const { token } = req.body;
+  const userId = req.auth?.id;
+
+  if (!token) {
+    res.status(400);
+    throw new Error("FCM token is required");
+  }
+
+  if (!userId) {
+    res.status(401);
+    throw new Error("Unauthorized - User not found");
+  }
+
+  const account = (await User.findById(userId)) || (await Doctor.findById(userId));
+  if (!account) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  await (account as any).removeFcmToken(token);
+
+  res.status(200).json({ success: true, message: "FCM token removed successfully" });
 });
 
 // -------------------- Convert Guest -> Full User --------------------

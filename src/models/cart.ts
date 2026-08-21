@@ -40,7 +40,10 @@ const CartSchema = new Schema<ICart>(
     totalPrice: { type: Number, default: 0 },
     partnerCartId: { type: String },
     isAbandoned: { type: Boolean, default: false },
-    status: { type: String, enum: ["active", "checked_out"], default: "active" },
+    // "checking_out" is a transient claim state set atomically at the start
+    // of checkout() to prevent a double-tap/retry from creating two Orders
+    // for the same cart — see checkoutController.ts.
+    status: { type: String, enum: ["active", "checking_out", "checked_out"], default: "active" },
   },
   { timestamps: true },
 );

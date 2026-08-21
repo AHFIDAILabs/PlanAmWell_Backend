@@ -1,6 +1,10 @@
 import { Request, Response } from "express";
 import axios, { AxiosError } from "axios";
 import asyncHandler from "../middleware/asyncHandler";
+import { memoryCache } from "../util/memoryCache";
+
+const CATEGORIES_CACHE_KEY = "categories:all";
+const CATEGORIES_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min — categories change rarely
 
 const BASE_URL = process.env.PARTNER_API_URL || "";
 
@@ -21,12 +25,21 @@ interface PartnerCategoryResponse {
 export const getAllCategories = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const response = await axios.get<PartnerCategoryResponse>(`${BASE_URL}/v1/categories`);
+      // Was hitting the partner's external API on every single request for
+      // data that almost never changes — now cached in-process.
+      const categories = await memoryCache.getOrSet(
+        CATEGORIES_CACHE_KEY,
+        CATEGORIES_CACHE_TTL_MS,
+        async () => {
+          const response = await axios.get<PartnerCategoryResponse>(`${BASE_URL}/v1/categories`);
+          return response.data.data;
+        }
+      );
 
       res.status(200).json({
         success: true,
-        count: response.data.data.length,
-        categories: response.data.data,
+        count: categories.length,
+        categories,
       });
       return;
     } catch (err) {

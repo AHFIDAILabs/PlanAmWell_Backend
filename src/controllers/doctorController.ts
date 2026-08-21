@@ -5,10 +5,18 @@ import { deleteFromCloudinary, uploadToCloudinary } from "../middleware/claudina
 import mongoose from "mongoose";
 import { IImage, Image } from "../models/image";
 import bcrypt from "bcryptjs";
+import { memoryCache } from "../util/memoryCache";
+
+const APPROVED_DOCTORS_CACHE_KEY = "doctors:approved";
+const APPROVED_DOCTORS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min — every write path below invalidates immediately anyway; this TTL is just the fallback bound.
 
 // GET all doctors — only approved doctors for public
 export const getDoctors = asyncHandler(async (req: Request, res: Response) => {
-  const doctors: IDoctor[] = await Doctor.find({ status: "approved" }).select("-passwordHash");
+  const doctors = await memoryCache.getOrSet(
+    APPROVED_DOCTORS_CACHE_KEY,
+    APPROVED_DOCTORS_CACHE_TTL_MS,
+    () => Doctor.find({ status: "approved" }).select("-passwordHash").lean()
+  );
   res.status(200).json({ success: true, data: doctors });
 });
 
@@ -159,6 +167,8 @@ export const updateDoctorAvailability = asyncHandler(async (req: Request, res: R
   doctor.availability = req.body.availability;
   await doctor.save();
 
+  memoryCache.invalidate(APPROVED_DOCTORS_CACHE_KEY);
+
   res.status(200).json({ success: true, data: doctor });
 });
 
@@ -233,6 +243,8 @@ export const updateDoctor = asyncHandler(async (req: Request, res: Response) => 
     .populate("doctorImage")
     .select("-passwordHash");
 
+  memoryCache.invalidate(APPROVED_DOCTORS_CACHE_KEY);
+
   res.status(200).json({ success: true, data: updatedDoctor });
 });
 
@@ -269,6 +281,8 @@ export const deleteDoctor = asyncHandler(async (req: Request, res: Response) => 
     res.status(404);
     throw new Error("Doctor not found");
   }
+
+  memoryCache.invalidate(APPROVED_DOCTORS_CACHE_KEY);
 
   res.status(200).json({ success: true, message: "Doctor deleted successfully" });
 });

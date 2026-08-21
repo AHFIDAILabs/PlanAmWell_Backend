@@ -227,7 +227,11 @@ export const updatePartner = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const partner = await Partner.findById(partnerId).populate("partnerImage");
+    // Not populated — this document gets .save()'d below, and Mongoose can't
+    // re-cast a populated ref back to an ObjectId on save (see the golden
+    // rule documented in videoCallController.ts). The old image is looked up
+    // explicitly below instead, only when actually replacing it.
+    const partner = await Partner.findById(partnerId);
 
     if (!partner) {
       res.status(404).json({ success: false, message: "Partner not found" });
@@ -247,14 +251,16 @@ export const updatePartner = async (req: AuthRequest, res: Response): Promise<vo
     // 🖼️ If new image uploaded → replace old one
     if (req.file?.buffer) {
       // Delete old image from Cloudinary
-      if (partner.partnerImage && typeof partner.partnerImage !== "string") {
-        const oldImage = partner.partnerImage as any;
+      if (partner.partnerImage) {
+        const oldImage = await Image.findById(partner.partnerImage);
 
-        if (oldImage.imageCldId) {
+        if (oldImage?.imageCldId) {
           await deleteFromCloudinary(oldImage.imageCldId);
         }
 
-        await Image.findByIdAndDelete(oldImage._id);
+        if (oldImage) {
+          await Image.findByIdAndDelete(oldImage._id);
+        }
       }
 
       // Upload new image

@@ -49,6 +49,13 @@ import rateLimit from "express-rate-limit";
 const app = express();
 const server = http.createServer(app);
 
+// Render (and most PaaS hosts) sit exactly one reverse-proxy hop in front of
+// this process. Without this, Express can't see the real client IP — req.ip
+// resolves to the proxy's address for every request, so express-rate-limit's
+// IP-based keying collapses all external users onto the same bucket instead
+// of limiting per-visitor.
+app.set("trust proxy", 1);
+
 // Build CORS origin list from env (comma-separated). Mobile apps have no Origin header,
 // so we always allow requests with no origin (React Native / Expo / Postman).
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
@@ -213,6 +220,17 @@ io.on("connection", (socket) => {
   socket.on("webrtc-ice-candidate", ({ appointmentId, candidate }: { appointmentId: string; candidate: any }) => {
     const roomName = `appointment:${appointmentId}`;
     socket.to(roomName).emit("webrtc-ice-candidate", { appointmentId, candidate });
+  });
+
+  // Explicit UI-sync signal for mid-call video<->voice switching. The actual
+  // media renegotiation still goes through webrtc-offer/answer above — this
+  // just tells the other screen which layout to show, since detecting a
+  // removed track reliably via WebRTC's own events is far less dependable
+  // than detecting an added one (which ontrack already handles).
+  socket.on("webrtc-call-mode-changed", ({ appointmentId, callMode }: { appointmentId: string; callMode: "audio" | "video" }) => {
+    const roomName = `appointment:${appointmentId}`;
+    socket.to(roomName).emit("webrtc-call-mode-changed", { appointmentId, callMode });
+    console.log(`🎥 webrtc-call-mode-changed (${callMode}) relayed for appointment ${appointmentId}`);
   });
   // ────────────────────────────────────────────────────────────────────────
 

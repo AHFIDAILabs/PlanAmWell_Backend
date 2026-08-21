@@ -8,6 +8,7 @@ import { Order } from "../models/order";
 import { signAdminJwt } from "../middleware/auth";
 import axios from "axios";
 import { NotificationService } from "../services/NotificationService";
+import { memoryCache } from "../util/memoryCache";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 const PARTNER_PREFIX = "/v1/PlanAmWell";
@@ -113,6 +114,10 @@ export const updateDoctorStatus = asyncHandler(async (req: Request, res: Respons
     { status },
     { new: true, runValidators: true }
   ).select("-passwordHash");
+
+  // Doctor moving in/out of "approved" changes the cached public doctors
+  // list — invalidate immediately rather than waiting out the TTL.
+  memoryCache.invalidate("doctors:approved");
 
   // Notify doctor of status change (non-blocking)
   NotificationService.notifyDoctorStatusChanged(

@@ -7,12 +7,25 @@
 
 import axios from "axios";
 
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+// The free public overpass-api.de instance is well known to be unreliable
+// under its own load — it returns either a hard 504 ("server too busy") or,
+// worse, a 200 OK with a truncated/empty result and a timeout remark baked
+// into the body, which looks identical to a genuine "no results" response
+// unless checked for explicitly. Several independently-run public mirrors
+// exist precisely because of this; trying them in sequence turns an
+// intermittent single-instance failure into something that only fails if
+// ALL of them are down at once.
+const OVERPASS_URLS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.openstreetmap.ru/api/interpreter",
+];
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 
-// 1-hour in-memory cache keyed by a rounded location string
-const CACHE_TTL_MS = 60 * 60 * 1000;
-const cache = new Map<string, { data: NormalizedClinic[]; expiresAt: number }>();
+// No caching in this file — hospitalController.ts caches at the HTTP layer
+// in front of both exported functions below (a coarser ~1.1km GPS grid, 6h
+// TTL, shared with the by-city path). This service is just "fetch fresh";
+// caching policy belongs to the caller, not duplicated here too.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,11 +49,6 @@ export interface NormalizedClinic {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function cacheKey(lat: number, lng: number, radius: number): string {
-  // Round to ~100 m precision to maximise cache hits
-  return `${Math.round(lat * 100) / 100}_${Math.round(lng * 100) / 100}_${radius}`;
-}
 
 function inferType(tags: Record<string, string>): "public" | "private" | "NGO" | undefined {
   const raw = [tags.operator_type, tags.ownership, tags.operator]
@@ -119,45 +127,70 @@ out center tags;
   `.trim();
 }
 
+// ─── Overpass query execution with mirror fallback ─────────────────────────
+
+/**
+ * Runs `query` against each mirror in OVERPASS_URLS in turn, moving to the
+ * next one on any failure — a hard error (network, 5xx/504) or a "soft"
+ * failure: Overpass can return HTTP 200 with a `remark` field describing a
+ * timeout and an empty/truncated `elements` array, which otherwise looks
+ * indistinguishable from a genuine "no results in this area" response.
+ * Throws only if every mirror fails.
+ */
+async function queryOverpass(query: string): Promise<any[]> {
+  let lastError: any;
+
+  for (const url of OVERPASS_URLS) {
+    try {
+      const response = await axios.post(
+        url,
+        `data=${encodeURIComponent(query)}`,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "PlanAmWell/1.0 (health app; contact@planamwell.com)",
+          },
+          timeout: 30_000,
+        }
+      );
+
+      if (response.data?.remark) {
+        // Present even on a 200 — Overpass hit its own internal query
+        // timeout and returned whatever partial result it had, which is not
+        // the same thing as "we searched properly and found nothing."
+        throw new Error(`Overpass remark (soft failure): ${response.data.remark}`);
+      }
+
+      return response.data?.elements ?? [];
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[Overpass] Mirror failed (${url}):`, err.message);
+      // fall through to the next mirror
+    }
+  }
+
+  throw lastError;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Search for real hospitals and clinics within `radiusMeters` of a GPS point.
- * Results are cached for 1 hour.
  */
 export async function searchNearbyHospitals(
   lat: number,
   lng: number,
   radiusMeters = 5000
 ): Promise<NormalizedClinic[]> {
-  const key = cacheKey(lat, lng, radiusMeters);
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
-    console.log(`[Overpass] Cache hit: ${key}`);
-    return cached.data;
-  }
-
   try {
     console.log(`[Overpass] Querying hospitals near (${lat}, ${lng}) within ${radiusMeters}m`);
     const query = buildNearbyQuery(lat, lng, radiusMeters);
-    const response = await axios.post(
-      OVERPASS_URL,
-      `data=${encodeURIComponent(query)}`,
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": "PlanAmWell/1.0 (health app; contact@planamwell.com)",
-        },
-        timeout: 30_000,
-      }
-    );
+    const elements = await queryOverpass(query);
 
-    const elements: any[] = response.data?.elements ?? [];
     const clinics = deduplicateByName(
       elements.map(normalizeElement).filter((c): c is NormalizedClinic => c !== null)
     );
 
-    cache.set(key, { data: clinics, expiresAt: Date.now() + CACHE_TTL_MS });
     console.log(`[Overpass] Found ${clinics.length} clinics near (${lat}, ${lng})`);
     return clinics;
   } catch (err: any) {
@@ -172,12 +205,6 @@ export async function searchNearbyHospitals(
  */
 export async function searchHospitalsByCity(cityName: string): Promise<NormalizedClinic[]> {
   const normalised = cityName.trim();
-  const cityCacheKey = `city_${normalised.toLowerCase().replace(/\s+/g, "_")}`;
-  const cached = cache.get(cityCacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    console.log(`[Overpass] Cache hit: ${cityCacheKey}`);
-    return cached.data;
-  }
 
   // Step 1: Geocode the city with Nominatim
   console.log(`[Nominatim] Geocoding: "${normalised}"`);
@@ -204,10 +231,5 @@ export async function searchHospitalsByCity(cityName: string): Promise<Normalize
   console.log(`[Nominatim] "${normalised}" → (${lat}, ${lon})`);
 
   // Step 2: Search hospitals within 10 km of that city centre
-  const clinics = await searchNearbyHospitals(parseFloat(lat), parseFloat(lon), 10_000);
-
-  // Also cache under the city key with a shorter TTL (6 hours)
-  cache.set(cityCacheKey, { data: clinics, expiresAt: Date.now() + 6 * 60 * 60 * 1000 });
-
-  return clinics;
+  return searchNearbyHospitals(parseFloat(lat), parseFloat(lon), 10_000);
 }

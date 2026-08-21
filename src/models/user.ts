@@ -23,9 +23,12 @@ export interface IUser extends Document {
   preferences?: Record<string, any>;
   partnerId?: string;
   expoPushTokens?: string[];
+  fcmTokens?: string[];
   comparePassword: (enteredPassword: string) => Promise<boolean>;
   addExpoPushToken: (token: string) => Promise<void>;
   removeExpoPushToken: (token: string) => Promise<void>;
+  addFcmToken: (token: string) => Promise<void>;
+  removeFcmToken: (token: string) => Promise<void>;
   createdAt: Date;
 }
 
@@ -52,6 +55,7 @@ const UserSchema = new Schema<IUser>(
     preferences: { type: Object, default: {} },
     partnerId: { type: String },
     expoPushTokens: { type: [String], default: [] },
+    fcmTokens: { type: [String], default: [] },
     createdAt: { type: Date, default: null },
   },
   { timestamps: true }
@@ -101,6 +105,24 @@ UserSchema.methods.addExpoPushToken = async function (token: string) {
 UserSchema.methods.removeExpoPushToken = async function (token: string) {
   if (!this.expoPushTokens || !token) return;
   this.expoPushTokens = this.expoPushTokens.filter((t: string) => t !== token);
+  await this.save();
+};
+
+// Add raw FCM device token (used for data-only "wake the app" call pushes,
+// separate from expoPushTokens which go through Expo's relay)
+UserSchema.methods.addFcmToken = async function (token: string) {
+  if (!token) return;
+  if (!this.fcmTokens) this.fcmTokens = [];
+  if (!this.fcmTokens.includes(token)) {
+    this.fcmTokens.push(token);
+    await this.save();
+  }
+};
+
+// Remove raw FCM device token
+UserSchema.methods.removeFcmToken = async function (token: string) {
+  if (!this.fcmTokens || !token) return;
+  this.fcmTokens = this.fcmTokens.filter((t: string) => t !== token);
   await this.save();
 };
 

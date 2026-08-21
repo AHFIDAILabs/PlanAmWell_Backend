@@ -321,6 +321,34 @@ console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => (
     }
   }
 
+  // ── Atomic claim — a double-tap "Checkout" or a client retry after a slow
+  // response that actually succeeded must not create two Orders for the same
+  // cart. Only one request can flip status from active/null to
+  // "checking_out"; a concurrent duplicate finds it already claimed here and
+  // stops immediately, before any partner API call or Order is created.
+  const claimedCart = await Cart.findOneAndUpdate(
+    { _id: cart._id, status: { $in: ["active", null] } },
+    { $set: { status: "checking_out" } },
+    { new: true }
+  );
+  if (!claimedCart) {
+    return res.status(409).json({
+      success: false,
+      code: "CHECKOUT_IN_PROGRESS",
+      message: "This cart is already being checked out.",
+    });
+  }
+  cart = claimedCart;
+
+  // Any failure from here through Order creation must release the claim
+  // (revert the cart to "active") so the user can retry checkout instead of
+  // being permanently stuck — that's exactly the "stuck order" failure mode
+  // this whole guard is meant to prevent, just moved earlier.
+  const releaseClaim = () =>
+    Cart.updateOne({ _id: cart._id, status: "checking_out" }, { $set: { status: "active" } }).catch(
+      (e) => console.error("[Checkout] Failed to release cart claim:", e.message)
+    );
+
   /** ------------------ 4. Sync User + Cart with Partner ------------------ */
   let partnerUserId: string | null = user.partnerId ?? null;
 
@@ -380,6 +408,7 @@ console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => (
             // ✅ Fall through to order creation
           } else {
             console.error(`[Checkout] MANUAL FIX NEEDED: ${user.email} not found via /user search`);
+            await releaseClaim();
             return res.status(503).json({
               success: false,
               code: "PARTNER_SYNC_FAILED",
@@ -389,6 +418,7 @@ console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => (
             });
           }
         } else {
+          await releaseClaim();
           return res.status(503).json({
             success: false,
             code: "PARTNER_SYNC_FAILED",
@@ -397,6 +427,7 @@ console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => (
         }
       } else {
         // Non-"already exists" axios error or unknown local error
+        await releaseClaim();
         return res.status(502).json({
           success: false,
           code: "PARTNER_SYNC_FAILED",
@@ -407,42 +438,60 @@ console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => (
   }
 
   /** ------------------ 5. Save Local Order ------------------ */
-  const localOrder = await Order.create({
-    orderNumber: uuidv4(),
-    userId: authUserId,
-    isThirdPartyOrder: true,
-    platform: "PlanAmWell",
-    items: cart.items.map((i) => ({
-      productId: String(i.drugId),
-      name: i.drugName || "",
-      qty: i.quantity,
-      price: i.price || 0,
-      dosage: i.dosage || "",
-      specialInstructions: i.specialInstructions || "",
-    })),
-    subtotal: cart.totalPrice,
-     shippingFee: safeDeliveryFee,                       
-  total: cart.totalPrice + safeDeliveryFee,  
-    paymentStatus: "pending",
-    deliveryMethod: "delivery",
-    shippingAddress: {
-      name: user.name,
-      phone: user.phone,
-      addressLine: user.homeAddress || (user.preferences as any)?.address,
-      city: user.city || (user.preferences as any)?.city,
-      state: user.state || (user.preferences as any)?.state,
-      lga: user.lga || (user.preferences as any)?.lga,
-    },
-  });
+  let localOrder;
+  try {
+    localOrder = await Order.create({
+      orderNumber: uuidv4(),
+      userId: authUserId,
+      isThirdPartyOrder: true,
+      platform: "PlanAmWell",
+      items: cart.items.map((i) => ({
+        productId: String(i.drugId),
+        name: i.drugName || "",
+        qty: i.quantity,
+        price: i.price || 0,
+        dosage: i.dosage || "",
+        specialInstructions: i.specialInstructions || "",
+      })),
+      subtotal: cart.totalPrice,
+      shippingFee: safeDeliveryFee,
+      total: cart.totalPrice + safeDeliveryFee,
+      paymentStatus: "pending",
+      deliveryMethod: "delivery",
+      shippingAddress: {
+        name: user.name,
+        phone: user.phone,
+        addressLine: user.homeAddress || (user.preferences as any)?.address,
+        city: user.city || (user.preferences as any)?.city,
+        state: user.state || (user.preferences as any)?.state,
+        lga: user.lga || (user.preferences as any)?.lga,
+      },
+    });
+  } catch (orderErr: any) {
+    console.error("[Checkout] Order.create failed:", orderErr.message);
+    await releaseClaim();
+    return res.status(500).json({
+      success: false,
+      code: "ORDER_CREATE_FAILED",
+      message: "Failed to create your order. Please try checking out again.",
+    });
+  }
 
   /** ------------------ 6. Mark Cart checked_out ------------------ */
-  await Cart.findByIdAndUpdate(cart._id, {
-    status: "checked_out",
-    orderId: localOrder._id,
-  });
-
-await Cart.findByIdAndDelete(cart._id);
-console.log("[Checkout] Cart deleted after checkout");
+  // Best-effort — the Order above is already safely created at this point,
+  // which is the part the user actually cares about. A failure here (cart
+  // already "checking_out", so nothing else can touch it anyway) shouldn't
+  // turn a successful checkout into an error response with no orderId.
+  try {
+    await Cart.findByIdAndUpdate(cart._id, {
+      status: "checked_out",
+      orderId: localOrder._id,
+    });
+    await Cart.findByIdAndDelete(cart._id);
+    console.log("[Checkout] Cart deleted after checkout");
+  } catch (cleanupErr: any) {
+    console.error("[Checkout] Cart cleanup after successful order failed (non-fatal):", cleanupErr.message);
+  }
 
   /** ------------------ 7. Respond ------------------ */
   res.status(201).json({
@@ -469,19 +518,16 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
     return res.status(400).json({ success: false, message: "orderId is required" });
   }
 
-  const order = await Order.findById(orderId);
-  if (!order) {
+  const existing = await Order.findById(orderId);
+  if (!existing) {
     return res.status(404).json({ success: false, message: "Order not found" });
   }
-
-  console.log("[ConfirmOrder] order.partnerOrderId:", order.partnerOrderId);
-
-  if (order.userId?.toString() !== authUserId) {
+  if (existing.userId?.toString() !== authUserId) {
     return res.status(403).json({ success: false, message: "Forbidden" });
   }
 
-  if (order.partnerOrderId) {
-    const existingPayment = await Payment.findOne({ orderId: order._id.toString() });
+  if (existing.partnerOrderId && existing.partnerOrderId !== "PENDING") {
+    const existingPayment = await Payment.findOne({ orderId: existing._id.toString() });
     console.log("[ConfirmOrder] Idempotency — payment found:", !!existingPayment, "checkoutUrl:", existingPayment?.checkoutUrl);
 
     if (!existingPayment) {
@@ -491,13 +537,55 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
       return res.status(200).json({
         success: true,
         checkoutUrl: existingPayment.checkoutUrl,
-        orderId: order._id,
+        orderId: existing._id,
       });
     }
   }
 
+  // ── Atomic claim — prevents two concurrent confirm requests (double-tap,
+  // a retried request that actually succeeded) from both creating a partner
+  // order + payment session for the same local order. Only one request can
+  // flip partnerOrderId from unset to the "PENDING" sentinel; any other
+  // concurrent request sees it already claimed and backs off cleanly below.
+  //
+  // A claim older than 2 minutes is treated as abandoned (the process that
+  // made it crashed or hung before reaching the catch blocks that normally
+  // release it) and can be retaken, so a single bad request can't strand an
+  // order in "PENDING" forever.
+  const claimIsStale =
+    existing.partnerOrderId === "PENDING" &&
+    Date.now() - new Date(existing.updatedAt || 0).getTime() > 2 * 60 * 1000;
+
+  const claimFilter =
+    existing.partnerOrderId === "PENDING" && !claimIsStale
+      ? null // freshly claimed by someone else — don't even try
+      : {
+          _id: orderId,
+          userId: authUserId,
+          partnerOrderId: claimIsStale ? "PENDING" : { $in: [null, undefined] },
+        };
+
+  const claimed = claimFilter
+    ? await Order.findOneAndUpdate(
+        claimFilter,
+        { $set: { partnerOrderId: "PENDING" } },
+        { new: true }
+      )
+    : null;
+
+  if (!claimed) {
+    return res.status(409).json({
+      success: false,
+      code: "CONFIRM_IN_PROGRESS",
+      message: "This order is already being processed. Please wait a moment and refresh.",
+    });
+  }
+
+  const order = claimed;
+
   const user = await User.findById(authUserId);
   if (!user || !user.partnerId) {
+    await Order.updateOne({ _id: orderId }, { $set: { partnerOrderId: null } }); // release claim
     return res.status(422).json({ success: false, message: "User not synced with partner" });
   }
 
@@ -510,9 +598,9 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
     userId: user.partnerId,
     telephone: user.phone,
     platform: "PlanAmWell",
-    state: user.state || (user.preferences as any)?.state || "",   
+    state: user.state || (user.preferences as any)?.state || "",
     lga: user.lga || (user.preferences as any)?.lga || "",
-    deliveryMethod: "delivery",       
+    deliveryMethod: "delivery",
     items: order.items.map((item) => ({
       drugId: item.productId,
       quantity: item.qty,
@@ -523,6 +611,7 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
     console.log("[ConfirmOrder] Partner order created:", JSON.stringify(partnerOrder, null, 2));
   } catch (err: any) {
     console.error("[ConfirmOrder] Partner order failed:", err.response?.data || err.message);
+    await Order.updateOne({ _id: orderId }, { $set: { partnerOrderId: null } }); // release claim — allow retry
     return res.status(502).json({ success: false, message: "Failed to create partner order" });
   }
 

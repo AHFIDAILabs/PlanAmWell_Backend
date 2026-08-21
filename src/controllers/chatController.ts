@@ -109,10 +109,14 @@ export const getOrCreateConversation = asyncHandler(
       });
 
       if (conversation) {
-        // Link existing conversation to current appointment so Step 1 works next time
-        appointment.conversationId =
-          conversation._id as mongoose.Types.ObjectId;
-        await appointment.save();
+        // Link existing conversation to current appointment so Step 1 works next time.
+        // appointment was fetched with .populate() — never .save() it directly
+        // (see the golden rule in videoCallController.ts); atomic update instead.
+        appointment.conversationId = conversation._id as mongoose.Types.ObjectId;
+        await Appointment.updateOne(
+          { _id: appointment._id },
+          { $set: { conversationId: conversation._id } }
+        );
         console.log(
           `🔗 Existing conversation ${conversation._id} linked to appointment ${appointmentId}`
         );
@@ -183,10 +187,13 @@ export const getOrCreateConversation = asyncHandler(
         populate: { path: "doctorImage", select: "imageUrl secure_url" },
       });
 
-      // Link conversation to appointment
+      // Link conversation to appointment — same populated-doc rule as above.
       appointment.conversationId =
         conversation._id as mongoose.Types.ObjectId;
-      await appointment.save();
+      await Appointment.updateOne(
+        { _id: appointment._id },
+        { $set: { conversationId: conversation._id } }
+      );
 
       console.log(
         `✅ New conversation created for appointment ${appointmentId}`
@@ -194,10 +201,15 @@ export const getOrCreateConversation = asyncHandler(
     }
 
     // ── Reset unread count for the caller (read-side bookkeeping only) ─────────
+    // conversation is populated by this point — never .save() it directly
+    // (see the golden rule in videoCallController.ts); atomic update instead.
     const unreadField = role === "Doctor" ? "doctor" : "user";
     if (conversation.unreadCount[unreadField] > 0) {
       conversation.unreadCount[unreadField] = 0;
-      await conversation.save();
+      await Conversation.updateOne(
+        { _id: conversation._id },
+        { $set: { [`unreadCount.${unreadField}`]: 0 } }
+      );
     }
 
     res.status(200).json({
@@ -375,7 +387,18 @@ export const sendMessage = asyncHandler(
       conversation.unreadCount.doctor += 1;
     }
 
-    await conversation.save();
+    // conversation was fetched with .populate() — never .save() it directly
+    // (see the golden rule in videoCallController.ts). Atomic update also
+    // avoids a lost-update race on unreadCount under concurrent messages.
+    const recipientUnreadField = role === "Doctor" ? "unreadCount.user" : "unreadCount.doctor";
+    await Conversation.updateOne(
+      { _id: conversation._id },
+      {
+        $push: { messages: newMessage },
+        $set: { lastMessage: newMessage },
+        $inc: { [recipientUnreadField]: 1 },
+      }
+    );
 
     // Emit real-time event
     const recipientId = role === "Doctor" ? patientId : doctorId;
@@ -628,8 +651,13 @@ export const requestVideoCall = asyncHandler(
       expiresAt: new Date(Date.now() + 60 * 1000),
     };
 
+    // conversation was fetched with .populate() — never .save() it directly
+    // (see the golden rule in videoCallController.ts); atomic update instead.
     conversation.activeVideoRequest = videoRequest;
-    await conversation.save();
+    await Conversation.updateOne(
+      { _id: conversation._id },
+      { $set: { activeVideoRequest: videoRequest } }
+    );
 
     const recipientId =
       role === "Doctor"
@@ -742,16 +770,25 @@ export const respondToVideoCall = asyncHandler(
       });
     }
 
-    conversation.activeVideoRequest.status = accept ? "accepted" : "declined";
+    const responseStatus: "accepted" | "declined" = accept ? "accepted" : "declined";
+    conversation.activeVideoRequest.status = responseStatus;
     conversation.activeVideoRequest.respondedAt = new Date();
-    conversation.videoCallHistory.push(conversation.activeVideoRequest);
+    const resolvedRequest = conversation.activeVideoRequest;
 
-    const requesterId = String(conversation.activeVideoRequest.requestedBy);
-    const responseStatus = conversation.activeVideoRequest.status;
-    const callType = conversation.activeVideoRequest.callType || "video";
+    const requesterId = String(resolvedRequest.requestedBy);
+    const callType = resolvedRequest.callType || "video";
+
+    // conversation was fetched with .populate() — never .save() it directly
+    // (see the golden rule in videoCallController.ts); atomic update instead.
+    conversation.videoCallHistory.push(resolvedRequest);
     conversation.activeVideoRequest = undefined;
-
-    await conversation.save();
+    await Conversation.updateOne(
+      { _id: conversation._id },
+      {
+        $push: { videoCallHistory: resolvedRequest },
+        $unset: { activeVideoRequest: "" },
+      }
+    );
 
     // Ad-hoc chat call, accepted — let generateVideoToken bypass the
     // scheduled-time window for the next few minutes so both sides can join,

@@ -275,6 +275,22 @@ AppointmentSchema.index({ callStatus: 1, callStartedAt: 1 });
 AppointmentSchema.index({ doctorId: 1, status: 1 });
 AppointmentSchema.index({ userId: 1, status: 1 });
 
+// Double-booking guard, enforced atomically by MongoDB itself (not just
+// application logic, which has a check-then-write race under concurrent
+// requests). A doctor can't have two live appointments at the same
+// scheduledAt — "live" meaning any status except the ones that free the slot
+// back up. createAppointment (appointmentController.ts) catches the resulting
+// E11000 duplicate-key error and turns it into a friendly 409.
+AppointmentSchema.index(
+  { doctorId: 1, scheduledAt: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $nin: ["cancelled", "rejected", "expired"] },
+    },
+  }
+);
+
 // ✅ NEW: Helper methods
 AppointmentSchema.methods.addActiveParticipant = function (userId: string) {
   const participantId = new mongoose.Types.ObjectId(userId);

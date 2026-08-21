@@ -119,6 +119,41 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
     throw new Error("Items are required");
   }
 
+  // ── Price/stock authority check ──────────────────────────────────────────
+  // `items` is client-supplied, including `price` — never trust that value.
+  // Re-fetch each product server-side and overwrite price with the real
+  // catalog price so a modified request can't check out at an arbitrary
+  // price. Also reject unknown drugIds and requests that exceed stock.
+  const products = await Product.find({
+    drugId: { $in: items.map((i) => i.drugId) },
+  }).lean();
+  const productByDrugId = new Map(products.map((p) => [p.drugId, p]));
+
+  const validatedItems: ICartItem[] = [];
+  for (const item of items) {
+    const product = productByDrugId.get(item.drugId);
+    if (!product) {
+      res.status(400);
+      throw new Error(`Product not found: ${item.drugId}`);
+    }
+    const quantity = Number(item.quantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      res.status(400);
+      throw new Error(`Invalid quantity for ${product.name || item.drugId}`);
+    }
+    if (product.stockQuantity < quantity) {
+      res.status(400);
+      throw new Error(`Only ${product.stockQuantity} left in stock for ${product.name}`);
+    }
+    validatedItems.push({
+      ...item,
+      quantity,
+      price: product.price,
+      drugName: product.name,
+      imageUrl: product.imageUrl || item.imageUrl,
+    });
+  }
+
   let ownerQuery;
   try {
     ownerQuery = getOwnerQuery(req);
@@ -133,12 +168,19 @@ export const addToCart = asyncHandler(async (req: Request, res: Response) => {
   console.log("[addToCart] existing cart:", cart?._id ?? "none");
 
   if (!cart) {
-    cart = new Cart({ ...ownerQuery, items, totalItems: 0, totalPrice: 0 });
+    cart = new Cart({ ...ownerQuery, items: validatedItems, totalItems: 0, totalPrice: 0 });
   } else {
-    for (const item of items) {
+    for (const item of validatedItems) {
       const idx = cart.items.findIndex((i) => i.drugId === item.drugId);
       if (idx > -1) {
-        cart.items[idx].quantity += item.quantity;
+        const newQuantity = cart.items[idx].quantity + item.quantity;
+        const product = productByDrugId.get(item.drugId)!;
+        if (product.stockQuantity < newQuantity) {
+          res.status(400);
+          throw new Error(`Only ${product.stockQuantity} left in stock for ${product.name}`);
+        }
+        cart.items[idx].quantity = newQuantity;
+        cart.items[idx].price = item.price; // re-sync in case catalog price changed
       } else {
         cart.items.push({ ...item });
       }

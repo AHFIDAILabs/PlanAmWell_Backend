@@ -271,53 +271,62 @@ const updatedPayment = await Payment.findOneAndUpdate(
     console.log("[verifyPayment] updatedPayment:", updatedPayment ? updatedPayment._id : "NOT FOUND");
 
  if (isSuccess && updatedPayment) {
+  // Idempotency guard — verifyPayment can legitimately be called more than
+  // once for the same payment (client polling, user re-opening the redirect
+  // page). Only run the one-time side effects (notification, cart clearing)
+  // the first time this order actually transitions to paid.
+  const orderBefore = await Order.findById(updatedPayment.orderId).select("paymentStatus");
+  const alreadyPaid = orderBefore?.paymentStatus === "paid";
+
   const order = await Order.findByIdAndUpdate(updatedPayment.orderId, {
     paymentStatus: "paid",
   }, { new: true });
 
-  if (order?.userId) {
-    //  Send payment success notification
-    try {
-      const { NotificationService } = await import("../services/NotificationService");
-      await NotificationService.notifyPaymentSuccessful(
-        order.userId.toString(),
-        order._id.toString(),
-        order.orderNumber.slice(0, 8).toUpperCase(),
-        order.total,
-      );
-    } catch (err) {
-      console.error("[verifyPayment] Notification failed:", err);
-    }
-  }
+  console.log("[verifyPayment] Order updated to paid:", order?.paymentStatus, "alreadyPaid:", alreadyPaid);
 
-  console.log("[verifyPayment] Order updated to paid:", order?.paymentStatus);
-
-  //  Delete cart using multiple strategies to ensure it's found
-  if (order) {
-    await Cart.deleteMany({
-      $or: [
-        { orderId: order._id },
-        { orderId: order._id.toString() },
-        { userId: order.userId?.toString() },
-      ]
-    });
-    console.log("[verifyPayment] Cart cleared for userId:", order.userId);
-  }
-
-  // Clear partner cart
-  if (order?.partnerOrderId && order?.userId) {
-    try {
-      const user = await User.findById(order.userId);
-      if (user?.partnerId) {
-        await axios.post(`${PARTNER_API_URL}/v1/PlanAmWell/cart`, {
-          userId: user.partnerId,
-          platform: "paw",
-          items: [],
-        });
-        console.log("[verifyPayment] Partner cart cleared");
+  if (!alreadyPaid) {
+    if (order?.userId) {
+      //  Send payment success notification
+      try {
+        const { NotificationService } = await import("../services/NotificationService");
+        await NotificationService.notifyPaymentSuccessful(
+          order.userId.toString(),
+          order._id.toString(),
+          order.orderNumber.slice(0, 8).toUpperCase(),
+          order.total,
+        );
+      } catch (err) {
+        console.error("[verifyPayment] Notification failed:", err);
       }
-    } catch (err: any) {
-      console.error("[verifyPayment] Partner cart clear failed:", err.response?.data || err.message);
+    }
+
+    //  Delete cart using multiple strategies to ensure it's found
+    if (order) {
+      await Cart.deleteMany({
+        $or: [
+          { orderId: order._id },
+          { orderId: order._id.toString() },
+          { userId: order.userId?.toString() },
+        ]
+      });
+      console.log("[verifyPayment] Cart cleared for userId:", order.userId);
+    }
+
+    // Clear partner cart
+    if (order?.partnerOrderId && order?.userId) {
+      try {
+        const user = await User.findById(order.userId);
+        if (user?.partnerId) {
+          await axios.post(`${PARTNER_API_URL}/v1/PlanAmWell/cart`, {
+            userId: user.partnerId,
+            platform: "paw",
+            items: [],
+          });
+          console.log("[verifyPayment] Partner cart cleared");
+        }
+      } catch (err: any) {
+        console.error("[verifyPayment] Partner cart clear failed:", err.response?.data || err.message);
+      }
     }
   }
 }

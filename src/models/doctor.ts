@@ -20,6 +20,9 @@ export interface IDoctor extends Document {
   status: "submitted" | "reviewing" | "approved" | "rejected";
   profileComplete: boolean;
   expoPushTokens?: string[];
+  fcmTokens?: string[];
+  addFcmToken: (token: string) => Promise<void>;
+  removeFcmToken: (token: string) => Promise<void>;
   createdAt: Date;
   updatedAt?: Date;
 }
@@ -55,8 +58,24 @@ const DoctorSchema = new Schema<IDoctor>(
     },
     profileComplete: { type: Boolean, default: false },
     expoPushTokens: { type: [String], default: [] },
+    fcmTokens: { type: [String], default: [] },
   },
   { timestamps: true }
 );
+
+DoctorSchema.methods.addFcmToken = async function (token: string) {
+  if (!token) return;
+  if (!this.fcmTokens) this.fcmTokens = [];
+  if (!this.fcmTokens.includes(token)) {
+    this.fcmTokens.push(token);
+    await this.save();
+  }
+};
+
+DoctorSchema.methods.removeFcmToken = async function (token: string) {
+  if (!this.fcmTokens || !token) return;
+  this.fcmTokens = this.fcmTokens.filter((t: string) => t !== token);
+  await this.save();
+};
 
 export const Doctor = mongoose.model<IDoctor>("Doctor", DoctorSchema);

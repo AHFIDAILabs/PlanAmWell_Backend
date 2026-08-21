@@ -4,8 +4,12 @@ import { AdvocacyArticle } from "../models/advocacy";
 import { Comment } from "../models/comment";
 import asyncHandler from "../middleware/asyncHandler";
 import { uploadToCloudinary } from "../middleware/claudinary";
+import { memoryCache } from "../util/memoryCache";
 
-import slugify from "slugify"; 
+import slugify from "slugify";
+
+const ADVOCACY_CACHE_PREFIX = "advocacy:";
+const ADVOCACY_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min — write paths below invalidate immediately anyway
 
 // =====================================================
 // PUBLIC ROUTES (No Authentication Required)
@@ -38,15 +42,21 @@ export const getArticles = asyncHandler(async (req: Request, res: Response) => {
   const limitNum = parseInt(limit as string, 10);
   const skip = (pageNum - 1) * limitNum;
 
-  // Execute query
-  const articles = await AdvocacyArticle.find(query)
-    .select("-content") // Exclude full content for list view
-    .sort(sort as string)
-    .skip(skip)
-    .limit(limitNum)
-    .lean();
+  // Cache keyed on the full filter/pagination combo — different filters need
+  // different cached results, so the key has to reflect every input.
+  const cacheKey = `${ADVOCACY_CACHE_PREFIX}list:${JSON.stringify({ category, tag, featured, search, pageNum, limitNum, sort })}`;
 
-  const total = await AdvocacyArticle.countDocuments(query);
+  const { articles, total } = await memoryCache.getOrSet(cacheKey, ADVOCACY_CACHE_TTL_MS, async () => {
+    const articles = await AdvocacyArticle.find(query)
+      .select("-content") // Exclude full content for list view
+      .sort(sort as string)
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const total = await AdvocacyArticle.countDocuments(query);
+    return { articles, total };
+  });
 
   res.status(200).json({
     success: true,
@@ -64,11 +74,16 @@ export const getArticles = asyncHandler(async (req: Request, res: Response) => {
 export const getRecentArticles = asyncHandler(async (req: Request, res: Response) => {
   const { limit = 5 } = req.query;
 
-  const articles = await AdvocacyArticle.find({ status: "published" })
-    .select("-content")
-    .sort("-publishedAt")
-    .limit(parseInt(limit as string, 10))
-    .lean();
+  const articles = await memoryCache.getOrSet(
+    `${ADVOCACY_CACHE_PREFIX}recent:${limit}`,
+    ADVOCACY_CACHE_TTL_MS,
+    () =>
+      AdvocacyArticle.find({ status: "published" })
+        .select("-content")
+        .sort("-publishedAt")
+        .limit(parseInt(limit as string, 10))
+        .lean()
+  );
 
   res.status(200).json({
     success: true,
@@ -80,14 +95,19 @@ export const getRecentArticles = asyncHandler(async (req: Request, res: Response
 export const getFeaturedArticles = asyncHandler(async (req: Request, res: Response) => {
   const { limit = 3 } = req.query;
 
-  const articles = await AdvocacyArticle.find({
-    status: "published",
-    featured: true,
-  })
-    .select("-content")
-    .sort("-publishedAt")
-    .limit(parseInt(limit as string, 10))
-    .lean();
+  const articles = await memoryCache.getOrSet(
+    `${ADVOCACY_CACHE_PREFIX}featured:${limit}`,
+    ADVOCACY_CACHE_TTL_MS,
+    () =>
+      AdvocacyArticle.find({
+        status: "published",
+        featured: true,
+      })
+        .select("-content")
+        .sort("-publishedAt")
+        .limit(parseInt(limit as string, 10))
+        .lean()
+  );
 
   res.status(200).json({
     success: true,
@@ -163,9 +183,11 @@ export const getArticleBySlug = asyncHandler(async (req: Request, res: Response)
     });
   }
 
-  // Increment views
-  article.views += 1;
-  await article.save();
+  // Increment views — atomic update, not .save() on this populated doc (see
+  // the golden rule documented in videoCallController.ts), and $inc also
+  // avoids a lost-update race under concurrent viewers.
+  await AdvocacyArticle.updateOne({ _id: article._id }, { $inc: { views: 1 } });
+  article.views += 1; // reflect in the response we're about to send
 
   res.status(200).json({
     success: true,
@@ -308,6 +330,8 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
     partner,
   });
 
+  memoryCache.invalidatePrefix(ADVOCACY_CACHE_PREFIX);
+
   res.status(201).json({
     success: true,
     message: "Article created successfully",
@@ -371,6 +395,8 @@ export const updateArticle = asyncHandler(async (req: Request, res: Response) =>
     throw new Error("Article not found");
   }
 
+  memoryCache.invalidatePrefix(ADVOCACY_CACHE_PREFIX);
+
   res.status(200).json({
     success: true,
     message: "Article updated successfully",
@@ -391,6 +417,8 @@ export const deleteArticle = asyncHandler(async (req: Request, res: Response) =>
       message: "Article not found",
     });
   }
+
+  memoryCache.invalidatePrefix(ADVOCACY_CACHE_PREFIX);
 
   res.status(200).json({
     success: true,

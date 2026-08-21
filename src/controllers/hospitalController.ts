@@ -2,6 +2,11 @@ import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import { Hospital } from "../models/hospital";
 import { searchNearbyHospitals, searchHospitalsByCity } from "../services/OverpassService";
+import { memoryCache } from "../util/memoryCache";
+
+const HOSPITALS_CACHE_PREFIX = "hospitals:";
+const HOSPITALS_CACHE_TTL_MS = 10 * 60 * 1000; // our own admin-curated data — write paths invalidate immediately
+const OSM_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — real-world hospital locations essentially never change day to day, and we don't control writes to this external data anyway
 
 // ── Admin-curated clinics (MongoDB) ──────────────────────────────────────────
 
@@ -32,18 +37,30 @@ export const getHospitals = asyncHandler(async (req: Request, res: Response) => 
   }
 
   const skip = (Number(page) - 1) * Number(limit);
-  const [hospitals, total] = await Promise.all([
-    Hospital.find(filter).sort({ rating: -1, name: 1 }).skip(skip).limit(Number(limit)).lean(),
-    Hospital.countDocuments(filter),
-  ]);
+  const cacheKey = `${HOSPITALS_CACHE_PREFIX}list:${JSON.stringify({ search, state, city, type, specialty, page, limit })}`;
+
+  const { hospitals, total } = await memoryCache.getOrSet(cacheKey, HOSPITALS_CACHE_TTL_MS, async () => {
+    const [hospitals, total] = await Promise.all([
+      Hospital.find(filter).sort({ rating: -1, name: 1 }).skip(skip).limit(Number(limit)).lean(),
+      Hospital.countDocuments(filter),
+    ]);
+    return { hospitals, total };
+  });
 
   res.json({ success: true, data: hospitals, total, page: Number(page), pages: Math.ceil(total / Number(limit)) });
 });
 
 // GET /api/v1/hospitals/states
 export const getClinicStates = asyncHandler(async (req: Request, res: Response) => {
-  const states = await Hospital.distinct("state", { isActive: true, state: { $ne: null } });
-  res.json({ success: true, data: (states as string[]).filter(Boolean).sort() });
+  const states = await memoryCache.getOrSet(
+    `${HOSPITALS_CACHE_PREFIX}states`,
+    HOSPITALS_CACHE_TTL_MS,
+    async () => {
+      const raw = await Hospital.distinct("state", { isActive: true, state: { $ne: null } });
+      return (raw as string[]).filter(Boolean).sort();
+    }
+  );
+  res.json({ success: true, data: states });
 });
 
 // GET /api/v1/hospitals/:id  (MongoDB only — OSM detail comes via /nearby payload)
@@ -62,6 +79,7 @@ export const createHospital = asyncHandler(async (req: Request, res: Response) =
   if (!name) { res.status(400); throw new Error("Clinic name is required"); }
   const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-");
   const hospital = await Hospital.create({ ...req.body, name, slug });
+  memoryCache.invalidatePrefix(HOSPITALS_CACHE_PREFIX);
   res.status(201).json({ success: true, data: hospital });
 });
 
@@ -69,6 +87,7 @@ export const createHospital = asyncHandler(async (req: Request, res: Response) =
 export const updateHospital = asyncHandler(async (req: Request, res: Response) => {
   const hospital = await Hospital.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
   if (!hospital) { res.status(404); throw new Error("Clinic not found"); }
+  memoryCache.invalidatePrefix(HOSPITALS_CACHE_PREFIX);
   res.json({ success: true, data: hospital });
 });
 
@@ -76,6 +95,7 @@ export const updateHospital = asyncHandler(async (req: Request, res: Response) =
 export const deleteHospital = asyncHandler(async (req: Request, res: Response) => {
   const hospital = await Hospital.findByIdAndDelete(req.params.id);
   if (!hospital) { res.status(404); throw new Error("Clinic not found"); }
+  memoryCache.invalidatePrefix(HOSPITALS_CACHE_PREFIX);
   res.json({ success: true, message: "Clinic removed successfully" });
 });
 
@@ -103,7 +123,16 @@ export const getNearbyHospitals = asyncHandler(async (req: Request, res: Respons
     throw new Error("lat and lng must be valid numbers");
   }
 
-  const clinics = await searchNearbyHospitals(parsedLat, parsedLng, parsedRadius);
+  // Round to ~1.1km grid so nearby users hitting slightly different exact
+  // coordinates still share a cache entry instead of each making their own
+  // Overpass call for what's effectively the same search area.
+  const gridLat = parsedLat.toFixed(2);
+  const gridLng = parsedLng.toFixed(2);
+  const clinics = await memoryCache.getOrSet(
+    `${HOSPITALS_CACHE_PREFIX}osm:nearby:${gridLat}:${gridLng}:${parsedRadius}`,
+    OSM_CACHE_TTL_MS,
+    () => searchNearbyHospitals(parsedLat, parsedLng, parsedRadius)
+  );
   res.json({ success: true, data: clinics, total: clinics.length });
 });
 
@@ -119,6 +148,11 @@ export const getHospitalsByCity = asyncHandler(async (req: Request, res: Respons
     throw new Error("city query parameter is required");
   }
 
-  const clinics = await searchHospitalsByCity(String(city).trim());
+  const normalizedCity = String(city).trim().toLowerCase();
+  const clinics = await memoryCache.getOrSet(
+    `${HOSPITALS_CACHE_PREFIX}osm:city:${normalizedCity}`,
+    OSM_CACHE_TTL_MS,
+    () => searchHospitalsByCity(String(city).trim())
+  );
   res.json({ success: true, data: clinics, total: clinics.length });
 });

@@ -4,6 +4,14 @@ import axios from "axios";
 import asyncHandler from "../middleware/asyncHandler";
 import { Product, IProduct } from "../models/product";
 import Fuse from 'fuse.js';
+import { memoryCache } from "../util/memoryCache";
+
+const PRODUCTS_CACHE_PREFIX = "products:";
+// Shorter than the other caches — stock levels change more often than
+// categories/doctors/articles, so freshness matters more here. Still cuts a
+// large amount of duplicate query/collection-scan load during traffic
+// spikes, since most pilot users will be browsing within the same minute.
+const PRODUCTS_CACHE_TTL_MS = 60 * 1000;
 
 const API_BASE = process.env.PARTNER_API_URL?.replace(/\/$/, ""); // remove trailing slash
 
@@ -46,36 +54,44 @@ export const getProducts = asyncHandler(async (req: Request, res: Response) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
   const skip = (page - 1) * limit;
 
-  let products = await Product.find({ partnerProductId: { $exists: true } })
-  .skip(skip)
-  .limit(limit);
-  // console.log(`[Products] Products in DB: ${products.length}`);
+  const products = await memoryCache.getOrSet(
+    `${PRODUCTS_CACHE_PREFIX}list:${page}:${limit}`,
+    PRODUCTS_CACHE_TTL_MS,
+    async () => {
+      let products = await Product.find({ partnerProductId: { $exists: true } })
+        .skip(skip)
+        .limit(limit);
+      // console.log(`[Products] Products in DB: ${products.length}`);
 
-if (!products.length) {
-  // console.log("[Products] DB empty. Fetching from partner API...");
-  const apiProducts = await fetchProductsFromAPI();
-  // console.log("[Products] Fetched from API:", apiProducts.length);
+      if (!products.length) {
+        // console.log("[Products] DB empty. Fetching from partner API...");
+        const apiProducts = await fetchProductsFromAPI();
+        // console.log("[Products] Fetched from API:", apiProducts.length);
 
-  if (apiProducts.length > 0) {
-    const bulkOps = apiProducts.map((p) => ({
-      updateOne: {
-        filter: { partnerProductId: p.partnerProductId },
-        update: { $set: p },
-        upsert: true,
-      },
-    }));
+        if (apiProducts.length > 0) {
+          const bulkOps = apiProducts.map((p) => ({
+            updateOne: {
+              filter: { partnerProductId: p.partnerProductId },
+              update: { $set: p },
+              upsert: true,
+            },
+          }));
 
-    await Product.bulkWrite(bulkOps);
-    // console.log(`[Products] Upserted ${apiProducts.length} products.`);
+          await Product.bulkWrite(bulkOps);
+          // console.log(`[Products] Upserted ${apiProducts.length} products.`);
 
-    // ✅ Re-query DB
-    products = await Product.find({ partnerId: { $exists: true } })
-      .skip(skip)
-      .limit(limit);
+          // ✅ Re-query DB
+          products = await Product.find({ partnerId: { $exists: true } })
+            .skip(skip)
+            .limit(limit);
 
-    // console.log(`[Products] Products after fetch: ${products.length}`);
-  }
-}
+          // console.log(`[Products] Products after fetch: ${products.length}`);
+        }
+      }
+      return products;
+    }
+  );
+
   res.status(200).json({ success: true, data: products, page, limit });
 });
 
@@ -142,6 +158,8 @@ export const syncProducts = asyncHandler(async (req: Request, res: Response) => 
     await Product.bulkWrite(bulkOps);
     // console.log(`[Products] Synced ${products.length} products from partner API.`);
 
+    memoryCache.invalidatePrefix(PRODUCTS_CACHE_PREFIX);
+
     res.status(200).json({
       success: true,
       message: "Products synced successfully",
@@ -169,13 +187,21 @@ export const searchProducts = async (req: Request, res: Response): Promise<void>
             stockQuantity: { $gt: 0 },
             status: { $ne: 'inactive' }
         };
-        
+
         if (category) {
             baseQuery.categoryName = { $regex: category, $options: 'i' };
         }
-        
-        const allProducts = await Product.find(baseQuery).lean<IProduct[]>();
-        
+
+        // Caches the base collection query, not the final fuzzy-searched
+        // result — free-text queries vary per call, but this is the same
+        // full-catalog (or per-category) scan on every single chatbot
+        // message that triggers a buy-intent search, regardless of query text.
+        const allProducts = await memoryCache.getOrSet(
+            `${PRODUCTS_CACHE_PREFIX}search-base:${category || 'all'}`,
+            PRODUCTS_CACHE_TTL_MS,
+            () => Product.find(baseQuery).lean<IProduct[]>()
+        );
+
         // ✅ Use fuzzy search
         const fuse = new Fuse(allProducts, {
             keys: ['name', 'categoryName', 'manufacturerName'],
@@ -205,14 +231,19 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
         const { category } = req.params;
         const catLimit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
 
-        const products = await Product.find({
-            categoryName: { $regex: category, $options: 'i' },
-            stockQuantity: { $gt: 0 },
-            status: { $ne: 'inactive' }
-        })
-        .limit(catLimit)
-        .lean<IProduct[]>();
-        
+        const products = await memoryCache.getOrSet(
+            `${PRODUCTS_CACHE_PREFIX}category:${category}:${catLimit}`,
+            PRODUCTS_CACHE_TTL_MS,
+            () =>
+                Product.find({
+                    categoryName: { $regex: category, $options: 'i' },
+                    stockQuantity: { $gt: 0 },
+                    status: { $ne: 'inactive' }
+                })
+                    .limit(catLimit)
+                    .lean<IProduct[]>()
+        );
+
         res.status(200).json({
             success: true,
             count: products.length,

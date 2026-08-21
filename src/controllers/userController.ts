@@ -77,8 +77,12 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
   // console.log("--- UPDATE PROFILE REQUEST RECEIVED ---");
   // console.log("[Update] Starting update for User ID:", req.params.id, ". File present:", !!req.file);
 
-  const user = await User.findById(req.params.id).populate("userImage");
-  
+  // Not populated — this document gets .save()'d below, and Mongoose can't
+  // re-cast a populated ref back to an ObjectId on save (see the golden rule
+  // documented in videoCallController.ts). The old-image lookup a few lines
+  // down already handles userImage as a plain ObjectId.
+  const user = await User.findById(req.params.id);
+
   if (!user) {
     res.status(404);
     throw new Error("User not found");
@@ -198,8 +202,9 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
  * @access Private
  */
 export const deleteUserImage = asyncHandler(async (req: Request, res: Response) => {
-  const user = await User.findById(req.params.id).populate("userImage");
-  
+  // Not populated — see updateUser above for why.
+  const user = await User.findById(req.params.id);
+
   if (!user) {
     res.status(404);
     throw new Error("User not found");

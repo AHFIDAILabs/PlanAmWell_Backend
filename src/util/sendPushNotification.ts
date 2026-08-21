@@ -3,6 +3,7 @@ import Expo from "expo-server-sdk";
 import { User } from "../models/user";
 import { Doctor } from "../models/doctor";
 import Notification, { NotificationDocument } from "../models/notifications";
+import { sendFcmDataMessages } from "./firebaseAdmin";
 
 const expo = new Expo();
 
@@ -24,19 +25,43 @@ export async function sendIncomingCallPushNotification(
 ) {
   try {
     // Find recipient user (could be User or Doctor)
-    let recipient = await User.findById(recipientUserId).select("expoPushTokens");
+    let recipient = await User.findById(recipientUserId).select("expoPushTokens fcmTokens");
 
     if (!recipient) {
-      recipient = await Doctor.findById(recipientUserId).select("expoPushTokens");
+      recipient = await Doctor.findById(recipientUserId).select("expoPushTokens fcmTokens");
     }
 
-    if (!recipient || !recipient.expoPushTokens?.length) {
+    if (!recipient || (!recipient.expoPushTokens?.length && !recipient.fcmTokens?.length)) {
       console.log(`[IncomingCall] No push tokens found for user ${recipientUserId}`);
       return;
     }
 
+    // Raw FCM data-only message — this is what actually wakes
+    // @react-native-firebase/messaging's background/foreground handlers
+    // (and therefore the notifee full-screen call UI) when the recipient's
+    // app is backgrounded or fully killed. Expo's push relay below does NOT
+    // reach those handlers, so this is sent in addition, not instead.
+    if (recipient.fcmTokens?.length) {
+      sendFcmDataMessages(recipient.fcmTokens, {
+        type: "incoming_call",
+        appointmentId: callData.appointmentId,
+        callerName: callData.callerName,
+        callerImage: callData.callerImage || "",
+        callerType: callData.callerType,
+        channelName: callData.channelName,
+        callType: callData.callType || "video",
+        conversationId: callData.conversationId || "",
+        videoRequestId: callData.videoRequestId || "",
+        timestamp: new Date().toISOString(),
+      }).catch((err) => console.error("[IncomingCall] FCM data send failed:", err));
+    }
+
+    if (!recipient.expoPushTokens?.length) {
+      return;
+    }
+
     // Filter valid Expo push tokens
-    const validTokens = recipient.expoPushTokens.filter((token: string) => 
+    const validTokens = recipient.expoPushTokens.filter((token: string) =>
       Expo.isExpoPushToken(token)
     );
 

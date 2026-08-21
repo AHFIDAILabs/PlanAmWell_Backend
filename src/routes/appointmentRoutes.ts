@@ -10,6 +10,7 @@ import {
   getAppointmentById,
   endAppointment,
   profileCheck,
+  getBookedSlots,
 } from "../controllers/appointmentController";
 
 import {
@@ -23,6 +24,7 @@ const appointmentRouter = express.Router();
 
 // Public routes (allow guest booking)
 appointmentRouter.post("/", guestAuth, createAppointment);
+appointmentRouter.get("/booked-slots", getBookedSlots);
 
 // Protected routes
 appointmentRouter.get("/profile-check", verifyToken, authorize("User"), profileCheck);

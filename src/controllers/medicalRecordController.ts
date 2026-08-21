@@ -352,16 +352,22 @@ export const respondToAccessRequest = asyncHandler(
       });
     }
 
+    // accessRequest was fetched with .populate() — never .save() it directly
+    // (see the golden rule in videoCallController.ts); atomic updates instead.
     if (new Date() > accessRequest.expiresAt) {
       accessRequest.status = "expired";
-      await accessRequest.save();
+      await AccessRequest.updateOne({ _id: accessRequest._id }, { $set: { status: "expired" } });
       return res.status(400).json({ success: false, message: "This request has expired." });
     }
 
     // ── Update ────────────────────────────────────────────────────────────────
+    const respondedAt = new Date();
     accessRequest.status      = approve ? "approved" : "denied";
-    accessRequest.respondedAt = new Date();
-    await accessRequest.save();
+    accessRequest.respondedAt = respondedAt;
+    await AccessRequest.updateOne(
+      { _id: accessRequest._id },
+      { $set: { status: accessRequest.status, respondedAt } }
+    );
 
     // ── Notify doctor ─────────────────────────────────────────────────────────
     const doctor = accessRequest.requestingDoctorId as any;

@@ -9,6 +9,8 @@ import {
   doctorLogin,
   registerPushToken,
   removePushToken,
+  registerFcmToken,
+  removeFcmToken,
   refreshToken,
   deleteMyAccount,
   requestAccountDeletionByCredentials,
@@ -72,6 +74,16 @@ authRouter.post("/register-push-token", guestAuth, verifyToken, registerPushToke
  * PROTECTED - remove Expo push token
  */
 authRouter.post("/remove-push-token", guestAuth, verifyToken, removePushToken);
+
+/**
+ * PROTECTED - register raw FCM device token (for backgrounded/killed call ringing)
+ */
+authRouter.post("/register-fcm-token", guestAuth, verifyToken, registerFcmToken);
+
+/**
+ * PROTECTED - remove raw FCM device token
+ */
+authRouter.post("/remove-fcm-token", guestAuth, verifyToken, removeFcmToken);
 
 
 authRouter.post("/refreshToken", refreshToken);
