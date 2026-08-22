@@ -279,8 +279,15 @@ export async function sendPushNotification(
         priority: "high" as const,
         channelId: "default",
         data: {
-          type: notification.type,
           ...(notification.metadata ?? {}),
+          // Spread after metadata, not before — metadata can carry its own
+          // `type` (e.g. "payment_pending", a sub-case of the "order" this
+          // notification is), which used to silently win here and break
+          // client-side routing that switches on this top-level type
+          // (App.tsx's handleNavigationFromData). The metadata's own type,
+          // if any, is preserved under `notificationSubType` instead.
+          notificationSubType: notification.metadata?.type,
+          type: notification.type,
         },
       }));
 

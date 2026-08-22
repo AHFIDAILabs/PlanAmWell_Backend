@@ -1,8 +1,43 @@
 import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
-import { Hospital } from "../models/hospital";
-import { searchNearbyHospitals, searchHospitalsByCity } from "../services/OverpassService";
+import { Hospital, IHospital } from "../models/hospital";
+import { searchNearbyHospitals, searchHospitalsByCity, NormalizedClinic } from "../services/OverpassService";
 import { memoryCache } from "../util/memoryCache";
+
+// Maps our own admin-curated clinics into the same shape OSM results come
+// in, so the frontend renders either source identically.
+function toNormalizedClinic(h: IHospital & { _id: any }): NormalizedClinic {
+  return {
+    _id: h._id.toString(),
+    name: h.name,
+    type: h.type,
+    address: h.address,
+    city: h.city,
+    state: h.state,
+    phone: h.phone,
+    email: h.email,
+    website: h.website,
+    openingHours: h.openingHours,
+    specialties: h.specialties,
+    services: h.services,
+    amenity: "hospital",
+    coordinates: h.coordinates,
+    source: "openstreetmap", // keeps the frontend's rendering path uniform
+  };
+}
+
+// All OSM mirrors are free, best-effort, third-party infrastructure — when
+// every one of them is unreachable (seen in production: overpass-api.de
+// throttles Render's IP specifically while the others are intermittently
+// down), falling through to whatever admin-curated clinics we have locally
+// beats returning nothing to a user standing in front of "Find a Clinic".
+async function localHospitalFallback(filter: Record<string, any>): Promise<NormalizedClinic[]> {
+  const hospitals = await Hospital.find({ isActive: true, ...filter })
+    .sort({ rating: -1 })
+    .limit(50)
+    .lean();
+  return hospitals.map((h) => toNormalizedClinic(h as any));
+}
 
 const HOSPITALS_CACHE_PREFIX = "hospitals:";
 const HOSPITALS_CACHE_TTL_MS = 10 * 60 * 1000; // our own admin-curated data — write paths invalidate immediately
@@ -131,7 +166,22 @@ export const getNearbyHospitals = asyncHandler(async (req: Request, res: Respons
   const clinics = await memoryCache.getOrSet(
     `${HOSPITALS_CACHE_PREFIX}osm:nearby:${gridLat}:${gridLng}:${parsedRadius}`,
     OSM_CACHE_TTL_MS,
-    () => searchNearbyHospitals(parsedLat, parsedLng, parsedRadius)
+    async () => {
+      try {
+        return await searchNearbyHospitals(parsedLat, parsedLng, parsedRadius);
+      } catch (err: any) {
+        console.error("[Hospitals] All OSM mirrors failed, falling back to local database:", err.message);
+        // Rough bounding-box approximation — good enough for a degraded
+        // fallback; 1 degree latitude is ~111km, longitude scaled by
+        // cos(latitude) since it narrows toward the poles.
+        const latDelta = parsedRadius / 111_000;
+        const lngDelta = parsedRadius / (111_000 * Math.cos((parsedLat * Math.PI) / 180) || 1);
+        return localHospitalFallback({
+          "coordinates.latitude": { $gte: parsedLat - latDelta, $lte: parsedLat + latDelta },
+          "coordinates.longitude": { $gte: parsedLng - lngDelta, $lte: parsedLng + lngDelta },
+        });
+      }
+    }
   );
   res.json({ success: true, data: clinics, total: clinics.length });
 });
@@ -152,7 +202,14 @@ export const getHospitalsByCity = asyncHandler(async (req: Request, res: Respons
   const clinics = await memoryCache.getOrSet(
     `${HOSPITALS_CACHE_PREFIX}osm:city:${normalizedCity}`,
     OSM_CACHE_TTL_MS,
-    () => searchHospitalsByCity(String(city).trim())
+    async () => {
+      try {
+        return await searchHospitalsByCity(String(city).trim());
+      } catch (err: any) {
+        console.error("[Hospitals] All OSM mirrors failed, falling back to local database:", err.message);
+        return localHospitalFallback({ city: { $regex: String(city).trim(), $options: "i" } });
+      }
+    }
   );
   res.json({ success: true, data: clinics, total: clinics.length });
 });

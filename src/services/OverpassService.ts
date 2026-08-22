@@ -15,7 +15,14 @@ import axios from "axios";
 // exist precisely because of this; trying them in sequence turns an
 // intermittent single-instance failure into something that only fails if
 // ALL of them are down at once.
+// Ordered by observed reliability from the production host's network, not
+// alphabetically — overpass-api.de (the "main" instance) is known to
+// throttle/block requests from datacenter IPs like Render's specifically,
+// even when it's reachable fine from a residential connection, so it's
+// listed after two mirrors confirmed working from Render.
 const OVERPASS_URLS = [
+  "https://overpass.osm.ch/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
   "https://overpass.openstreetmap.ru/api/interpreter",

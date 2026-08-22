@@ -15,7 +15,7 @@ export const getDoctors = asyncHandler(async (req: Request, res: Response) => {
   const doctors = await memoryCache.getOrSet(
     APPROVED_DOCTORS_CACHE_KEY,
     APPROVED_DOCTORS_CACHE_TTL_MS,
-    () => Doctor.find({ status: "approved" }).select("-passwordHash").lean()
+    () => Doctor.find({ status: "approved" }).select("-passwordHash").populate("doctorImage").lean()
   );
   res.status(200).json({ success: true, data: doctors });
 });
