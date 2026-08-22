@@ -8,20 +8,21 @@
 import axios from "axios";
 
 // The free public overpass-api.de instance is well known to be unreliable
-// under its own load — it returns either a hard 504 ("server too busy") or,
-// worse, a 200 OK with a truncated/empty result and a timeout remark baked
-// into the body, which looks identical to a genuine "no results" response
-// unless checked for explicitly. Several independently-run public mirrors
-// exist precisely because of this; trying them in sequence turns an
-// intermittent single-instance failure into something that only fails if
-// ALL of them are down at once.
-// Ordered by observed reliability from the production host's network, not
-// alphabetically — overpass-api.de (the "main" instance) is known to
-// throttle/block requests from datacenter IPs like Render's specifically,
-// even when it's reachable fine from a residential connection, so it's
-// listed after two mirrors confirmed working from Render.
+// under its own load — it returns a hard 504 ("server too busy") when
+// overloaded, which axios throws on and the loop below correctly treats as
+// a failure. Several independently-run public mirrors exist precisely
+// because of this; trying them in sequence turns an intermittent
+// single-instance failure into something that only fails if ALL are down.
+//
+// overpass.osm.ch is deliberately NOT in this list — verified directly
+// (curl, both Lagos and Abuja queries) that it returns a syntactically
+// valid HTTP 200 with a well-formed but ALWAYS-EMPTY `elements: []`,
+// regardless of the query. That's worse than an honest failure: nothing in
+// queryOverpass's error handling can distinguish "this mirror is lying"
+// from "genuinely zero results here", so it silently poisoned every single
+// lookup when it was first in this list. Do not re-add it without directly
+// verifying it returns real data for a location known to have OSM entries.
 const OVERPASS_URLS = [
-  "https://overpass.osm.ch/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
