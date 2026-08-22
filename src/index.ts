@@ -12,6 +12,7 @@ import mongoose from "mongoose";
 import { errorHandler } from "./middleware/errorHandler";
 
 import "./cron/reminderJob";
+import "./cron/clinicPrewarmJob";
 
 // Import routers
 import categoryRouter from "./routes/categoryRoutes";

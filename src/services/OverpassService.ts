@@ -40,7 +40,10 @@ const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 // same list the frontend already offers as quick-picks) removes Nominatim
 // from the hot path entirely for the vast majority of real searches —
 // Nominatim is now only a fallback for city names not in this table.
-const KNOWN_CITY_COORDS: Record<string, { lat: number; lon: number }> = {
+// Exported so the clinic pre-warm cron job (services/HospitalSeedService.ts
+// + cron/clinicPrewarmJob.ts) can sweep the exact same set of cities on a
+// schedule, rather than maintaining a second, driftable copy of this list.
+export const KNOWN_CITY_COORDS: Record<string, { lat: number; lon: number }> = {
   "lagos": { lat: 6.5244, lon: 3.3792 },
   "abuja": { lat: 9.0765, lon: 7.3986 },
   "port harcourt": { lat: 4.8156, lon: 7.0498 },
@@ -157,7 +160,7 @@ function deduplicateByName(clinics: NormalizedClinic[]): NormalizedClinic[] {
 function buildNearbyQuery(lat: number, lng: number, radius: number): string {
   const area = `(around:${radius},${lat},${lng})`;
   return `
-[out:json][timeout:25];
+[out:json][timeout:6];
 (
   node["amenity"~"^(hospital|clinic|doctors|health_post|healthcare_centre)$"]${area};
   way["amenity"~"^(hospital|clinic|doctors|health_post|healthcare_centre)$"]${area};
@@ -178,10 +181,40 @@ out center tags;
  * indistinguishable from a genuine "no results in this area" response.
  * Throws only if every mirror fails.
  */
+// Tracks mirrors that failed recently so back-to-back requests (e.g. a user
+// tapping through several city quick-picks) don't keep hammering the same
+// one during its rate-limit/overload window — observed directly: a mirror
+// that answered fine on request 1 started timing out by request 3 of a
+// rapid sequence, and since OVERPASS_URLS has a fixed order, every
+// subsequent request paid the full timeout on that same mirror before
+// reaching one that wasn't also currently struggling.
+const mirrorCooldownUntil = new Map<string, number>();
+const MIRROR_COOLDOWN_MS = 60_000;
+
+// Shuffled per call (not just once at module load) so concurrent/rapid
+// requests spread across mirrors instead of every request racing to hit
+// whichever mirror happens to be first in a fixed list.
+function shuffledMirrors(): string[] {
+  const arr = [...OVERPASS_URLS];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  // Mirrors still in their cooldown window go last, but are still included
+  // as a final resort — if every mirror is cooling down, trying anyway
+  // beats refusing to search at all.
+  const now = Date.now();
+  return arr.sort((a, b) => {
+    const aCooling = (mirrorCooldownUntil.get(a) ?? 0) > now;
+    const bCooling = (mirrorCooldownUntil.get(b) ?? 0) > now;
+    return Number(aCooling) - Number(bCooling);
+  });
+}
+
 async function queryOverpass(query: string): Promise<any[]> {
   let lastError: any;
 
-  for (const url of OVERPASS_URLS) {
+  for (const url of shuffledMirrors()) {
     try {
       const response = await axios.post(
         url,
@@ -191,7 +224,15 @@ async function queryOverpass(query: string): Promise<any[]> {
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "PlanAmWell/1.0 (health app; contact@planamwell.com)",
           },
-          timeout: 30_000,
+          // Short on purpose — a genuinely working mirror answers in 1-3s
+          // (observed), and with 4 mirrors tried sequentially, a slow/dead
+          // one hanging for its full timeout before we move on compounds
+          // fast: at 30s each, all 4 failing would take 2 minutes, well
+          // past the frontend's own 35-40s request timeout, which made a
+          // slow-but-eventually-successful chain look like a hard failure.
+          // 8s per mirror keeps the worst case (~32s for 4 mirrors) inside
+          // that budget.
+          timeout: 8_000,
         }
       );
 
@@ -202,9 +243,11 @@ async function queryOverpass(query: string): Promise<any[]> {
         throw new Error(`Overpass remark (soft failure): ${response.data.remark}`);
       }
 
+      mirrorCooldownUntil.delete(url);
       return response.data?.elements ?? [];
     } catch (err: any) {
       lastError = err;
+      mirrorCooldownUntil.set(url, Date.now() + MIRROR_COOLDOWN_MS);
       console.warn(`[Overpass] Mirror failed (${url}):`, err.message);
       // fall through to the next mirror
     }
@@ -241,56 +284,67 @@ export async function searchNearbyHospitals(
 }
 
 /**
- * Geocode a Nigerian city or state name via Nominatim, then search for
- * hospitals within 10 km of the city centre.
+ * Resolves a Nigerian city or state name to coordinates — the known-city
+ * table first (skips Nominatim, and its failure modes, entirely for the
+ * cities that cover most real searches), Nominatim geocoding as a fallback
+ * for anything not in that table. Returns null only for "genuinely no such
+ * place" (Nominatim ran and found nothing); a Nominatim request failure
+ * throws instead, same as an Overpass failure, so callers can tell "no
+ * results" and "couldn't check" apart.
  */
-export async function searchHospitalsByCity(cityName: string): Promise<NormalizedClinic[]> {
+export async function resolveCityCoordinates(
+  cityName: string
+): Promise<{ lat: number; lon: number } | null> {
   const normalised = cityName.trim();
 
-  // Step 1: Try the known-city table first — skips Nominatim (and its
-  // failure modes) entirely for the cities that cover most real searches.
   const known = KNOWN_CITY_COORDS[normalised.toLowerCase()];
-  let lat: number, lon: number;
-
   if (known) {
-    ({ lat, lon } = known);
-    console.log(`[Hospitals] "${normalised}" matched known city table → (${lat}, ${lon})`);
-  } else {
-    // Step 2: Fall back to geocoding via Nominatim for anything not in the table.
-    console.log(`[Nominatim] Geocoding: "${normalised}"`);
-    let geoRes;
-    try {
-      geoRes = await axios.get(NOMINATIM_URL, {
-        params: {
-          q: `${normalised}, Nigeria`,
-          format: "json",
-          limit: 1,
-          countrycodes: "ng",
-        },
-        headers: {
-          "User-Agent": "PlanAmWell/1.0 (health app; contact@planamwell.com)",
-        },
-        timeout: 10_000,
-      });
-    } catch (err: any) {
-      // Surfaced distinctly from an Overpass failure so production logs
-      // make it obvious which external dependency actually failed —
-      // Nominatim has no mirror fallback the way Overpass does.
-      console.error(`[Nominatim] Geocoding request failed for "${normalised}":`, err.response?.status, err.message);
-      throw new Error(`Nominatim geocoding failed: ${err.message}`);
-    }
-
-    const places = geoRes.data as any[];
-    if (!places.length) {
-      console.warn(`[Nominatim] No results for "${normalised}"`);
-      return [];
-    }
-
-    lat = parseFloat(places[0].lat);
-    lon = parseFloat(places[0].lon);
-    console.log(`[Nominatim] "${normalised}" → (${lat}, ${lon})`);
+    console.log(`[Hospitals] "${normalised}" matched known city table → (${known.lat}, ${known.lon})`);
+    return known;
   }
 
-  // Step 3: Search hospitals within 10 km of that city centre
-  return searchNearbyHospitals(lat, lon, 10_000);
+  console.log(`[Nominatim] Geocoding: "${normalised}"`);
+  let geoRes;
+  try {
+    geoRes = await axios.get(NOMINATIM_URL, {
+      params: {
+        q: `${normalised}, Nigeria`,
+        format: "json",
+        limit: 1,
+        countrycodes: "ng",
+      },
+      headers: {
+        "User-Agent": "PlanAmWell/1.0 (health app; contact@planamwell.com)",
+      },
+      timeout: 10_000,
+    });
+  } catch (err: any) {
+    // Surfaced distinctly from an Overpass failure so production logs make
+    // it obvious which external dependency actually failed — Nominatim has
+    // no mirror fallback the way Overpass does.
+    console.error(`[Nominatim] Geocoding request failed for "${normalised}":`, err.response?.status, err.message);
+    throw new Error(`Nominatim geocoding failed: ${err.message}`);
+  }
+
+  const places = geoRes.data as any[];
+  if (!places.length) {
+    console.warn(`[Nominatim] No results for "${normalised}"`);
+    return null;
+  }
+
+  const lat = parseFloat(places[0].lat);
+  const lon = parseFloat(places[0].lon);
+  console.log(`[Nominatim] "${normalised}" → (${lat}, ${lon})`);
+  return { lat, lon };
+}
+
+/**
+ * Geocode a Nigerian city or state name, then search for hospitals within
+ * 10 km of the city centre. Always a live Overpass lookup — hospitalController
+ * uses resolveCityCoordinates directly to check the local database first.
+ */
+export async function searchHospitalsByCity(cityName: string): Promise<NormalizedClinic[]> {
+  const coords = await resolveCityCoordinates(cityName);
+  if (!coords) return [];
+  return searchNearbyHospitals(coords.lat, coords.lon, 10_000);
 }

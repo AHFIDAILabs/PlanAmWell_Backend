@@ -1,7 +1,8 @@
 import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import { Hospital, IHospital } from "../models/hospital";
-import { searchNearbyHospitals, searchHospitalsByCity, NormalizedClinic } from "../services/OverpassService";
+import { searchNearbyHospitals, resolveCityCoordinates, NormalizedClinic } from "../services/OverpassService";
+import { upsertOsmClinics } from "../services/HospitalSeedService";
 import { memoryCache } from "../util/memoryCache";
 
 // Maps our own admin-curated clinics into the same shape OSM results come
@@ -26,12 +27,19 @@ function toNormalizedClinic(h: IHospital & { _id: any }): NormalizedClinic {
   };
 }
 
-// All OSM mirrors are free, best-effort, third-party infrastructure — when
-// every one of them is unreachable (seen in production: overpass-api.de
-// throttles Render's IP specifically while the others are intermittently
-// down), falling through to whatever admin-curated clinics we have locally
-// beats returning nothing to a user standing in front of "Find a Clinic".
-async function localHospitalFallback(filter: Record<string, any>): Promise<NormalizedClinic[]> {
+function boundingBoxFilter(lat: number, lng: number, radiusMeters: number) {
+  // 1 degree latitude is ~111km; longitude is scaled by cos(latitude) since
+  // it narrows toward the poles. Approximate, but plenty for a "clinics
+  // near this point" radius search.
+  const latDelta = radiusMeters / 111_000;
+  const lngDelta = radiusMeters / (111_000 * Math.cos((lat * Math.PI) / 180) || 1);
+  return {
+    "coordinates.latitude": { $gte: lat - latDelta, $lte: lat + latDelta },
+    "coordinates.longitude": { $gte: lng - lngDelta, $lte: lng + lngDelta },
+  };
+}
+
+async function queryLocalHospitals(filter: Record<string, any>): Promise<NormalizedClinic[]> {
   const hospitals = await Hospital.find({ isActive: true, ...filter })
     .sort({ rating: -1 })
     .limit(50)
@@ -39,15 +47,37 @@ async function localHospitalFallback(filter: Record<string, any>): Promise<Norma
   return hospitals.map((h) => toNormalizedClinic(h as any));
 }
 
+// Local-database-first, live-Overpass-as-fallback. This used to be the
+// other way round (always hit Overpass live, fall back to the database
+// only if every mirror failed) — but the free Overpass mirrors reliably
+// start rate-limiting after just a couple of requests in quick succession
+// (confirmed directly: a mirror answering in 2s on request 1 was timing
+// out by request 3), so real users would see slow, sometimes-empty results
+// during exactly the kind of back-to-back searching "browsing several
+// cities" naturally involves. The clinic pre-warm cron job
+// (cron/clinicPrewarmJob.ts) keeps this database filled in for known
+// cities; a live hit here also self-seeds the database for next time, so
+// coverage organically grows to match wherever users actually search.
+async function findClinicsNear(lat: number, lng: number, radiusMeters: number): Promise<NormalizedClinic[]> {
+  const local = await queryLocalHospitals(boundingBoxFilter(lat, lng, radiusMeters));
+  if (local.length > 0) return local;
+
+  try {
+    const live = await searchNearbyHospitals(lat, lng, radiusMeters);
+    if (live.length > 0) {
+      upsertOsmClinics(live).catch((err) =>
+        console.error("[Hospitals] Auto-seed upsert failed:", err.message)
+      );
+    }
+    return live;
+  } catch (err: any) {
+    console.error("[Hospitals] Live OSM lookup failed and no local data available:", err.message);
+    return [];
+  }
+}
+
 const HOSPITALS_CACHE_PREFIX = "hospitals:";
 const HOSPITALS_CACHE_TTL_MS = 10 * 60 * 1000; // our own admin-curated data — write paths invalidate immediately
-const OSM_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — real-world hospital locations essentially never change day to day, and we don't control writes to this external data anyway
-// Short on purpose — a fallback result (all OSM mirrors down) is a degraded
-// answer, not a genuine one, and must NOT sit in cache for the same 6h as a
-// real result. getOrSet can't express two different TTLs for the same key
-// depending on which branch the fetcher took, so nearby/by-city below manage
-// the cache manually instead of through getOrSet for this reason.
-const FALLBACK_CACHE_TTL_MS = 2 * 60 * 1000;
 
 // ── Admin-curated clinics (MongoDB) ──────────────────────────────────────────
 
@@ -164,62 +194,45 @@ export const getNearbyHospitals = asyncHandler(async (req: Request, res: Respons
     throw new Error("lat and lng must be valid numbers");
   }
 
-  // Round to ~1.1km grid so nearby users hitting slightly different exact
-  // coordinates still share a cache entry instead of each making their own
-  // Overpass call for what's effectively the same search area.
-  const gridLat = parsedLat.toFixed(2);
-  const gridLng = parsedLng.toFixed(2);
-  const cacheKey = `${HOSPITALS_CACHE_PREFIX}osm:nearby:${gridLat}:${gridLng}:${parsedRadius}`;
-
-  let clinics = memoryCache.get<NormalizedClinic[]>(cacheKey);
-  if (clinics === undefined) {
-    try {
-      clinics = await searchNearbyHospitals(parsedLat, parsedLng, parsedRadius);
-      memoryCache.set(cacheKey, clinics, OSM_CACHE_TTL_MS);
-    } catch (err: any) {
-      console.error("[Hospitals] All OSM mirrors failed, falling back to local database:", err.message);
-      // Rough bounding-box approximation — good enough for a degraded
-      // fallback; 1 degree latitude is ~111km, longitude scaled by
-      // cos(latitude) since it narrows toward the poles.
-      const latDelta = parsedRadius / 111_000;
-      const lngDelta = parsedRadius / (111_000 * Math.cos((parsedLat * Math.PI) / 180) || 1);
-      clinics = await localHospitalFallback({
-        "coordinates.latitude": { $gte: parsedLat - latDelta, $lte: parsedLat + latDelta },
-        "coordinates.longitude": { $gte: parsedLng - lngDelta, $lte: parsedLng + lngDelta },
-      });
-      // Short TTL — a degraded answer, not a real one; the next request
-      // should retry OSM soon rather than being stuck behind this for 6h.
-      memoryCache.set(cacheKey, clinics, FALLBACK_CACHE_TTL_MS);
-    }
-  }
+  const clinics = await findClinicsNear(parsedLat, parsedLng, parsedRadius);
   res.json({ success: true, data: clinics, total: clinics.length });
 });
 
 /**
  * GET /api/v1/hospitals/by-city?city=Lagos
- * Geocodes the city via Nominatim then queries Overpass within 10 km.
+ * Resolves the city to coordinates (known-city table or Nominatim), then
+ * searches the local database first, live OSM as a fallback — same
+ * local-first strategy as getNearbyHospitals, see findClinicsNear above.
  */
 export const getHospitalsByCity = asyncHandler(async (req: Request, res: Response) => {
   const { city } = req.query;
+  const trimmedCity = String(city ?? "").trim();
 
-  if (!city || !String(city).trim()) {
+  if (!trimmedCity) {
     res.status(400);
     throw new Error("city query parameter is required");
   }
 
-  const normalizedCity = String(city).trim().toLowerCase();
-  const cacheKey = `${HOSPITALS_CACHE_PREFIX}osm:city:${normalizedCity}`;
-
-  let clinics = memoryCache.get<NormalizedClinic[]>(cacheKey);
-  if (clinics === undefined) {
-    try {
-      clinics = await searchHospitalsByCity(String(city).trim());
-      memoryCache.set(cacheKey, clinics, OSM_CACHE_TTL_MS);
-    } catch (err: any) {
-      console.error("[Hospitals] All OSM mirrors failed, falling back to local database:", err.message);
-      clinics = await localHospitalFallback({ city: { $regex: String(city).trim(), $options: "i" } });
-      memoryCache.set(cacheKey, clinics, FALLBACK_CACHE_TTL_MS);
-    }
+  let coords: { lat: number; lon: number } | null;
+  try {
+    coords = await resolveCityCoordinates(trimmedCity);
+  } catch (err: any) {
+    // Nominatim failed outright (no coordinates to search around at all) —
+    // last resort is whatever the local database has tagged with this city
+    // name directly, since a bounding-box search needs coordinates we
+    // don't have here.
+    console.error("[Hospitals] City geocoding failed, falling back to local city-name match:", err.message);
+    const clinics = await queryLocalHospitals({ city: { $regex: trimmedCity, $options: "i" } });
+    res.json({ success: true, data: clinics, total: clinics.length });
+    return;
   }
+
+  if (!coords) {
+    // Genuinely no such place, per Nominatim — not a failure, just zero results.
+    res.json({ success: true, data: [], total: 0 });
+    return;
+  }
+
+  const clinics = await findClinicsNear(coords.lat, coords.lon, 10_000);
   res.json({ success: true, data: clinics, total: clinics.length });
 });
