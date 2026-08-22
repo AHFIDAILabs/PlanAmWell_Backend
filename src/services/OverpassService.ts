@@ -30,6 +30,39 @@ const OVERPASS_URLS = [
 ];
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 
+// Nominatim has a strict usage policy and is known to rate-limit/block
+// automated requests from cloud/datacenter IPs (the same category of
+// problem we saw with overpass-api.de and Render's IP) — and unlike
+// Overpass, there's no mirror fallback for it, so a Nominatim failure used
+// to take the whole by-city search down with it even though the actual
+// clinic lookup (searchNearbyHospitals) works fine. Since this app only
+// targets Nigerian cities, pre-seeding coordinates for the major ones (the
+// same list the frontend already offers as quick-picks) removes Nominatim
+// from the hot path entirely for the vast majority of real searches —
+// Nominatim is now only a fallback for city names not in this table.
+const KNOWN_CITY_COORDS: Record<string, { lat: number; lon: number }> = {
+  "lagos": { lat: 6.5244, lon: 3.3792 },
+  "abuja": { lat: 9.0765, lon: 7.3986 },
+  "port harcourt": { lat: 4.8156, lon: 7.0498 },
+  "kano": { lat: 12.0022, lon: 8.5920 },
+  "ibadan": { lat: 7.3775, lon: 3.9470 },
+  "benin city": { lat: 6.3350, lon: 5.6037 },
+  "enugu": { lat: 6.4483, lon: 7.5086 },
+  "kaduna": { lat: 10.5105, lon: 7.4165 },
+  "owerri": { lat: 5.4840, lon: 7.0351 },
+  "calabar": { lat: 4.9757, lon: 8.3417 },
+  "uyo": { lat: 5.0377, lon: 7.9128 },
+  "warri": { lat: 5.5160, lon: 5.7500 },
+  "jos": { lat: 9.8965, lon: 8.8583 },
+  "maiduguri": { lat: 11.8333, lon: 13.1500 },
+  "onitsha": { lat: 6.1667, lon: 6.7833 },
+  "aba": { lat: 5.1167, lon: 7.3667 },
+  "abeokuta": { lat: 7.1475, lon: 3.3619 },
+  "akure": { lat: 7.2571, lon: 5.2058 },
+  "ilorin": { lat: 8.4966, lon: 4.5426 },
+  "sokoto": { lat: 13.0059, lon: 5.2476 },
+};
+
 // No caching in this file — hospitalController.ts caches at the HTTP layer
 // in front of both exported functions below (a coarser ~1.1km GPS grid, 6h
 // TTL, shared with the by-city path). This service is just "fetch fresh";
@@ -214,30 +247,50 @@ export async function searchNearbyHospitals(
 export async function searchHospitalsByCity(cityName: string): Promise<NormalizedClinic[]> {
   const normalised = cityName.trim();
 
-  // Step 1: Geocode the city with Nominatim
-  console.log(`[Nominatim] Geocoding: "${normalised}"`);
-  const geoRes = await axios.get(NOMINATIM_URL, {
-    params: {
-      q: `${normalised}, Nigeria`,
-      format: "json",
-      limit: 1,
-      countrycodes: "ng",
-    },
-    headers: {
-      "User-Agent": "PlanAmWell/1.0 (health app; contact@planamwell.com)",
-    },
-    timeout: 10_000,
-  });
+  // Step 1: Try the known-city table first — skips Nominatim (and its
+  // failure modes) entirely for the cities that cover most real searches.
+  const known = KNOWN_CITY_COORDS[normalised.toLowerCase()];
+  let lat: number, lon: number;
 
-  const places = geoRes.data as any[];
-  if (!places.length) {
-    console.warn(`[Nominatim] No results for "${normalised}"`);
-    return [];
+  if (known) {
+    ({ lat, lon } = known);
+    console.log(`[Hospitals] "${normalised}" matched known city table → (${lat}, ${lon})`);
+  } else {
+    // Step 2: Fall back to geocoding via Nominatim for anything not in the table.
+    console.log(`[Nominatim] Geocoding: "${normalised}"`);
+    let geoRes;
+    try {
+      geoRes = await axios.get(NOMINATIM_URL, {
+        params: {
+          q: `${normalised}, Nigeria`,
+          format: "json",
+          limit: 1,
+          countrycodes: "ng",
+        },
+        headers: {
+          "User-Agent": "PlanAmWell/1.0 (health app; contact@planamwell.com)",
+        },
+        timeout: 10_000,
+      });
+    } catch (err: any) {
+      // Surfaced distinctly from an Overpass failure so production logs
+      // make it obvious which external dependency actually failed —
+      // Nominatim has no mirror fallback the way Overpass does.
+      console.error(`[Nominatim] Geocoding request failed for "${normalised}":`, err.response?.status, err.message);
+      throw new Error(`Nominatim geocoding failed: ${err.message}`);
+    }
+
+    const places = geoRes.data as any[];
+    if (!places.length) {
+      console.warn(`[Nominatim] No results for "${normalised}"`);
+      return [];
+    }
+
+    lat = parseFloat(places[0].lat);
+    lon = parseFloat(places[0].lon);
+    console.log(`[Nominatim] "${normalised}" → (${lat}, ${lon})`);
   }
 
-  const { lat, lon } = places[0];
-  console.log(`[Nominatim] "${normalised}" → (${lat}, ${lon})`);
-
-  // Step 2: Search hospitals within 10 km of that city centre
-  return searchNearbyHospitals(parseFloat(lat), parseFloat(lon), 10_000);
+  // Step 3: Search hospitals within 10 km of that city centre
+  return searchNearbyHospitals(lat, lon, 10_000);
 }
