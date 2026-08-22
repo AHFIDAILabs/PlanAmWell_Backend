@@ -42,6 +42,12 @@ async function localHospitalFallback(filter: Record<string, any>): Promise<Norma
 const HOSPITALS_CACHE_PREFIX = "hospitals:";
 const HOSPITALS_CACHE_TTL_MS = 10 * 60 * 1000; // our own admin-curated data — write paths invalidate immediately
 const OSM_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — real-world hospital locations essentially never change day to day, and we don't control writes to this external data anyway
+// Short on purpose — a fallback result (all OSM mirrors down) is a degraded
+// answer, not a genuine one, and must NOT sit in cache for the same 6h as a
+// real result. getOrSet can't express two different TTLs for the same key
+// depending on which branch the fetcher took, so nearby/by-city below manage
+// the cache manually instead of through getOrSet for this reason.
+const FALLBACK_CACHE_TTL_MS = 2 * 60 * 1000;
 
 // ── Admin-curated clinics (MongoDB) ──────────────────────────────────────────
 
@@ -163,26 +169,29 @@ export const getNearbyHospitals = asyncHandler(async (req: Request, res: Respons
   // Overpass call for what's effectively the same search area.
   const gridLat = parsedLat.toFixed(2);
   const gridLng = parsedLng.toFixed(2);
-  const clinics = await memoryCache.getOrSet(
-    `${HOSPITALS_CACHE_PREFIX}osm:nearby:${gridLat}:${gridLng}:${parsedRadius}`,
-    OSM_CACHE_TTL_MS,
-    async () => {
-      try {
-        return await searchNearbyHospitals(parsedLat, parsedLng, parsedRadius);
-      } catch (err: any) {
-        console.error("[Hospitals] All OSM mirrors failed, falling back to local database:", err.message);
-        // Rough bounding-box approximation — good enough for a degraded
-        // fallback; 1 degree latitude is ~111km, longitude scaled by
-        // cos(latitude) since it narrows toward the poles.
-        const latDelta = parsedRadius / 111_000;
-        const lngDelta = parsedRadius / (111_000 * Math.cos((parsedLat * Math.PI) / 180) || 1);
-        return localHospitalFallback({
-          "coordinates.latitude": { $gte: parsedLat - latDelta, $lte: parsedLat + latDelta },
-          "coordinates.longitude": { $gte: parsedLng - lngDelta, $lte: parsedLng + lngDelta },
-        });
-      }
+  const cacheKey = `${HOSPITALS_CACHE_PREFIX}osm:nearby:${gridLat}:${gridLng}:${parsedRadius}`;
+
+  let clinics = memoryCache.get<NormalizedClinic[]>(cacheKey);
+  if (clinics === undefined) {
+    try {
+      clinics = await searchNearbyHospitals(parsedLat, parsedLng, parsedRadius);
+      memoryCache.set(cacheKey, clinics, OSM_CACHE_TTL_MS);
+    } catch (err: any) {
+      console.error("[Hospitals] All OSM mirrors failed, falling back to local database:", err.message);
+      // Rough bounding-box approximation — good enough for a degraded
+      // fallback; 1 degree latitude is ~111km, longitude scaled by
+      // cos(latitude) since it narrows toward the poles.
+      const latDelta = parsedRadius / 111_000;
+      const lngDelta = parsedRadius / (111_000 * Math.cos((parsedLat * Math.PI) / 180) || 1);
+      clinics = await localHospitalFallback({
+        "coordinates.latitude": { $gte: parsedLat - latDelta, $lte: parsedLat + latDelta },
+        "coordinates.longitude": { $gte: parsedLng - lngDelta, $lte: parsedLng + lngDelta },
+      });
+      // Short TTL — a degraded answer, not a real one; the next request
+      // should retry OSM soon rather than being stuck behind this for 6h.
+      memoryCache.set(cacheKey, clinics, FALLBACK_CACHE_TTL_MS);
     }
-  );
+  }
   res.json({ success: true, data: clinics, total: clinics.length });
 });
 
@@ -199,17 +208,18 @@ export const getHospitalsByCity = asyncHandler(async (req: Request, res: Respons
   }
 
   const normalizedCity = String(city).trim().toLowerCase();
-  const clinics = await memoryCache.getOrSet(
-    `${HOSPITALS_CACHE_PREFIX}osm:city:${normalizedCity}`,
-    OSM_CACHE_TTL_MS,
-    async () => {
-      try {
-        return await searchHospitalsByCity(String(city).trim());
-      } catch (err: any) {
-        console.error("[Hospitals] All OSM mirrors failed, falling back to local database:", err.message);
-        return localHospitalFallback({ city: { $regex: String(city).trim(), $options: "i" } });
-      }
+  const cacheKey = `${HOSPITALS_CACHE_PREFIX}osm:city:${normalizedCity}`;
+
+  let clinics = memoryCache.get<NormalizedClinic[]>(cacheKey);
+  if (clinics === undefined) {
+    try {
+      clinics = await searchHospitalsByCity(String(city).trim());
+      memoryCache.set(cacheKey, clinics, OSM_CACHE_TTL_MS);
+    } catch (err: any) {
+      console.error("[Hospitals] All OSM mirrors failed, falling back to local database:", err.message);
+      clinics = await localHospitalFallback({ city: { $regex: String(city).trim(), $options: "i" } });
+      memoryCache.set(cacheKey, clinics, FALLBACK_CACHE_TTL_MS);
     }
-  );
+  }
   res.json({ success: true, data: clinics, total: clinics.length });
 });
