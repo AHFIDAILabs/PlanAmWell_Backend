@@ -6,6 +6,7 @@ import { NotificationService } from "../services/NotificationService";
 import { emitAppointmentEnded } from "../index";
 import { AccessRequest } from "../models/AccessRequest";
 import { User } from "../models/user";
+import { autoExpireAbandonedPayments } from "../util/autoExpirePayments";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // JOB 1: 15-minute appointment reminders (unchanged, runs every minute)
@@ -228,6 +229,18 @@ cron.schedule("0 */4 * * *", async () => {
 
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOB 4: Release slots held by abandoned consultation payments
+// Runs every 15 minutes for a 30-minute payment window.
+// ─────────────────────────────────────────────────────────────────────────────
+cron.schedule("*/15 * * * *", async () => {
+  try {
+    await autoExpireAbandonedPayments();
+  } catch (error) {
+    console.error("❌ [AutoExpirePaymentsJob] Error:", error);
+  }
+});
 
 console.log("✅ Appointment reminder + auto-expiry cron jobs started");
 

@@ -42,6 +42,7 @@ import medicationReminderRouter from "./routes/medicationReminderRoutes";
 import familyMemberRouter from "./routes/familyMemberRoutes";
 import eventRouter from "./routes/eventRoutes";
 import reviewRouter from "./routes/reviewRoutes";
+import platformSettingsRouter from "./routes/platformSettingsRoutes";
 import legalRouter from "./routes/legalRoutes";
 import searchRouter from "./routes/searchRoutes";
 
@@ -649,7 +650,17 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "10mb" }));
+app.use(
+  express.json({
+    limit: "10mb",
+    // Stash the exact request bytes for anything that needs to verify a
+    // webhook HMAC signature (e.g. appointment payment webhooks) — a
+    // re-serialized req.body can differ byte-for-byte from what was signed.
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
@@ -715,6 +726,7 @@ app.use("/api/v1/medication-reminders", medicationReminderRouter);
 app.use("/api/v1/family", familyMemberRouter);
 app.use("/api/v1/events", eventRouter);
 app.use("/api/v1/reviews", reviewRouter);
+app.use("/api/v1/platform-settings", platformSettingsRouter);
 app.use("/api/v1/search", searchRouter);
 
 app.use(errorHandler);

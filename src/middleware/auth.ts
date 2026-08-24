@@ -25,6 +25,10 @@ declare module "express" {
     };
     user?: any;
     session?: any;
+    // Captured by express.json()'s `verify` hook in index.ts — the exact
+    // bytes the client sent, needed for webhook HMAC signature checks
+    // (a re-serialized req.body can differ byte-for-byte from what was signed).
+    rawBody?: Buffer;
   }
 }
 

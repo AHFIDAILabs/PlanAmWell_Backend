@@ -663,3 +663,16 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
   res.status(400);
   throw new Error("This reset link is invalid or has expired.");
 });
+
+// ─────────────────────────────────────────────
+// GET /auth/socket-token — Mints a short-lived JWT (same payload shape and
+// secret as a normal access token, just a ~10 min expiry) that the web BFF
+// hands to the browser so it can open a direct Socket.IO connection for
+// WebRTC call signaling. The browser never sees the real access/refresh
+// tokens; this token is scoped narrowly by its short lifetime.
+// ─────────────────────────────────────────────
+export const mintSocketToken = asyncHandler(async (req: Request, res: Response) => {
+  const { id, role, name } = req.auth!;
+  const token = jwt.sign({ id, role, name }, process.env.JWT_SECRET!, { expiresIn: "10m" });
+  res.status(200).json({ success: true, data: { token } });
+});

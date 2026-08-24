@@ -13,6 +13,10 @@ import {
   profileCheck,
   getBookedSlots,
 } from "../controllers/appointmentController";
+import {
+  initiateAppointmentPayment,
+  getAppointmentPaymentStatus,
+} from "../controllers/appointmentPaymentController";
 
 import {
   guestAuth,
@@ -44,6 +48,18 @@ appointmentRouter.get("/booked-slots", getBookedSlots);
 appointmentRouter.get("/profile-check", verifyToken, authorize("User"), profileCheck);
 appointmentRouter.get("/my", verifyToken, authorize("User"), getMyAppointments);
 appointmentRouter.get("/appointment/:id", verifyToken, getAppointmentById);
+appointmentRouter.post(
+  "/:id/payment/initiate",
+  verifyToken,
+  authorize("User"),
+  initiateAppointmentPayment,
+);
+appointmentRouter.get(
+  "/:id/payment/status",
+  verifyToken,
+  authorize("User"),
+  getAppointmentPaymentStatus,
+);
 appointmentRouter.get(
   "/doctor",
   verifyToken,

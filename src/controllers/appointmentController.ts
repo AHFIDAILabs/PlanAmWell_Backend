@@ -9,6 +9,7 @@ import { NotificationService } from "../services/NotificationService";
 import { createNotificationForUser } from "../util/sendPushNotification";
 import { Conversation } from "../models/conversation";
 import { emitAppointmentEnded, emitConversationUnlocked } from "../index";
+import { getPlatformSettings } from "../services/platformSettingsService";
 
 const extractId = (field: any): string => {
   if (!field) return "";
@@ -177,6 +178,8 @@ export const createAppointment = asyncHandler(
       throw new Error("Invalid scheduledAt date.");
     }
  
+    const platformSettings = await getPlatformSettings();
+
     let appointment;
     try {
       appointment = await Appointment.create({
@@ -189,6 +192,9 @@ export const createAppointment = asyncHandler(
         shareUserInfo: !!shareUserInfo,
         patientSnapshot,
         consultationType,
+        status: "awaiting-payment",
+        amountKobo: platformSettings.consultationFeeKobo,
+        currency: platformSettings.currency,
         notificationsSent: {
           reminder: false,
           expiryWarning: false,
@@ -211,36 +217,15 @@ export const createAppointment = asyncHandler(
       throw err;
     }
 
-    const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
-    const patientName = user?.name || "A patient";
- 
-    try {
-      await NotificationService.notifyAppointmentRequestSent(
-        req.auth.id,
-        String(appointment._id),
-        doctorName,
-        scheduledDate
-      );
-    } catch (error) {
-      console.error("❌ Failed to send patient notification:", error);
-    }
- 
-    try {
-      await NotificationService.notifyDoctorNewRequest(
-        String(doctorId),
-        String(appointment._id),
-        patientName,
-        scheduledDate,
-        reason
-      );
-    } catch (error) {
-      console.error("❌ Failed to send doctor notification:", error);
-    }
- 
+    // Neither the patient nor the doctor is notified yet — the appointment
+    // is only reserved (holding the slot) until payment succeeds. Both
+    // notifications fire from the payment webhook handler instead, once
+    // status actually moves to "pending" (awaiting doctor review).
+
     res.status(201).json({
       success: true,
       data: appointment,
-      message: "Appointment request sent successfully. Awaiting doctor review.",
+      message: "Appointment reserved. Complete payment to send your request to the doctor.",
     });
   }
 );

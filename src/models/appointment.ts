@@ -3,7 +3,8 @@ import mongoose, { Schema, Types, Document } from "mongoose";
 import { IDoctor } from "./doctor";
 
 export type AppointmentStatus =
-  | "pending" 
+  | "awaiting-payment"
+  | "pending"
   | "confirmed" 
   | "in-progress" 
   | "completed" 
@@ -56,6 +57,10 @@ export interface IAppointment extends Document {
 
   status: AppointmentStatus;
   paymentStatus: PaymentStatus;
+  amountKobo?: number;
+  currency?: string;
+  paymentReference?: string;
+  paymentProvider?: string;
   consultationType?: ConsultationType;
 
   reason?: string;
@@ -167,6 +172,7 @@ const AppointmentSchema = new Schema<IAppointment>(
     status: {
       type: String,
       enum: [
+        "awaiting-payment",
         "pending",
         "confirmed",
         "cancelled",
@@ -187,6 +193,12 @@ const AppointmentSchema = new Schema<IAppointment>(
       enum: ["pending", "paid", "failed"],
       default: "pending",
     },
+    // Snapshotted at booking time so a later platform-fee change never
+    // rewrites the amount owed/paid on an existing appointment.
+    amountKobo: { type: Number },
+    currency: { type: String, default: "NGN" },
+    paymentReference: { type: String },
+    paymentProvider: { type: String },
 
     reason: String,
     notes: String,

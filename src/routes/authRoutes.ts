@@ -16,8 +16,9 @@ import {
   requestAccountDeletionByCredentials,
   forgotPassword,
   resetPassword,
+  mintSocketToken,
 } from "../controllers/authController";
-import { guestAuth, verifyToken } from "../middleware/auth";
+import { guestAuth, verifyToken, authorize } from "../middleware/auth";
 import { keyByIdentifierOrIp } from "../middleware/rateLimit";
 
 const authRouter = Router();
@@ -143,5 +144,12 @@ authRouter.post("/forgot-password", forgotPasswordLimiter, forgotPassword);
  * PUBLIC - redeem a password reset token
  */
 authRouter.post("/reset-password", resetPasswordLimiter, resetPassword);
+
+/**
+ * PROTECTED - mints a short-lived socket-auth token for the web BFF to hand
+ * the browser, so it can open a direct Socket.IO connection for WebRTC
+ * call signaling without ever holding the real access/refresh tokens.
+ */
+authRouter.get("/socket-token", guestAuth, verifyToken, authorize("Doctor", "User"), mintSocketToken);
 
 export default authRouter;
