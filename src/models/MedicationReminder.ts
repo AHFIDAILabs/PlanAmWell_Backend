@@ -12,6 +12,7 @@ export interface IMedicationReminder extends Document {
   isActive: boolean;
   startDate: Date;
   endDate?: Date;
+  displayAlias?: string;
 }
 
 const MedicationReminderSchema = new Schema<IMedicationReminder>(
@@ -31,6 +32,7 @@ const MedicationReminderSchema = new Schema<IMedicationReminder>(
     isActive: { type: Boolean, default: true },
     startDate: { type: Date, default: Date.now },
     endDate: { type: Date },
+    displayAlias: { type: String, trim: true },
   },
   { timestamps: true }
 );

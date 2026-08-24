@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getOrders,
+  getMyOrders,
   getOrder,
   createOrder,
   updateOrder,
@@ -18,6 +19,13 @@ const orderRouter = Router();
 orderRouter.post("/", createOrder);
 orderRouter.get("/:id/delivery-status", refreshDeliveryStatus);
 
+/**
+ * USER - list their own orders. Must be registered before "/:id" —
+ * Express matches in registration order, so "/:id" would otherwise swallow
+ * "/my" as a request for the order with id "my" (same class of bug fixed on
+ * productRoutes.ts's "/search").
+ */
+orderRouter.get("/my", verifyToken, authorize("User"), getMyOrders);
 
 /**
  * ADMIN - get all orders

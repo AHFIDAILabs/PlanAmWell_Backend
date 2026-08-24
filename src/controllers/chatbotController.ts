@@ -4,8 +4,9 @@ import OpenAI from 'openai';
 
 import { Product } from '../models/product';
 import { ChatConversation, IMessage } from '../models/ChatConversation';
-import { Intent, ChatbotRequest } from '../types/chatbot.types';
+import { Intent, ChatbotRequest, ChatbotLanguage } from '../types/chatbot.types';
 import { uploadToCloudinary, uploadDocumentToCloudinary, uploadVideoToCloudinary } from '../middleware/claudinary';
+import { extractDocumentText } from '../util/extractDocumentText';
 import multer from 'multer';
 
 // --- CONFIGURATION ---
@@ -23,25 +24,49 @@ const groq = new OpenAI({
 
 // --- HELPER FUNCTIONS ---
 
-export const getGPTResponse = async (userPrompt: string, history: any[] = []): Promise<string> => {
+// Each entry is a hard, explicit instruction — not a hint — because leaving
+// language selection to the model's own judgment (detect-and-match) let it
+// drift into languages nobody asked for (observed: a Spanish reply to an
+// English conversation). Pairing this with the negative constraint below
+// ("under NO circumstances any other language") is the actual fix, not just
+// a nicer prompt.
+const LANGUAGE_INSTRUCTIONS: Record<ChatbotLanguage, string> = {
+    en: 'Respond ONLY in warm, natural Nigerian English.',
+    yo: 'Respond ONLY in clear, simple Yoruba. Embed English medical terms in parentheses where helpful, e.g. "àárùn abẹ́ (STI)".',
+    ig: 'Respond ONLY in clear, simple Igbo. Embed English medical terms in parentheses where helpful, e.g. "ọrịa mmekọahụ (STI)".',
+    ha: 'Respond ONLY in clear, simple Hausa. Embed English medical terms in parentheses where helpful, e.g. "cutar jima\'i (STI)".',
+    pcm: 'Respond ONLY in Nigerian Pidgin English — natural expressions like "wetin", "no worry", "e go better", "how far", "abeg", "oga", "make you", "I no go lie".',
+};
+
+const FOLLOW_UP_PROMPTS: Record<ChatbotLanguage, string> = {
+    en: 'Would you like more detail?',
+    yo: 'Ṣé o fẹ́ mọ̀ síi?',
+    ig: 'Ị chọrọ ịmatakwu?',
+    ha: 'Kana so ƙari?',
+    pcm: 'You wan know more?',
+};
+
+export const getGPTResponse = async (
+    userPrompt: string,
+    history: any[] = [],
+    language: ChatbotLanguage = 'en'
+): Promise<string> => {
+    const languageInstruction = LANGUAGE_INSTRUCTIONS[language] ?? LANGUAGE_INSTRUCTIONS.en;
+    const followUpPrompt = FOLLOW_UP_PROMPTS[language] ?? FOLLOW_UP_PROMPTS.en;
+
     const systemMessage: OpenAI.Chat.ChatCompletionMessageParam = {
         role: 'system',
         content: `You are "Ask AmWell", a warm and trustworthy sexual & reproductive health (SRH) assistant built into the PlanAmWell app — a Nigerian telehealth platform.
 
 LANGUAGE (CRITICAL):
-- You understand and speak English, Yoruba, Hausa, and Nigerian Pidgin English fluently.
-- Detect the language the user writes in and ALWAYS respond in that SAME language.
-- If the user mixes languages (e.g. English + Pidgin), match their style.
-- Nigerian Pidgin: use natural expressions — "wetin", "no worry", "e go better", "how far", "abeg", "oga", "make you", "I no go lie".
-- Yoruba: respond in clear, simple Yoruba; embed English medical terms in parentheses e.g. "àárùn abẹ́ (STI)".
-- Hausa: respond in clear, simple Hausa; embed English medical terms in parentheses e.g. "cutar jima'i (STI)".
-- If language is unclear, default to warm Nigerian English.
+- ${languageInstruction}
+- Under NO circumstances reply in any other language — not Spanish, French, or anything else — even if the user's message, an uploaded document, or anything else in the conversation is written in a different language. The reply language above is fixed for this entire conversation regardless of what language the input is in.
 
 TONE & STYLE:
 - Use plain, everyday language — no medical jargon without explanation.
 - Keep responses short: 2–4 sentences for simple questions; use bullet points only for steps or lists.
 - Be empathetic and non-judgmental — users may ask sensitive questions about their bodies or relationships.
-- End with one short follow-up prompt like "You wan know more?" (Pidgin) / "Ṣé o fẹ́ mọ̀ síi?" (Yoruba) / "Kana so ƙari?" (Hausa) / "Would you like more detail?" (English).
+- End with a short follow-up prompt in the same fixed reply language: "${followUpPrompt}"
 
 CONFIDENTIALITY:
 - Remind users their conversation is private and confidential if they seem hesitant.
@@ -242,9 +267,12 @@ export const sendMessage = [
     upload.single('file'),
     async (req: Request, res: Response): Promise<Response> => {
         try {
-            const { message: textMessage, userId, sessionId } = req.body as ChatbotRequest;
+            const { message: textMessage, userId, sessionId, language } = req.body as ChatbotRequest;
             const session = sessionId || `session_${Date.now()}`;
             const effectiveUserId = userId ? new mongoose.Types.ObjectId(userId) : null;
+            const replyLanguage: ChatbotLanguage = (['en', 'yo', 'ig', 'ha', 'pcm'] as const).includes(language as any)
+                ? (language as ChatbotLanguage)
+                : 'en';
 
             let userText = textMessage || '';
             let audioData;
@@ -320,7 +348,7 @@ export const sendMessage = [
                 botResponseText = "Hello 👋 I'm Ask AmWell. How can I help you today?";
             } else {
                 // OpenAI handles health/info/general
-                botResponseText = await getGPTResponse(userText, conversation.messages);
+                botResponseText = await getGPTResponse(userText, conversation.messages, replyLanguage);
                 
                 // Smart search: Attach products if mentioned
                 const possibleKeywords = extractProductKeywords(userText);
@@ -486,6 +514,7 @@ export const uploadChatbotFile = [
       const { mimetype, buffer, originalname } = req.file;
       let url: string;
       let fileType: 'image' | 'document';
+      let extractedText: string | null = null;
 
       if (mimetype.startsWith('image/')) {
         const result = await uploadToCloudinary(buffer, 'chatbot-attachments');
@@ -495,11 +524,14 @@ export const uploadChatbotFile = [
         const result = await uploadDocumentToCloudinary(buffer, 'chatbot-attachments', mimetype);
         url = result.fileUrl;
         fileType = 'document';
+        // Best-effort — extraction failing (scanned PDF, legacy .doc) never
+        // fails the upload itself, it just leaves extractedText null.
+        extractedText = await extractDocumentText(buffer, mimetype);
       }
 
       return res.status(200).json({
         success: true,
-        data: { url, fileType, fileName: originalname, mimeType: mimetype },
+        data: { url, fileType, fileName: originalname, mimeType: mimetype, extractedText },
       });
     } catch (error: any) {
       console.error('Chatbot file upload error:', error);

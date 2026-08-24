@@ -380,10 +380,11 @@ export const updateAppointment = asyncHandler(
       updates,
       { new: true, runValidators: true }
     )
-      .populate(
-        "doctorId",
-        "firstName lastName doctorImage email contactNumber licenseNumber"
-      )
+      .populate({
+        path: "doctorId",
+        select: "firstName lastName specialization doctorImage email contactNumber licenseNumber",
+        populate: { path: "doctorImage" },
+      })
       .populate("userId", "name userImage email")) as any;
 
     if (!updatedAppointment) {
@@ -660,7 +661,11 @@ export const getAllAppointments = asyncHandler(
 export const getAppointmentById = asyncHandler(
   async (req: Request, res: Response) => {
     const appointment = await Appointment.findById(req.params.id)
-      .populate("doctorId", "firstName lastName")
+      .populate({
+        path: "doctorId",
+        select: "firstName lastName specialization doctorImage",
+        populate: { path: "doctorImage" },
+      })
       .populate("userId", "firstName lastName name email userImage");
 
     if (!appointment) {

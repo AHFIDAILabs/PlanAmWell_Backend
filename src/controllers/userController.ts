@@ -7,6 +7,7 @@ import { IImage, Image } from "../models/image";
 import asyncHandler from "../middleware/asyncHandler";
 import axios from "axios";
 import mongoose from "mongoose";
+import { generatePseudonym } from "../util/pseudonym";
 
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 
@@ -260,6 +261,15 @@ export const getUserProfile = asyncHandler(async (req: Request, res: Response) =
   if (!user) {
     res.status(404);
     throw new Error("User not found");
+  }
+
+  if (!user.pseudonym) {
+    let pseudonym = generatePseudonym();
+    for (let attempt = 0; attempt < 5 && (await User.exists({ pseudonym })); attempt++) {
+      pseudonym = generatePseudonym(attempt + 1);
+    }
+    user.pseudonym = pseudonym;
+    await user.save();
   }
 
   // console.log("✅ User profile found");

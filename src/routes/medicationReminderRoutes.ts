@@ -6,6 +6,8 @@ import {
   updateReminder,
   deleteReminder,
   toggleReminder,
+  markDoseTaken,
+  unmarkDoseTaken,
 } from "../controllers/medicationReminderController";
 
 const medicationReminderRouter = Router();
@@ -16,6 +18,8 @@ medicationReminderRouter.get("/", getReminders);
 medicationReminderRouter.post("/", createReminder);
 medicationReminderRouter.put("/:id", updateReminder);
 medicationReminderRouter.patch("/:id/toggle", toggleReminder);
+medicationReminderRouter.post("/:id/mark-taken", markDoseTaken);
+medicationReminderRouter.post("/:id/unmark-taken", unmarkDoseTaken);
 medicationReminderRouter.delete("/:id", deleteReminder);
 
 export default medicationReminderRouter;

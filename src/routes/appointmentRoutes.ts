@@ -1,5 +1,6 @@
 // routes/appointmentRoutes.ts
 import express from "express";
+import rateLimit from "express-rate-limit";
 import {
   createAppointment,
   getMyAppointments,
@@ -19,11 +20,24 @@ import {
   authorize,
   verifyAdminToken,
 } from "../middleware/auth";
+import { keyByUserOrIp } from "../middleware/rateLimit";
 
 const appointmentRouter = express.Router();
 
+// Generous enough for legitimate multi-booking (family members, rescheduling
+// attempts) while still catching spam-booking; keyed by account, placed
+// after guestAuth so req.auth is already populated.
+const createAppointmentLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: keyByUserOrIp,
+  message: { success: false, message: "Too many booking attempts. Please try again later." },
+});
+
 // Public routes (allow guest booking)
-appointmentRouter.post("/", guestAuth, createAppointment);
+appointmentRouter.post("/", guestAuth, createAppointmentLimiter, createAppointment);
 appointmentRouter.get("/booked-slots", getBookedSlots);
 
 // Protected routes

@@ -21,6 +21,8 @@ export interface IDoctor extends Document {
   profileComplete: boolean;
   expoPushTokens?: string[];
   fcmTokens?: string[];
+  resetPasswordToken?: string;
+  resetPasswordExpires?: Date;
   addFcmToken: (token: string) => Promise<void>;
   removeFcmToken: (token: string) => Promise<void>;
   createdAt: Date;
@@ -59,6 +61,8 @@ const DoctorSchema = new Schema<IDoctor>(
     profileComplete: { type: Boolean, default: false },
     expoPushTokens: { type: [String], default: [] },
     fcmTokens: { type: [String], default: [] },
+    resetPasswordToken: { type: String, select: false },
+    resetPasswordExpires: { type: Date, select: false },
   },
   { timestamps: true }
 );

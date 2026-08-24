@@ -12,7 +12,7 @@ import mongoose from "mongoose";
 import { errorHandler } from "./middleware/errorHandler";
 
 import "./cron/reminderJob";
-import "./cron/clinicPrewarmJob";
+import { prewarmMissingCitiesOnStartup } from "./cron/clinicPrewarmJob";
 
 // Import routers
 import categoryRouter from "./routes/categoryRoutes";
@@ -40,8 +40,10 @@ import webhookRouter from "./routes/webhookRoutes";
 import hospitalRouter from "./routes/hospitalRoutes";
 import medicationReminderRouter from "./routes/medicationReminderRoutes";
 import familyMemberRouter from "./routes/familyMemberRoutes";
+import eventRouter from "./routes/eventRoutes";
 import reviewRouter from "./routes/reviewRoutes";
 import legalRouter from "./routes/legalRoutes";
+import searchRouter from "./routes/searchRoutes";
 
 import { Server } from "socket.io";
 import { verifyJwtToken } from "./middleware/auth";
@@ -55,7 +57,27 @@ const server = http.createServer(app);
 // resolves to the proxy's address for every request, so express-rate-limit's
 // IP-based keying collapses all external users onto the same bucket instead
 // of limiting per-visitor.
-app.set("trust proxy", 1);
+//
+// The web app (Next.js) adds a SECOND hop for browser traffic: browser ->
+// Next.js server -> Render -> this process. Next.js forwards the real
+// visitor IP via X-Forwarded-For, but Express only walks back through hops
+// it's told to trust. TRUSTED_PROXY_IPS lets the web app's own egress
+// IP(s) be trusted once known (set as a comma-separated list once the web
+// app is deployed) WITHOUT changing anything for mobile, which only ever
+// presents the one Render hop this always trusts. Until that env var is
+// set, behavior is identical to the previous `trust proxy: 1` — web
+// traffic's req.ip will resolve to the Next.js server's address (same
+// single-hop assumption as before) rather than the real browser, which is
+// safe (just less precise) until the env var is configured.
+const TRUSTED_PROXY_IPS = (process.env.TRUSTED_PROXY_IPS ?? "")
+  .split(",")
+  .map((ip) => ip.trim())
+  .filter(Boolean);
+
+app.set("trust proxy", (addr: string, hopIndex: number) => {
+  if (hopIndex === 0) return true; // Render's own edge — always trust, as before
+  return TRUSTED_PROXY_IPS.includes(addr);
+});
 
 // Build CORS origin list from env (comma-separated). Mobile apps have no Origin header,
 // so we always allow requests with no origin (React Native / Expo / Postman).
@@ -691,7 +713,9 @@ app.use("/api/v1/hospitals", hospitalRouter);
 app.use("/api/v1/webhooks", webhookRouter);
 app.use("/api/v1/medication-reminders", medicationReminderRouter);
 app.use("/api/v1/family", familyMemberRouter);
+app.use("/api/v1/events", eventRouter);
 app.use("/api/v1/reviews", reviewRouter);
+app.use("/api/v1/search", searchRouter);
 
 app.use(errorHandler);
 
@@ -707,6 +731,12 @@ mongoose
       console.log(`📱 WebSocket endpoint: ws://YOUR_IP:${PORT}`);
       console.log(`🌐 HTTP endpoint: http://YOUR_IP:${PORT}`);
     });
+    // Non-blocking — server accepts requests immediately regardless of how
+    // long this takes. See clinicPrewarmJob.ts for why this runs here
+    // (post-connect) rather than as a fixed cron schedule alone.
+    prewarmMissingCitiesOnStartup().catch((err) =>
+      console.error("[ClinicPrewarm] Startup sweep threw:", err)
+    );
   })
   .catch((err) => {
     console.error("❌ MongoDB Connection Error:", err);

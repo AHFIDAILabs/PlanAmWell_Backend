@@ -9,10 +9,13 @@ export type Intent =
   | 'greeting';
 
 
+export type ChatbotLanguage = "en" | "yo" | "ig" | "ha" | "pcm";
+
 export interface ChatbotRequest {
     message: string;
     userId?: string; // Optional for guest users
     sessionId?: string; // Optional, will be generated if not provided
+    language?: ChatbotLanguage; // Explicit reply language — defaults to "en" if omitted
 }
 
 // Define a lean product type for API responses

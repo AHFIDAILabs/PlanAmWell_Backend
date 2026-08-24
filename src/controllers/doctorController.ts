@@ -22,7 +22,11 @@ export const getDoctors = asyncHandler(async (req: Request, res: Response) => {
 
 // GET single doctor
 export const getDoctor = asyncHandler(async (req: Request, res: Response) => {
-  const doctor: IDoctor | null = await Doctor.findById(req.params.id).select("-passwordHash");
+  // Same populate discipline as getDoctors above — without this, doctorImage
+  // comes back as a raw ObjectId string and every client silently falls
+  // back to a placeholder image, exactly the bug already fixed on the list
+  // endpoint but never caught here since nothing exercised this route yet.
+  const doctor: IDoctor | null = await Doctor.findById(req.params.id).select("-passwordHash").populate("doctorImage");
   if (!doctor) {
     res.status(404);
     throw new Error("Doctor not found");

@@ -7,10 +7,13 @@ import { getProduct, getProducts, syncProducts, searchProducts,
 const productRouter = Router();
 
 // Public - anyone can browse products
+// NOTE: "/search" and "/category/:category" must be registered before
+// "/:id" — Express matches routes in registration order, so "/:id" would
+// otherwise swallow "/search" as a request for the product with id "search".
 productRouter.get("/",guestAuth, getProducts);
-productRouter.get("/:id", guestAuth, getProduct);
 productRouter.get("/search", guestAuth, searchProducts);
 productRouter.get("/category/:category", getProductsByCategory);
+productRouter.get("/:id", guestAuth, getProduct);
 
 // Admin only - sync products from third-party API
 productRouter.post("/sync", verifyToken, authorize("Admin"), syncProducts);

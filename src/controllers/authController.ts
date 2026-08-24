@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { Types } from "mongoose";
-import { randomBytes } from "crypto";
+import { randomBytes, createHash } from "crypto";
 const jwt = require("jsonwebtoken");
 import { User } from "../models/user";
 import { Doctor } from "../models/doctor";
@@ -11,6 +11,7 @@ import {signJwt, signRefreshToken} from "../middleware/auth";
 import bcrypt from "bcryptjs";
 import { Admin } from "../models/admin";
 import { RefreshToken } from "../models/refreshToken";
+import { sendPasswordResetEmail } from "../services/emailService";
 
 if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET missing from .env");
 
@@ -20,7 +21,15 @@ if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET missing from .env");
 // POST /auth/guest
 export const createGuestSession = asyncHandler(async (req: Request, res: Response) => {
   const session = await Session.create({ isAnonymous: true });
-  const token = signJwt({ sessionId: session._id, isAnonymous: true });
+  // signJwt's guest branch keys off entity._id (not entity.sessionId) to
+  // build the token's `sessionId` claim — passing `sessionId` here instead
+  // of `_id` meant that condition (entity.isAnonymous && entity._id) never
+  // matched, silently falling through to the generic branch and minting a
+  // token with NO sessionId/isAnonymous claim at all (just a bare
+  // {role:"User", name:"User"}). Confirmed by decoding a real token from
+  // this endpoint — every guest session, on both mobile and web, has been
+  // getting this broken shape.
+  const token = signJwt({ _id: session._id, isAnonymous: true });
 
   res.status(201).json({
     success: true,
@@ -567,4 +576,90 @@ export const requestAccountDeletionByCredentials = asyncHandler(async (req: Requ
   // Same generic error either way — don't reveal whether the email exists.
   res.status(401);
   throw new Error("Invalid email or password.");
+});
+
+// ─────────────────────────────────────────────
+// POST /auth/forgot-password — Sends a reset link if the email matches a
+// User or Doctor account. Always responds success either way, so the
+// response can never be used to enumerate registered emails.
+// ─────────────────────────────────────────────
+function hashResetToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+export const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+  const { email } = req.body;
+
+  if (!email) {
+    res.status(400);
+    throw new Error("Email is required.");
+  }
+
+  const trimmedEmail = String(email).trim();
+  const rawToken = randomBytes(32).toString("hex");
+  const hashedToken = hashResetToken(rawToken);
+  const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  const account =
+    (await User.findOne({ email: trimmedEmail })) || (await Doctor.findOne({ email: trimmedEmail }));
+
+  if (account) {
+    account.resetPasswordToken = hashedToken;
+    account.resetPasswordExpires = expires;
+    await account.save();
+
+    const resetUrl = `${process.env.WEB_APP_URL || "http://localhost:3000"}/reset-password?token=${rawToken}`;
+    await sendPasswordResetEmail(trimmedEmail, resetUrl);
+  }
+
+  res.status(200).json({ success: true, message: "If that email exists, we've sent a reset link." });
+});
+
+// ─────────────────────────────────────────────
+// POST /auth/reset-password — Redeems a reset token minted by forgotPassword
+// above. Invalidates existing refresh tokens on success so any other signed-
+// in sessions for that account are logged out.
+// ─────────────────────────────────────────────
+export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
+  const { token, password } = req.body;
+
+  if (!token || !password) {
+    res.status(400);
+    throw new Error("Token and password are required.");
+  }
+
+  const hashedToken = hashResetToken(token);
+
+  const user = await User.findOne({
+    resetPasswordToken: hashedToken,
+    resetPasswordExpires: { $gt: new Date() },
+  }).select("+resetPasswordToken +resetPasswordExpires");
+
+  if (user) {
+    user.password = password; // pre-save hook rehashes
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+    await RefreshToken.deleteMany({ userId: user._id });
+    res.status(200).json({ success: true, message: "Password reset successfully." });
+    return;
+  }
+
+  const doctor = await Doctor.findOne({
+    resetPasswordToken: hashedToken,
+    resetPasswordExpires: { $gt: new Date() },
+  }).select("+resetPasswordToken +resetPasswordExpires");
+
+  if (doctor) {
+    doctor.passwordHash = await bcrypt.hash(password, 10);
+    doctor.resetPasswordToken = undefined;
+    doctor.resetPasswordExpires = undefined;
+    await doctor.save();
+    await RefreshToken.deleteMany({ userId: doctor._id });
+    res.status(200).json({ success: true, message: "Password reset successfully." });
+    return;
+  }
+
+  res.status(400);
+  throw new Error("This reset link is invalid or has expired.");
 });

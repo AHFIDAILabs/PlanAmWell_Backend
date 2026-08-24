@@ -16,6 +16,30 @@ import { log } from "console";
 const PARTNER_API_URL = process.env.PARTNER_API_URL || "";
 const PARTNER_PREFIX = "/v1/PlanAmWell";
 
+// Reuses the same trust boundary as CORS (index.ts's ALLOWED_ORIGINS) rather
+// than inventing a separate allowlist — a caller-supplied redirect URL only
+// gets used if its origin is one we already trust to make browser-facing
+// requests against this API.
+const ALLOWED_REDIRECT_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : [];
+
+function resolveRedirectUrl(orderId: string, requestedRedirectUrl?: unknown): string {
+  const fallback = `${process.env.APP_URL}/api/v1/payment/redirect?orderId=${orderId}`;
+  if (typeof requestedRedirectUrl !== "string" || !requestedRedirectUrl) return fallback;
+
+  try {
+    const parsed = new URL(requestedRedirectUrl);
+    if (ALLOWED_REDIRECT_ORIGINS.length > 0 && !ALLOWED_REDIRECT_ORIGINS.includes(parsed.origin)) {
+      return fallback;
+    }
+    parsed.searchParams.set("orderId", orderId);
+    return parsed.toString();
+  } catch {
+    return fallback;
+  }
+}
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VALID_GENDERS = ["male", "female", "other"];
 const ALLOWED_PREFERENCE_KEYS = [
@@ -509,7 +533,7 @@ console.log("[Checkout] All carts for user:", JSON.stringify(allCarts.map(c => (
 
 /** ------------------ CONFIRM ORDER ------------------ */
 export const confirmOrder = asyncHandler(async (req: Request, res: Response) => {
-  const { orderId } = req.body;
+  const { orderId, redirectUrl } = req.body;
   const authUserId = req.auth?.id;
 
   console.log("[ConfirmOrder] START — orderId:", orderId, "authUserId:", authUserId);
@@ -627,7 +651,7 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
   /** --- Initiate Payment --- */
   const PARTNER_API_KEY = process.env.PARTNER_API_KEY;
   const partnerReferenceCode = `PAW-${order.orderNumber}`;
-  const mobileRedirectUrl = `${process.env.APP_URL}/api/v1/payment/redirect?orderId=${order._id}`;
+  const mobileRedirectUrl = resolveRedirectUrl(String(order._id), redirectUrl);
 
   try {
     const paymentRes = await axios.post(

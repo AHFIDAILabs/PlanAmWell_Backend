@@ -21,6 +21,23 @@ export const getOrders = asyncHandler(async (req: Request, res: Response) => {
 });
 
 /**
+ * Get the authenticated user's own orders, most recent first. There was no
+ * patient-facing "list my orders" endpoint before this — GET / is Admin-only
+ * and GET /:id requires already knowing an order's id — so an Order History
+ * page had nothing to call.
+ */
+export const getMyOrders = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.auth?.id;
+  if (!userId) {
+    res.status(401);
+    throw new Error("Not authenticated");
+  }
+
+  const orders = await Order.find({ userId }).sort({ createdAt: -1 });
+  res.status(200).json({ success: true, data: orders });
+});
+
+/**
  * Get one order (Owner or Admin)
  */
 export const getOrder = asyncHandler(async (req: Request, res: Response) => {

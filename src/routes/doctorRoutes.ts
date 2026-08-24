@@ -56,7 +56,11 @@ doctorRouter.post("/complete-profile", guestAuth, verifyToken, authorize("Doctor
 
 
 // NOW the /:id routes
-doctorRouter.get("/:id", guestAuth, verifyToken, authorize("User", "Doctor", "Admin"), getDoctor);
+// Viewing a single approved doctor's profile is exactly as public as the
+// list endpoint above — guestAuth alone still lets an authenticated Admin
+// preview a non-approved doctor (getDoctor checks req.auth?.role itself),
+// it just no longer hard-requires a real, non-anonymous account to browse.
+doctorRouter.get("/:id", guestAuth, getDoctor);
 doctorRouter.put("/:id", guestAuth, verifyToken, authorize("Doctor", "Admin"), upload.single("doctorImage"), updateDoctor);
 doctorRouter.delete("/:id", guestAuth, verifyToken, authorize("Admin"), deleteDoctor);
 

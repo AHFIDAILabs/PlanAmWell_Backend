@@ -22,8 +22,11 @@ export interface IUser extends Document {
   verified?: boolean;
   preferences?: Record<string, any>;
   partnerId?: string;
+  pseudonym?: string;
   expoPushTokens?: string[];
   fcmTokens?: string[];
+  resetPasswordToken?: string;
+  resetPasswordExpires?: Date;
   comparePassword: (enteredPassword: string) => Promise<boolean>;
   addExpoPushToken: (token: string) => Promise<void>;
   removeExpoPushToken: (token: string) => Promise<void>;
@@ -54,8 +57,11 @@ const UserSchema = new Schema<IUser>(
     verified: { type: Boolean, default: false },
     preferences: { type: Object, default: {} },
     partnerId: { type: String },
+    pseudonym: { type: String },
     expoPushTokens: { type: [String], default: [] },
     fcmTokens: { type: [String], default: [] },
+    resetPasswordToken: { type: String, select: false },
+    resetPasswordExpires: { type: Date, select: false },
     createdAt: { type: Date, default: null },
   },
   { timestamps: true }
