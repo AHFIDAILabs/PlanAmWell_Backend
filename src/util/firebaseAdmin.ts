@@ -10,28 +10,65 @@ import admin from "firebase-admin";
 let app: admin.app.App | null = null;
 let initAttempted = false;
 
+// Preferred: three separate single-line env vars — pasting one JSON blob
+// with embedded newlines into a dashboard's env var field is easy to get
+// wrong (a trimmed line, a stripped quote), and there's no good way to tell
+// from the resulting error. Falls back to the single FIREBASE_SERVICE_ACCOUNT
+// JSON blob for anyone who already has that set.
+function buildServiceAccount(): admin.ServiceAccount | null {
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+  if (projectId && clientEmail && rawPrivateKey) {
+    // Env var UIs commonly store a pasted PEM key's real line breaks as the
+    // literal two characters "\" + "n" rather than an actual newline —
+    // Firebase's key parser requires real newlines, so convert them back.
+    const privateKey = rawPrivateKey.includes("\\n") ? rawPrivateKey.replace(/\\n/g, "\n") : rawPrivateKey;
+    return { projectId, clientEmail, privateKey };
+  }
+
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (raw) {
+    const parsed = JSON.parse(raw);
+    return {
+      projectId: parsed.project_id,
+      clientEmail: parsed.client_email,
+      privateKey: parsed.private_key,
+    };
+  }
+
+  return null;
+}
+
 function getApp(): admin.app.App | null {
   if (app) return app;
   if (initAttempted) return null;
   initAttempted = true;
 
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!raw) {
+  let serviceAccount: admin.ServiceAccount | null;
+  try {
+    serviceAccount = buildServiceAccount();
+  } catch (err: any) {
+    console.error("[FirebaseAdmin] Failed to parse FIREBASE_SERVICE_ACCOUNT — check it's valid JSON:", err.message);
+    return null;
+  }
+
+  if (!serviceAccount) {
     console.warn(
-      "[FirebaseAdmin] FIREBASE_SERVICE_ACCOUNT env var not set — raw FCM call-ringing pushes are disabled (Expo push still sends)."
+      "[FirebaseAdmin] No Firebase credentials set (FIREBASE_PROJECT_ID/FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY, or FIREBASE_SERVICE_ACCOUNT) — raw FCM call-ringing pushes are disabled (Expo push still sends)."
     );
     return null;
   }
 
   try {
-    const serviceAccount = JSON.parse(raw);
     app = admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });
     console.log("[FirebaseAdmin] Initialized");
     return app;
   } catch (err: any) {
-    console.error("[FirebaseAdmin] Failed to initialize — check FIREBASE_SERVICE_ACCOUNT is valid JSON:", err.message);
+    console.error("[FirebaseAdmin] Failed to initialize:", err.message);
     return null;
   }
 }
