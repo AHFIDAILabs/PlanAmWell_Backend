@@ -57,9 +57,14 @@ export const profileCheck = asyncHandler(async (req: Request, res: Response) => 
 
   const missing = getMissingAppointmentFields(user);
   if (missing.length > 0) {
-    res.status(400).json({
+    // Same contract as createAppointment's own PROFILE_INCOMPLETE response
+    // below — this endpoint exists specifically so mobile can pre-flight
+    // check before navigating to payment, so it must match exactly what the
+    // client already knows how to handle from that other call.
+    res.status(422).json({
       success: false,
-      message: "Profile incomplete",
+      code: "PROFILE_INCOMPLETE",
+      message: "Please complete your profile before booking an appointment.",
       missingFields: missing,
     });
     return;
@@ -180,6 +185,16 @@ export const createAppointment = asyncHandler(
  
     const platformSettings = await getPlatformSettings();
 
+    // Payment is temporarily disabled — no provider is configured yet
+    // (PAYMENT_PROVIDER unset in .env, deliberately, per the earlier scoping
+    // decision), so gating every booking on a payment step that always fails
+    // was blocking real users entirely. Until a real provider is wired in,
+    // booking goes straight to "pending" — the same behavior as before the
+    // payment feature existed. Flip PAYMENT_ENABLED=true once real (at least
+    // sandbox) provider keys are in place to re-enable the payment step;
+    // nothing else needs to change, this is the only branch point.
+    const paymentEnabled = process.env.PAYMENT_ENABLED === "true";
+
     let appointment;
     try {
       appointment = await Appointment.create({
@@ -192,7 +207,7 @@ export const createAppointment = asyncHandler(
         shareUserInfo: !!shareUserInfo,
         patientSnapshot,
         consultationType,
-        status: "awaiting-payment",
+        status: paymentEnabled ? "awaiting-payment" : "pending",
         amountKobo: platformSettings.consultationFeeKobo,
         currency: platformSettings.currency,
         notificationsSent: {
@@ -217,15 +232,48 @@ export const createAppointment = asyncHandler(
       throw err;
     }
 
-    // Neither the patient nor the doctor is notified yet — the appointment
-    // is only reserved (holding the slot) until payment succeeds. Both
-    // notifications fire from the payment webhook handler instead, once
-    // status actually moves to "pending" (awaiting doctor review).
+    if (paymentEnabled) {
+      // Neither the patient nor the doctor is notified yet — the appointment
+      // is only reserved (holding the slot) until payment succeeds. Both
+      // notifications fire from the payment webhook handler instead, once
+      // status actually moves to "pending" (awaiting doctor review).
+      return res.status(201).json({
+        success: true,
+        data: appointment,
+        message: "Appointment reserved. Complete payment to send your request to the doctor.",
+      });
+    }
+
+    const doctorName = `Dr. ${doctor.lastName || doctor.firstName}`;
+    const patientName = user.name || "A patient";
+
+    try {
+      await NotificationService.notifyAppointmentRequestSent(
+        req.auth.id,
+        String(appointment._id),
+        doctorName,
+        scheduledDate
+      );
+    } catch (error) {
+      console.error("❌ Failed to send patient notification:", error);
+    }
+
+    try {
+      await NotificationService.notifyDoctorNewRequest(
+        String(doctorId),
+        String(appointment._id),
+        patientName,
+        scheduledDate,
+        reason
+      );
+    } catch (error) {
+      console.error("❌ Failed to send doctor notification:", error);
+    }
 
     res.status(201).json({
       success: true,
       data: appointment,
-      message: "Appointment reserved. Complete payment to send your request to the doctor.",
+      message: "Appointment request sent successfully. Awaiting doctor review.",
     });
   }
 );

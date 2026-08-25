@@ -4,8 +4,12 @@ import asyncHandler from "../middleware/asyncHandler";
 import { getPlatformSettings, updatePlatformSettings } from "../services/platformSettingsService";
 
 /**
- * @desc Public config the apps need before booking — currently just the
- *       flat consultation fee, so it's no longer a hardcoded UI constant.
+ * @desc Public config the apps need before booking — the flat consultation
+ *       fee, plus whether the real payment step is currently active
+ *       (PAYMENT_ENABLED — off until a real provider is configured, see the
+ *       matching comment in appointmentController.createAppointment). Both
+ *       apps check this before deciding whether to run the payment flow at
+ *       all for a new booking.
  * @route GET /api/v1/platform-settings
  * @access Public
  */
@@ -13,7 +17,11 @@ export const getPlatformSettingsHandler = asyncHandler(async (_req: Request, res
   const settings = await getPlatformSettings();
   res.status(200).json({
     success: true,
-    data: { consultationFeeKobo: settings.consultationFeeKobo, currency: settings.currency },
+    data: {
+      consultationFeeKobo: settings.consultationFeeKobo,
+      currency: settings.currency,
+      paymentEnabled: process.env.PAYMENT_ENABLED === "true",
+    },
   });
 });
 

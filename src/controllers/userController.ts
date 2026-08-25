@@ -268,8 +268,22 @@ export const getUserProfile = asyncHandler(async (req: Request, res: Response) =
     for (let attempt = 0; attempt < 5 && (await User.exists({ pseudonym })); attempt++) {
       pseudonym = generatePseudonym(attempt + 1);
     }
-    user.pseudonym = pseudonym;
-    await user.save();
+
+    // Atomic check-and-set: two near-simultaneous requests (e.g. the topbar
+    // and this profile page both loading on first login) could otherwise
+    // both see pseudonym as unset and each generate+save a different value,
+    // with the last write silently winning while the first request's
+    // already-sent response still shows the discarded one. The filter only
+    // matches while the field is still unset, so only the first request's
+    // update actually applies; a losing request re-reads whatever the
+    // winner actually saved instead of trusting its own generated value.
+    const updated = await User.findOneAndUpdate(
+      { _id: user._id, pseudonym: { $exists: false } },
+      { $set: { pseudonym } },
+      { new: true }
+    ).select("pseudonym");
+
+    user.pseudonym = updated ? updated.pseudonym : (await User.findById(user._id).select("pseudonym"))?.pseudonym;
   }
 
   // console.log("✅ User profile found");

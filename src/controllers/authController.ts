@@ -527,7 +527,7 @@ export const deleteMyAccount = asyncHandler(async (req: Request, res: Response) 
     await Doctor.findByIdAndDelete(authId);
     await RefreshToken.deleteMany({ userId: authId });
   } else {
-    const user = await User.findById(authId);
+    const user = await User.findById(authId).select("+password");
     if (!user || !user.password) { res.status(404); throw new Error("Account not found"); }
 
     const match = await bcrypt.compare(password, user.password);
