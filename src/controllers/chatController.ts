@@ -80,6 +80,16 @@ export const getOrCreateConversation = asyncHandler(
       });
     }
 
+    // appointment.doctorId/userId can populate to null if that account was
+    // since deleted, leaving a dangling reference on the appointment — guard
+    // before dereferencing, same as everywhere else this pattern shows up.
+    if (!appointment.doctorId || !appointment.userId) {
+      return res.status(404).json({
+        success: false,
+        message: "One of the participants on this appointment no longer has an account.",
+      });
+    }
+
     const doctorId = String(
       (appointment.doctorId as any)._id || appointment.doctorId
     );
@@ -408,8 +418,8 @@ export const sendMessage = asyncHandler(
     try {
       const senderName =
         role === "Doctor"
-          ? `Dr. ${(conversation.participants.doctorId as any).firstName}`
-          : (conversation.participants.userId as any).name;
+          ? `Dr. ${(conversation.participants.doctorId as any)?.firstName || ""}`.trim() || "Doctor"
+          : (conversation.participants.userId as any)?.name || "Patient";
 
       const apptId = String(conversation.appointmentId);
       await NotificationService.notifyNewMessage(
@@ -659,15 +669,22 @@ export const requestVideoCall = asyncHandler(
       { $set: { activeVideoRequest: videoRequest } }
     );
 
+    if (!conversation.participants.userId || !conversation.participants.doctorId) {
+      return res.status(404).json({
+        success: false,
+        message: "One of the participants on this conversation no longer has an account.",
+      });
+    }
+
     const recipientId =
       role === "Doctor"
-        ? String(conversation.participants.userId._id)
-        : String(conversation.participants.doctorId._id);
+        ? String((conversation.participants.userId as any)._id)
+        : String((conversation.participants.doctorId as any)._id);
 
     const requesterName =
       role === "Doctor"
-        ? `Dr. ${(conversation.participants.doctorId as any).firstName}`
-        : (conversation.participants.userId as any).name;
+        ? `Dr. ${(conversation.participants.doctorId as any).firstName || ""}`.trim() || "Doctor"
+        : (conversation.participants.userId as any).name || "Patient";
 
     emitVideoCallRequest(
       conversationId,
@@ -812,7 +829,9 @@ export const respondToVideoCall = asyncHandler(
       success: true,
       data: {
         accepted: accept,
-        appointmentId: (conversation.appointmentId as any)._id,
+        appointmentId: conversation.appointmentId
+          ? (conversation.appointmentId as any)._id || conversation.appointmentId
+          : null,
         callType,
       },
       message: accept

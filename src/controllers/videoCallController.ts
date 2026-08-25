@@ -92,10 +92,21 @@ export const generateVideoToken = asyncHandler(
     const participantObjectId = new mongoose.Types.ObjectId(userId);
     const recipientId         = isDoctor ? patientId : doctorId;
     const channelName         = `appt_${appointmentId}`;
-    const callerName          = isDoctor
-      ? `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`
-      : ((appointment.userId as any).name ||
-         `${(appointment.userId as any).firstName || ""} ${(appointment.userId as any).lastName || ""}`.trim());
+
+    // doctorId/userId can populate to null if that account was since deleted,
+    // leaving a dangling reference on the appointment — computed once here
+    // (instead of re-deriving inline at every response below, each an
+    // unguarded dereference that 500'd the moment either side was missing)
+    // and reused everywhere a display name is needed.
+    const doctorName = appointment.doctorId
+      ? `Dr. ${(appointment.doctorId as any).firstName || ""} ${(appointment.doctorId as any).lastName || ""}`.trim()
+      : "Doctor";
+    const patientName = appointment.userId
+      ? (appointment.userId as any).name ||
+        `${(appointment.userId as any).firstName || ""} ${(appointment.userId as any).lastName || ""}`.trim() ||
+        "Patient"
+      : "Patient";
+    const callerName = isDoctor ? doctorName : patientName;
 
     const currentCallStatus = appointment.callStatus;
 
@@ -147,8 +158,10 @@ export const generateVideoToken = asyncHandler(
             callStatus:       current.callStatus,
             callType:         current.callType || "video",
             isInitiator:      current.callInitiatedBy === role,
-            doctorName:       `Dr. ${(current.doctorId as any).firstName} ${(current.doctorId as any).lastName}`,
-            patientName:      (current.userId as any).name || "",
+            doctorName:       current.doctorId
+              ? `Dr. ${current.doctorId.firstName || ""} ${current.doctorId.lastName || ""}`.trim()
+              : "Doctor",
+            patientName:      current.userId?.name || "Patient",
           },
           message: "Joined existing call",
         });
@@ -201,8 +214,8 @@ export const generateVideoToken = asyncHandler(
           callStatus:  "ringing",
           callType:    requestedCallType,
           isInitiator: true,
-          doctorName:  `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
-          patientName: (appointment.userId as any).name || "",
+          doctorName:  doctorName,
+patientName: patientName,
         },
         message: "Call initiated",
       });
@@ -234,8 +247,8 @@ export const generateVideoToken = asyncHandler(
           // The original initiator is determined by callInitiatedBy stored in DB.
           // The second joiner is never the initiator.
           isInitiator:  false,
-          doctorName:   `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
-          patientName:  (appointment.userId as any).name || "",
+          doctorName:  doctorName,
+patientName: patientName,
         },
         message: "Joined call",
       });
@@ -258,8 +271,8 @@ export const generateVideoToken = asyncHandler(
           callType:     appointment.callType || "video",
           // Preserve original initiator role so WebRTC offer/answer logic stays correct.
           isInitiator:  appointment.callInitiatedBy === role,
-          doctorName:   `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
-          patientName:  (appointment.userId as any).name || "",
+          doctorName:  doctorName,
+patientName: patientName,
         },
         message: "Rejoined call",
       });
@@ -403,9 +416,14 @@ export const getCallStatus = asyncHandler(async (req: Request, res: Response) =>
       channelName:         appointment.callChannelName,
       callStartedAt:       appointment.callStartedAt,
       callDuration:        appointment.callDuration,
-      doctorName:  `Dr. ${(appointment.doctorId as any).firstName} ${(appointment.doctorId as any).lastName}`,
-      patientName: (appointment.userId as any).name ||
-                   `${(appointment.userId as any).firstName || ""} ${(appointment.userId as any).lastName || ""}`.trim(),
+      doctorName: appointment.doctorId
+        ? `Dr. ${(appointment.doctorId as any).firstName || ""} ${(appointment.doctorId as any).lastName || ""}`.trim()
+        : "Doctor",
+      patientName: appointment.userId
+        ? (appointment.userId as any).name ||
+          `${(appointment.userId as any).firstName || ""} ${(appointment.userId as any).lastName || ""}`.trim() ||
+          "Patient"
+        : "Patient",
     },
   });
 });
