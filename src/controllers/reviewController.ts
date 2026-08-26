@@ -4,6 +4,8 @@ import { Doctor } from "../models/doctor";
 import { Appointment } from "../models/appointment";
 import { User } from "../models/user";
 import { io } from "../index";
+import { memoryCache } from "../util/memoryCache";
+import { APPROVED_DOCTORS_CACHE_KEY } from "./doctorController";
 
 // GET /api/v1/reviews/doctor/:doctorId
 export const getDoctorReviews = async (req: Request, res: Response): Promise<Response> => {
@@ -97,7 +99,13 @@ export const submitReview = async (req: Request, res: Response): Promise<Respons
     ]);
 
     const newAvg = agg[0] ? Math.round(agg[0].avg * 10) / 10 : rating;
-    await Doctor.findByIdAndUpdate(doctorId, { ratings: newAvg });
+    const newCount = agg[0]?.count ?? 1;
+    await Doctor.findByIdAndUpdate(doctorId, { ratings: newAvg, reviewCount: newCount });
+
+    // getDoctors caches the approved-doctor list for up to 10 minutes — that
+    // cache was never invalidated here, so a new rating/review count could
+    // take up to 10 minutes to show up in the doctor list after being saved.
+    memoryCache.invalidate(APPROVED_DOCTORS_CACHE_KEY);
 
     // Real-time: notify the doctor's room
     io.to(`user_${doctorId}`).emit("doctor-new-review", {

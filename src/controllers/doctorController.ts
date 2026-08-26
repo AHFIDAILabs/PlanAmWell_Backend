@@ -6,8 +6,10 @@ import mongoose from "mongoose";
 import { IImage, Image } from "../models/image";
 import bcrypt from "bcryptjs";
 import { memoryCache } from "../util/memoryCache";
+import { computeNextAvailableSlots } from "../services/doctorAvailability";
+import { computePatientCounts } from "../services/doctorStats";
 
-const APPROVED_DOCTORS_CACHE_KEY = "doctors:approved";
+export const APPROVED_DOCTORS_CACHE_KEY = "doctors:approved";
 const APPROVED_DOCTORS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min — every write path below invalidates immediately anyway; this TTL is just the fallback bound.
 
 // GET all doctors — only approved doctors for public
@@ -17,7 +19,24 @@ export const getDoctors = asyncHandler(async (req: Request, res: Response) => {
     APPROVED_DOCTORS_CACHE_TTL_MS,
     () => Doctor.find({ status: "approved" }).select("-passwordHash").populate("doctorImage").lean()
   );
-  res.status(200).json({ success: true, data: doctors });
+
+  // Both deliberately computed OUTSIDE the cached block above — they depend
+  // on live booking/completion state, which the 10-minute doctor-profile
+  // cache must not hold stale (a slot booked seconds ago would otherwise
+  // keep showing as "next available" to everyone else for up to 10 more
+  // minutes; same for a just-completed appointment's patient count).
+  const doctorIds = doctors.map((d: any) => d._id);
+  const [nextAvailableByDoctor, patientCountByDoctor] = await Promise.all([
+    computeNextAvailableSlots(doctors as any),
+    computePatientCounts(doctorIds),
+  ]);
+  const withAvailability = doctors.map((d: any) => ({
+    ...d,
+    nextAvailable: nextAvailableByDoctor.get(String(d._id)) ?? null,
+    patientCount: patientCountByDoctor.get(String(d._id)) ?? 0,
+  }));
+
+  res.status(200).json({ success: true, data: withAvailability });
 });
 
 // GET single doctor
@@ -37,7 +56,19 @@ export const getDoctor = asyncHandler(async (req: Request, res: Response) => {
     return res.status(403).json({ message: "Doctor profile not available" });
   }
 
-  res.status(200).json({ success: true, data: doctor });
+  const [nextAvailableByDoctor, patientCountByDoctor] = await Promise.all([
+    computeNextAvailableSlots([doctor as any]),
+    computePatientCounts([doctor._id]),
+  ]);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      ...doctor.toObject(),
+      nextAvailable: nextAvailableByDoctor.get(String(doctor._id)) ?? null,
+      patientCount: patientCountByDoctor.get(String(doctor._id)) ?? 0,
+    },
+  });
 });
 
 // CREATE doctor — self-registration defaults to 'submitted' AND handles image upload

@@ -10,6 +10,7 @@ import { createNotificationForUser } from "../util/sendPushNotification";
 import { Conversation } from "../models/conversation";
 import { emitAppointmentEnded, emitConversationUnlocked } from "../index";
 import { getPlatformSettings } from "../services/platformSettingsService";
+import { isSlotWithinAvailability } from "../services/doctorAvailability";
 
 const extractId = (field: any): string => {
   if (!field) return "";
@@ -182,7 +183,20 @@ export const createAppointment = asyncHandler(
       res.status(400);
       throw new Error("Invalid scheduledAt date.");
     }
- 
+
+    // Previously unvalidated server-side — the booking screen's own slot
+    // picker was the only thing standing between a patient and a time the
+    // doctor never opened up. Doctors whose availability predates the
+    // {available, from, to} schema (still a free-text/legacy shape for some)
+    // already can't produce a selectable slot in that same picker, so this
+    // rejects the same bookings the UI already couldn't complete — it's a
+    // backstop against a direct API call, not a new restriction on anyone
+    // who could book successfully today.
+    if (!isSlotWithinAvailability(doctor.availability, scheduledDate)) {
+      res.status(400);
+      throw new Error("This doctor is not available at the requested time.");
+    }
+
     const platformSettings = await getPlatformSettings();
 
     // Payment is temporarily disabled — no provider is configured yet

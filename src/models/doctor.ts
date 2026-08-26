@@ -16,6 +16,7 @@ export interface IDoctor extends Document {
   contactNumber?: string;
   availability?: Record<string, any>;
   ratings?: number;
+  reviewCount?: number;
   reviews?: Array<{ userId: string; rating: number; comment: string }>;
   status: "submitted" | "reviewing" | "approved" | "rejected";
   profileComplete: boolean;
@@ -45,6 +46,7 @@ const DoctorSchema = new Schema<IDoctor>(
     contactNumber: String,
     availability: Object,
     ratings: { type: Number, default: 0 },
+    reviewCount: { type: Number, default: 0 },
     reviews: [
       {
         userId: { type: Schema.Types.ObjectId, ref: "User" },
