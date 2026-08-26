@@ -3,9 +3,8 @@ import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import mongoose from "mongoose";
 import { Appointment } from "../models/appointment";
-import { NotificationService } from "../services/NotificationService";
-import { emitCallEnded, emitCallRinging } from "../index";
-import { sendIncomingCallPushNotification } from "../util/sendPushNotification";
+import { emitCallEnded } from "../index";
+import { notifyIncomingCall, cancelIncomingCall, notifyAnsweredElsewhere } from "../services/callSignaling";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GOLDEN RULES for this controller:
@@ -114,35 +113,24 @@ export const generateVideoToken = asyncHandler(
     // CASE A: Initiate a new call (idle / ended / no prior call state)
     // ══════════════════════════════════════════════════════════════════════════
     if (!currentCallStatus || currentCallStatus === "idle" || currentCallStatus === "ended") {
-      // Atomic compare-and-swap: only wins if DB still shows idle/ended.
-      // This prevents two simultaneous POST /token requests from both becoming
-      // the initiator.
-      const initiated = await Appointment.findOneAndUpdate(
-        {
-          _id:        appointmentId,
-          callStatus: { $in: [null, "idle", "ended"] },
-        },
-        {
-          $set: {
-            callStatus:      "ringing",
-            callInitiatedBy: role,
-            callChannelName: channelName,
-            callType:        requestedCallType,
-            status:          "in-progress",
-            // Reset participant list — fresh call, fresh slate.
-            callParticipants: [participantObjectId],
-            // Clear stale call metadata from a previous call.
-            callStartedAt: null,
-            callEndedAt:   null,
-            callEndedBy:   null,
-          },
-        },
-        { new: true }
-      );
+      const callerImage = isDoctor
+        ? (appointment.doctorId as any)?.doctorImage
+        : (appointment.userId as any)?.userImage;
 
-      if (!initiated) {
-        // Race condition: another request beat us. Re-read current state and
-        // return it so the client can proceed as a joiner.
+      const result = await notifyIncomingCall({
+        appointmentId: appointmentId.toString(),
+        initiatorId: userId,
+        initiatorRole: role,
+        recipientId,
+        callerName,
+        callerImage,
+        callType: requestedCallType,
+        source: "appointment",
+      });
+
+      if (!result.success) {
+        // Race condition: another request beat us to the reservation. Re-read
+        // current state and return it so the client can proceed as a joiner.
         const current = await Appointment.findById(appointmentId)
           .populate("doctorId", "firstName lastName")
           .populate("userId",   "name") as any;
@@ -167,55 +155,15 @@ export const generateVideoToken = asyncHandler(
         });
       }
 
-      // ── Notify the other participant (fire-and-forget) ───────────────────
-      try {
-        const Conversation = require("../models/conversation").default;
-        const conversation = appointment.conversationId
-          ? await Conversation.findById(appointment.conversationId)
-          : await Conversation.findOne({ appointmentId });
-
-        const callData = {
-          callerName,
-          callerImage: isDoctor
-            ? (appointment.doctorId as any).doctorImage
-            : (appointment.userId  as any).userImage,
-          callerType:     role,
-          channelName,
-          callType:       requestedCallType,
-          conversationId: conversation?._id?.toString(),
-          videoRequestId: conversation?.activeVideoRequest?._id?.toString(),
-        };
-
-        sendIncomingCallPushNotification(recipientId, {
-          appointmentId: appointmentId.toString(),
-          ...callData,
-        }).catch((err: any) =>
-          console.error("⚠️ Push notification failed (non-fatal):", err.message)
-        );
-
-        emitCallRinging(appointmentId.toString(), role, recipientId, callData);
-
-        NotificationService.notifyCallStarted(
-          recipientId,
-          isDoctor ? "User" : "Doctor",
-          appointmentId.toString(),
-          callerName
-        ).catch((err: any) =>
-          console.error("⚠️ In-app notification failed (non-fatal):", err.message)
-        );
-      } catch (notifErr) {
-        console.error("⚠️ Notification block failed (non-fatal):", notifErr);
-      }
-
       return res.json({
         success: true,
         data: {
-          channelName,
+          channelName: result.channelName,
           callStatus:  "ringing",
           callType:    requestedCallType,
           isInitiator: true,
-          doctorName:  doctorName,
-patientName: patientName,
+          doctorName,
+          patientName,
         },
         message: "Call initiated",
       });
@@ -238,15 +186,25 @@ patientName: patientName,
         }
       );
 
+      // If this user is logged into more than one session (e.g. mobile and
+      // web at once), tell the others to stop ringing — WhatsApp-style
+      // "answered elsewhere". This session also receives it; the client is
+      // expected to ignore it once it has locally committed to accepting.
+      notifyAnsweredElsewhere(appointmentId.toString(), userId);
+
       return res.json({
         success: true,
         data: {
           channelName:  appointment.callChannelName || channelName,
           callStatus:   "in-progress",
           callType:     appointment.callType || "video",
-          // The original initiator is determined by callInitiatedBy stored in DB.
-          // The second joiner is never the initiator.
-          isInitiator:  false,
+          // Usually the second joiner, so false — EXCEPT a chat-initiated
+          // call: notifyIncomingCall now reserves "ringing" at request time
+          // (before either side has called /video/token), so the original
+          // requester's own first /video/token call can land here too, once
+          // the recipient has accepted. Deriving from callInitiatedBy (same
+          // as Case C below) gets both cases right regardless of call order.
+          isInitiator:  appointment.callInitiatedBy === role,
           doctorName:  doctorName,
 patientName: patientName,
         },
@@ -349,27 +307,47 @@ export const declineCall = asyncHandler(async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: "Missing required fields" });
   }
 
-  // Only reset if still ringing — idempotent otherwise.
-  await Appointment.updateOne(
-    { _id: appointmentId, callStatus: "ringing" },
-    {
-      $set: {
-        callStatus:       "idle",
-        callParticipants: [],
-      },
-    }
-  );
-
-  // Notify the initiator (who is waiting in the appointment socket room).
-  const { io } = require("../index");
-  io.to(`appointment:${appointmentId}`).emit("call-declined", {
-    appointmentId,
-    declinedBy: userId,
-    timestamp:  new Date().toISOString(),
-  });
+  // Idempotent if already past "ringing" (already cancelled/answered/expired).
+  await cancelIncomingCall(appointmentId, "declined");
 
   console.log(`📵 Call declined for appointment ${appointmentId} by ${userId}`);
   return res.json({ success: true, message: "Call declined" });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/v1/video/cancel
+// The CALLER hanging up before the callee has answered a ringing direct
+// call — previously there was no way to do this at all; IncomingCallScreen
+// on the receiving end had no listener for it and would just keep ringing
+// until its own 60s client-side timeout.
+// ─────────────────────────────────────────────────────────────────────────────
+export const cancelCall = asyncHandler(async (req: Request, res: Response) => {
+  const { appointmentId } = req.body;
+  const userId = req.auth?.id;
+
+  if (!appointmentId || !userId) {
+    return res.status(400).json({ success: false, message: "Missing required fields" });
+  }
+
+  const appointment = await Appointment.findById(appointmentId).select("callInitiatedBy doctorId userId");
+  if (!appointment) {
+    return res.status(404).json({ success: false, message: "Appointment not found" });
+  }
+
+  const isCaller =
+    (appointment.callInitiatedBy === "Doctor" && String(appointment.doctorId) === userId) ||
+    (appointment.callInitiatedBy === "User" && String(appointment.userId) === userId);
+  if (!isCaller) {
+    return res.status(403).json({ success: false, message: "Only the caller can cancel a ringing call" });
+  }
+
+  const result = await cancelIncomingCall(appointmentId, "cancelled");
+  if (!result.success) {
+    return res.status(400).json({ success: false, message: "Call is no longer ringing" });
+  }
+
+  console.log(`📵 Call cancelled for appointment ${appointmentId} by caller ${userId}`);
+  return res.json({ success: true, message: "Call cancelled" });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

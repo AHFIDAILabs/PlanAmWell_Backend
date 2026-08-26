@@ -374,47 +374,6 @@ export const emitCallStarted = (appointmentId: string, startedBy: string) => {
   }
 };
 
-// ✅ Emit call ringing to appointment room AND recipient's personal room
-export const emitCallRinging = (
-  appointmentId: string,
-  initiatedBy: string,
-  recipientId?: string,
-  callData?: {
-    callerName?: string;
-    callerImage?: string;
-    callerType?: string;
-    channelName?: string;
-    callType?: "audio" | "video";
-    conversationId?: string;
-    videoRequestId?: string;
-  }
-) => {
-  try {
-    const payload = {
-      appointmentId,
-      initiatedBy,
-      timestamp: new Date().toISOString(),
-      ...(callData || {}),
-    };
-
-    // Always emit to appointment room (catches anyone already viewing that appointment)
-    io.to(`appointment:${appointmentId}`).emit("call-ringing", payload);
-
-    // Also emit to the recipient's personal room so it fires regardless of which screen they're on
-    if (recipientId) {
-      io.to(`user_${recipientId}`).emit("call-ringing", payload);
-      console.log(`📞 Call ringing sent to appointment room + user_${recipientId}`);
-    } else {
-      console.log(`📞 Call ringing sent to appointment room ${appointmentId}`);
-    }
-
-    return true;
-  } catch (error) {
-    console.error(`❌ Failed to emit call ringing:`, error);
-    return false;
-  }
-};
-
 // ✅ NEW: Emit appointment updated to appointment room
 export const emitAppointmentUpdated = (appointmentId: string, appointment: any) => {
   try {
@@ -495,31 +454,6 @@ export const emitMessageRead = (
     return true;
   } catch (error) {
     console.error(`❌ Failed to emit message read:`, error);
-    return false;
-  }
-};
-
-// ✅ NEW: Emit video call request
-export const emitVideoCallRequest = (
-  conversationId: string,
-  recipientId: string,
-  requesterName: string,
-  requestId: string
-) => {
-  try {
-    const roomName = `user_${recipientId}`;
-    
-    io.to(roomName).emit("video-call-request", {
-      conversationId,
-      requesterName,
-      requestId,
-      timestamp: new Date().toISOString(),
-    });
-    
-    console.log(`📞 Video call request sent to user ${recipientId}`);
-    return true;
-  } catch (error) {
-    console.error(`❌ Failed to emit video call request:`, error);
     return false;
   }
 };

@@ -9,6 +9,7 @@ import {
   getCallStatus,
   reportCallIssue,
   declineCall,
+  cancelCall,
   getIceServers,
 } from '../controllers/videoCallController';
 import { verifyToken, authorize, guestAuth } from '../middleware/auth';
@@ -104,6 +105,19 @@ videoRouter.post(
   verifyToken,
   authorize('Doctor', 'User'),
   declineCall
+);
+
+/**
+ * @route   POST /api/v1/video/cancel
+ * @desc    Caller cancels their own outgoing call before it's answered
+ * @access  Private (Doctor | User)
+ */
+videoRouter.post(
+  '/cancel',
+  guestAuth,
+  verifyToken,
+  authorize('Doctor', 'User'),
+  cancelCall
 );
 
 /**

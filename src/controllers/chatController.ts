@@ -10,12 +10,11 @@ import {
   emitNewMessage,
   emitTypingIndicator,
   emitMessageRead,
-  emitVideoCallRequest,
   emitVideoCallResponse,
   emitConversationUnlocked,
 } from "../index";
 import { NotificationService } from "../services/NotificationService";
-import { sendIncomingCallPushNotification } from "../util/sendPushNotification";
+import { notifyIncomingCall, cancelIncomingCall } from "../services/callSignaling";
 import multer from "multer";
 import {
   uploadToCloudinary,
@@ -632,8 +631,8 @@ export const requestVideoCall = asyncHandler(
 
     const conversation = await Conversation.findById(conversationId)
       .populate("appointmentId")
-      .populate("participants.userId", "name expoPushTokens")
-      .populate("participants.doctorId", "firstName lastName expoPushTokens");
+      .populate("participants.userId", "name userImage expoPushTokens")
+      .populate("participants.doctorId", "firstName lastName doctorImage expoPushTokens");
 
     if (!conversation) {
       return res
@@ -650,24 +649,6 @@ export const requestVideoCall = asyncHandler(
         message: "A video call request is already pending",
       });
     }
-
-    const videoRequest = {
-      _id: new mongoose.Types.ObjectId(),
-      requestedBy: new mongoose.Types.ObjectId(userId),
-      requestedByType: role,
-      status: "pending" as const,
-      callType,
-      requestedAt: new Date(),
-      expiresAt: new Date(Date.now() + 60 * 1000),
-    };
-
-    // conversation was fetched with .populate() — never .save() it directly
-    // (see the golden rule in videoCallController.ts); atomic update instead.
-    conversation.activeVideoRequest = videoRequest;
-    await Conversation.updateOne(
-      { _id: conversation._id },
-      { $set: { activeVideoRequest: videoRequest } }
-    );
 
     if (!conversation.participants.userId || !conversation.participants.doctorId) {
       return res.status(404).json({
@@ -686,45 +667,59 @@ export const requestVideoCall = asyncHandler(
         ? `Dr. ${(conversation.participants.doctorId as any).firstName || ""}`.trim() || "Doctor"
         : (conversation.participants.userId as any).name || "Patient";
 
-    emitVideoCallRequest(
-      conversationId,
+    const callerImage =
+      role === "Doctor"
+        ? (conversation.participants.doctorId as any).doctorImage
+        : (conversation.participants.userId as any).userImage;
+
+    const appointmentId = String((conversation.appointmentId as any)?._id || conversation.appointmentId);
+
+    const videoRequest = {
+      _id: new mongoose.Types.ObjectId(),
+      requestedBy: new mongoose.Types.ObjectId(userId),
+      requestedByType: role,
+      status: "pending" as const,
+      callType,
+      requestedAt: new Date(),
+      expiresAt: new Date(Date.now() + 60 * 1000),
+    };
+
+    // Reserves Appointment.callStatus = "ringing" atomically — same slot the
+    // direct appointment-page call path uses — so a direct call and a chat
+    // call can no longer both be "ringing" for the same appointment at once.
+    const result = await notifyIncomingCall({
+      appointmentId,
+      initiatorId: userId!,
+      initiatorRole: role,
       recipientId,
-      requesterName,
-      videoRequest._id.toString()
+      callerName: requesterName,
+      callerImage,
+      callType,
+      source: "chat",
+      conversationId,
+      videoRequestId: videoRequest._id.toString(),
+    });
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: "A call is already ringing or in progress for this appointment.",
+      });
+    }
+
+    // conversation was fetched with .populate() — never .save() it directly
+    // (see the golden rule in videoCallController.ts); atomic update instead.
+    conversation.activeVideoRequest = videoRequest;
+    await Conversation.updateOne(
+      { _id: conversation._id },
+      { $set: { activeVideoRequest: videoRequest } }
     );
 
-    try {
-      await NotificationService.notifyVideoCallRequest(
-        recipientId,
-        role === "Doctor" ? "User" : "Doctor",
-        requesterName,
-        conversationId
-      );
-    } catch (error) {
-      console.error("Failed to send video call request notification:", error);
-    }
-
-    // Also send the special "incoming-calls" channel push (full-screen ringing
-    // on Android, time-sensitive on iOS) — notifyVideoCallRequest above only
-    // sends a generic notification, which doesn't ring the recipient's phone
-    // when backgrounded. Same treatment as the formal appointment-call flow
-    // in videoCallController.generateVideoToken.
-    try {
-      const appointmentId = String((conversation.appointmentId as any)?._id || conversation.appointmentId);
-      await sendIncomingCallPushNotification(recipientId, {
-        appointmentId,
-        callerName: requesterName,
-        callerType: role,
-        channelName: `appt_${appointmentId}`,
-        callType,
-        conversationId,
-        videoRequestId: videoRequest._id.toString(),
-      });
-    } catch (error: any) {
-      console.error("⚠️ Incoming-call push failed for chat video request (non-fatal):", error.message);
-    }
-
-    // Auto-expire after 60 seconds
+    // Auto-expire the conversation-side request after 60 seconds — mirrors
+    // notifyIncomingCall's own Appointment-side ring-expiry timer (armed
+    // above), which already handles the "call-cancelled" notification; this
+    // just clears activeVideoRequest so a future request isn't blocked by a
+    // stale "pending" entry.
     setTimeout(async () => {
       const conv = await Conversation.findById(conversationId);
       if (
@@ -736,12 +731,6 @@ export const requestVideoCall = asyncHandler(
         conv.videoCallHistory.push(conv.activeVideoRequest);
         conv.activeVideoRequest = undefined;
         await conv.save();
-        emitVideoCallResponse(
-          conversationId,
-          String(userId),
-          "expired",
-          videoRequest._id.toString()
-        );
       }
     }, 60000);
 
@@ -807,14 +796,23 @@ export const respondToVideoCall = asyncHandler(
       }
     );
 
-    // Ad-hoc chat call, accepted — let generateVideoToken bypass the
-    // scheduled-time window for the next few minutes so both sides can join,
-    // and record the call type so both joiners open the same UI.
     if (accept && conversation.appointmentId) {
+      // Ad-hoc chat call, accepted — let generateVideoToken bypass the
+      // scheduled-time window for the next few minutes so both sides can
+      // join, and record the call type so both joiners open the same UI.
+      // Appointment.callStatus is already "ringing" (reserved at request
+      // time by notifyIncomingCall) — both sides' subsequent POST
+      // /video/token calls transition it to in-progress on their own.
       await Appointment.updateOne(
         { _id: conversation.appointmentId },
         { $set: { adHocCallApprovedAt: new Date(), callType } }
       );
+    } else if (!accept && conversation.appointmentId) {
+      // Release the ringing reservation notifyIncomingCall put in place at
+      // request time — otherwise the appointment is stuck "ringing" and no
+      // new call (chat or direct) can be started on it.
+      const appointmentId = String((conversation.appointmentId as any)?._id || conversation.appointmentId);
+      await cancelIncomingCall(appointmentId, "declined");
     }
 
     emitVideoCallResponse(
@@ -891,6 +889,10 @@ export const cancelVideoCallRequest = asyncHandler(
 
     conversation.activeVideoRequest = undefined;
     await conversation.save();
+
+    if (conversation.appointmentId) {
+      await cancelIncomingCall(String(conversation.appointmentId), "cancelled");
+    }
 
     emitVideoCallResponse(conversationId, recipientId, "cancelled", requestId);
 
