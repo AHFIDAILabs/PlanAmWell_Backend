@@ -20,17 +20,32 @@ function buildServiceAccount(): admin.ServiceAccount | null {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-  if (projectId && clientEmail && rawPrivateKey) {
+  // A dashboard env var field commonly truncates or mangles a pasted
+  // multi-line PEM key (only "-----BEGIN PRIVATE KEY-----" makes it in,
+  // nothing after) — checking these three are merely *present* isn't enough
+  // to trust them; a truncated key parses as a non-empty string just fine
+  // and only fails later inside admin.credential.cert(). Require both PEM
+  // markers before committing to this path, so a broken split key falls
+  // through to FIREBASE_SERVICE_ACCOUNT below instead of failing silently.
+  if (projectId && clientEmail && rawPrivateKey?.includes("BEGIN PRIVATE KEY") && rawPrivateKey?.includes("END PRIVATE KEY")) {
     // Env var UIs commonly store a pasted PEM key's real line breaks as the
     // literal two characters "\" + "n" rather than an actual newline —
     // Firebase's key parser requires real newlines, so convert them back.
     const privateKey = rawPrivateKey.includes("\\n") ? rawPrivateKey.replace(/\\n/g, "\n") : rawPrivateKey;
+    console.log("[FirebaseAdmin] Using split env vars (FIREBASE_PROJECT_ID/FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY)");
     return { projectId, clientEmail, privateKey };
+  }
+
+  if (projectId || clientEmail || rawPrivateKey) {
+    console.warn(
+      "[FirebaseAdmin] Split env vars present but incomplete/malformed (FIREBASE_PRIVATE_KEY missing a full PEM key?) — falling back to FIREBASE_SERVICE_ACCOUNT."
+    );
   }
 
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (raw) {
     const parsed = JSON.parse(raw);
+    console.log("[FirebaseAdmin] Using FIREBASE_SERVICE_ACCOUNT JSON blob");
     return {
       projectId: parsed.project_id,
       clientEmail: parsed.client_email,
