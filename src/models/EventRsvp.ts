@@ -5,15 +5,17 @@ export interface IEventRsvp extends Document {
   userId: Types.ObjectId;
   chosenName: string;
   reminderOptIn: boolean;
+  reminderSent: boolean;
   status: "going" | "cancelled";
 }
 
 const EventRsvpSchema = new Schema<IEventRsvp>(
   {
-    eventId: { type: Schema.Types.ObjectId, required: true, index: true },
+    eventId: { type: Schema.Types.ObjectId, ref: "Event", required: true, index: true },
     userId: { type: Schema.Types.ObjectId, required: true, index: true },
     chosenName: { type: String, required: true, trim: true },
     reminderOptIn: { type: Boolean, default: false },
+    reminderSent: { type: Boolean, default: false },
     status: { type: String, enum: ["going", "cancelled"], default: "going" },
   },
   { timestamps: true }

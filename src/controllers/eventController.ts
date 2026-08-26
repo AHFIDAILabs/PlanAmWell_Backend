@@ -2,21 +2,63 @@ import { Request, Response } from "express";
 import { Event } from "../models/Event";
 import { EventRsvp } from "../models/EventRsvp";
 
+// rsvpCount is an aggregate number only — never attendee names or any other
+// identifying detail. Showing "12 going" gives a lightweight sense that
+// other people are here too without exposing who anyone is, which matters
+// on a platform whose whole premise is confidential, non-judgmental care.
+async function withRsvpCounts<T extends { _id: any }>(events: T[]): Promise<(T & { rsvpCount: number })[]> {
+  if (events.length === 0) return [];
+  const counts = await EventRsvp.aggregate([
+    { $match: { eventId: { $in: events.map((e) => e._id) }, status: "going" } },
+    { $group: { _id: "$eventId", count: { $sum: 1 } } },
+  ]);
+  const countByEvent = new Map(counts.map((c) => [String(c._id), c.count]));
+  return events.map((e) => ({ ...e, rsvpCount: countByEvent.get(String(e._id)) ?? 0 }));
+}
+
 export const getEvents = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const events = await Event.find({ isActive: true, startsAt: { $gte: new Date() } }).sort({ startsAt: 1 });
-    return res.json({ success: true, data: events });
+    const events = await Event.find({ isActive: true, startsAt: { $gte: new Date() } })
+      .sort({ startsAt: 1 })
+      .lean();
+    return res.json({ success: true, data: await withRsvpCounts(events) });
   } catch (err: any) {
     console.error("[Event] list error:", err.message);
     return res.status(500).json({ success: false, message: "Failed to fetch events" });
   }
 };
 
+// Admin management view — the public getEvents above only ever shows
+// active, not-yet-started events (that's the right behavior for patients
+// browsing), which means an admin using that same endpoint could never see
+// past events, drafts they've deactivated, or manage anything after it
+// starts. Also surfaces the "going" count per event so an admin can see
+// interest at a glance without opening each one.
+export const getAllEventsAdmin = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const events = await Event.find({}).sort({ startsAt: -1 }).lean();
+    return res.json({ success: true, data: await withRsvpCounts(events) });
+  } catch (err: any) {
+    console.error("[Event] admin list error:", err.message);
+    return res.status(500).json({ success: false, message: "Failed to fetch events" });
+  }
+};
+
 export const getEventById = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const event = await Event.findOne({ _id: req.params.id, isActive: true });
+    const event = await Event.findOne({ _id: req.params.id, isActive: true }).lean();
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
-    return res.json({ success: true, data: event });
+
+    // The detail page previously had no way to know the viewer had already
+    // RSVP'd beyond the current session's own local state — reloading the
+    // page, or coming back another day, reverted the button to "RSVP to
+    // this event" even though they were already going. Returning the
+    // viewer's own RSVP here (never anyone else's) fixes that at the source.
+    const userId = req.auth?.id;
+    const myRsvp = userId ? await EventRsvp.findOne({ eventId: event._id, userId, status: "going" }).lean() : null;
+
+    const [withCount] = await withRsvpCounts([event]);
+    return res.json({ success: true, data: { ...withCount, myRsvp } });
   } catch (err: any) {
     console.error("[Event] get error:", err.message);
     return res.status(500).json({ success: false, message: "Failed to fetch event" });
@@ -139,7 +181,11 @@ export const cancelRsvp = async (req: Request, res: Response): Promise<Response>
 export const getMyRsvps = async (req: Request, res: Response): Promise<Response> => {
   try {
     const userId = req.auth?.id;
-    const rsvps = await EventRsvp.find({ userId, status: "going" }).sort({ createdAt: -1 });
+    // Populated so the "My Events" list can render title/time directly
+    // instead of the client re-fetching every event by id one at a time.
+    const rsvps = await EventRsvp.find({ userId, status: "going" })
+      .sort({ createdAt: -1 })
+      .populate("eventId");
     return res.json({ success: true, data: rsvps });
   } catch (err: any) {
     console.error("[Event] my rsvps error:", err.message);

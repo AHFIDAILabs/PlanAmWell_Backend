@@ -7,6 +7,7 @@ import { emitAppointmentEnded } from "../index";
 import { AccessRequest } from "../models/AccessRequest";
 import { User } from "../models/user";
 import { autoExpireAbandonedPayments } from "../util/autoExpirePayments";
+import { EventRsvp } from "../models/EventRsvp";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // JOB 1: 15-minute appointment reminders (unchanged, runs every minute)
@@ -59,6 +60,56 @@ cron.schedule("* * * * *", async () => {
     }
   } catch (error) {
     console.error("❌ [ReminderJob] Error:", error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOB 1b: Community Hub event reminders, 60 minutes before start, for RSVPs
+// that opted in. Previously "Remind me before this event starts" saved
+// reminderOptIn to the DB and nothing ever read it — this is what actually
+// fulfills that checkbox. Runs every minute like the appointment reminder
+// job; reminderSent guards against re-sending on the next tick.
+// ─────────────────────────────────────────────────────────────────────────────
+cron.schedule("* * * * *", async () => {
+  try {
+    const now = new Date();
+    const windowStart = new Date(now.getTime() + 60 * 60 * 1000);
+    const windowEnd = new Date(windowStart.getTime() + 60 * 1000);
+
+    const dueRsvps = await EventRsvp.find({
+      status: "going",
+      reminderOptIn: true,
+      reminderSent: { $ne: true },
+    }).populate("eventId");
+
+    const due = dueRsvps.filter((r: any) => {
+      const event = r.eventId;
+      if (!event || !event.startsAt) return false;
+      const startsAt = new Date(event.startsAt).getTime();
+      return startsAt >= windowStart.getTime() && startsAt < windowEnd.getTime();
+    });
+
+    if (due.length === 0) return;
+
+    for (const rsvp of due) {
+      const event = (rsvp as any).eventId;
+      try {
+        await NotificationService.create({
+          userId: rsvp.userId.toString(),
+          userType: "User",
+          title: "Event starting soon",
+          message: `${event.title} starts in about an hour.`,
+          type: "system",
+          metadata: { eventId: String(event._id), type: "event_reminder" },
+        });
+        rsvp.reminderSent = true;
+        await rsvp.save();
+      } catch (err) {
+        console.error(`❌ [EventReminderJob] Failed for RSVP ${rsvp._id}:`, err);
+      }
+    }
+  } catch (error) {
+    console.error("❌ [EventReminderJob] Error:", error);
   }
 });
 
