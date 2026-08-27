@@ -1,6 +1,11 @@
 import { Request, Response } from "express";
-import { Event } from "../models/Event";
+import { Event, EVENT_BANNER_PRESETS, EventBannerPreset } from "../models/Event";
 import { EventRsvp } from "../models/EventRsvp";
+import { uploadToCloudinary, deleteFromCloudinary } from "../middleware/claudinary";
+
+function isValidPreset(value: unknown): value is EventBannerPreset {
+  return typeof value === "string" && (EVENT_BANNER_PRESETS as readonly string[]).includes(value);
+}
 
 // rsvpCount is an aggregate number only — never attendee names or any other
 // identifying detail. Showing "12 going" gives a lightweight sense that
@@ -67,10 +72,21 @@ export const getEventById = async (req: Request, res: Response): Promise<Respons
 
 export const createEvent = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const { title, description, category, startsAt, endsAt, location, isVirtual, capacity } = req.body;
+    const { title, description, category, startsAt, endsAt, location, isVirtual, capacity, bannerPreset } = req.body;
 
     if (!title || !description || !startsAt) {
       return res.status(400).json({ success: false, message: "title, description and startsAt are required" });
+    }
+
+    let bannerImage: { url: string; publicId: string } | undefined;
+    if (req.file?.buffer) {
+      try {
+        const { secure_url, public_id } = await uploadToCloudinary(req.file.buffer, "events");
+        bannerImage = { url: secure_url, publicId: public_id };
+      } catch (error) {
+        console.error("[Event] banner upload error:", error);
+        return res.status(500).json({ success: false, message: "Failed to upload banner image" });
+      }
     }
 
     const event = await Event.create({
@@ -80,9 +96,14 @@ export const createEvent = async (req: Request, res: Response): Promise<Response
       startsAt: new Date(startsAt),
       endsAt: endsAt ? new Date(endsAt) : undefined,
       location: location?.trim(),
-      isVirtual: !!isVirtual,
+      isVirtual: isVirtual === true || isVirtual === "true",
       capacity: capacity || undefined,
       createdBy: req.auth?.id,
+      // An uploaded photo wins over a preset pick if a caller somehow sends
+      // both — bannerImage is only ever set here when a file actually came
+      // through multer.
+      bannerImage,
+      bannerPreset: !bannerImage && isValidPreset(bannerPreset) ? bannerPreset : undefined,
     });
 
     return res.status(201).json({ success: true, data: event });
@@ -95,10 +116,56 @@ export const createEvent = async (req: Request, res: Response): Promise<Response
 export const updateEvent = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { id } = req.params;
-    const { title, description, category, startsAt, endsAt, location, isVirtual, capacity, isActive } = req.body;
+    const {
+      title,
+      description,
+      category,
+      startsAt,
+      endsAt,
+      location,
+      isVirtual,
+      capacity,
+      isActive,
+      bannerPreset,
+      clearBanner,
+    } = req.body;
 
     const event = await Event.findById(id);
     if (!event) return res.status(404).json({ success: false, message: "Event not found" });
+
+    if (req.file?.buffer) {
+      try {
+        const { secure_url, public_id } = await uploadToCloudinary(req.file.buffer, "events");
+        // Clean up the previous upload so switching banners doesn't leave
+        // orphaned files behind in Cloudinary.
+        if (event.bannerImage?.publicId) {
+          deleteFromCloudinary(event.bannerImage.publicId).catch((err) =>
+            console.error("[Event] old banner cleanup failed (non-fatal):", err)
+          );
+        }
+        event.bannerImage = { url: secure_url, publicId: public_id };
+        event.bannerPreset = undefined;
+      } catch (error) {
+        console.error("[Event] banner upload error:", error);
+        return res.status(500).json({ success: false, message: "Failed to upload banner image" });
+      }
+    } else if (isValidPreset(bannerPreset)) {
+      if (event.bannerImage?.publicId) {
+        deleteFromCloudinary(event.bannerImage.publicId).catch((err) =>
+          console.error("[Event] old banner cleanup failed (non-fatal):", err)
+        );
+      }
+      event.bannerPreset = bannerPreset;
+      event.bannerImage = undefined;
+    } else if (clearBanner === true || clearBanner === "true") {
+      if (event.bannerImage?.publicId) {
+        deleteFromCloudinary(event.bannerImage.publicId).catch((err) =>
+          console.error("[Event] old banner cleanup failed (non-fatal):", err)
+        );
+      }
+      event.bannerImage = undefined;
+      event.bannerPreset = undefined;
+    }
 
     if (title !== undefined) event.title = title.trim();
     if (description !== undefined) event.description = description.trim();
@@ -106,9 +173,13 @@ export const updateEvent = async (req: Request, res: Response): Promise<Response
     if (startsAt !== undefined) event.startsAt = new Date(startsAt);
     if (endsAt !== undefined) event.endsAt = endsAt ? new Date(endsAt) : undefined;
     if (location !== undefined) event.location = location?.trim();
-    if (isVirtual !== undefined) event.isVirtual = !!isVirtual;
-    if (capacity !== undefined) event.capacity = capacity || undefined;
-    if (isActive !== undefined) event.isActive = isActive;
+    // Multipart form submissions (whenever a banner file is attached) send
+    // every field as a string, including "false" — !!"false" is true, so a
+    // naive truthy check here would make "make it not virtual" silently
+    // no-op the moment an image upload was also involved in the same save.
+    if (isVirtual !== undefined) event.isVirtual = isVirtual === true || isVirtual === "true";
+    if (capacity !== undefined) event.capacity = capacity ? Number(capacity) : undefined;
+    if (isActive !== undefined) event.isActive = isActive === true || isActive === "true";
 
     await event.save();
     return res.json({ success: true, data: event });

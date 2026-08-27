@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import { guestAuth, verifyToken, authorize } from "../middleware/auth";
 import {
   getEvents,
@@ -12,6 +13,15 @@ import {
   getMyRsvps,
 } from "../controllers/eventController";
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) cb(null, true);
+    else cb(new Error("Only image files are allowed!"));
+  },
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
 const eventRouter = Router();
 
 eventRouter.get("/", guestAuth, getEvents);
@@ -21,8 +31,8 @@ eventRouter.get("/mine/rsvps", guestAuth, verifyToken, getMyRsvps);
 eventRouter.get("/admin/all", guestAuth, verifyToken, authorize("Admin"), getAllEventsAdmin);
 eventRouter.get("/:id", guestAuth, getEventById);
 
-eventRouter.post("/", guestAuth, verifyToken, authorize("Admin"), createEvent);
-eventRouter.put("/:id", guestAuth, verifyToken, authorize("Admin"), updateEvent);
+eventRouter.post("/", guestAuth, verifyToken, authorize("Admin"), upload.single("bannerImage"), createEvent);
+eventRouter.put("/:id", guestAuth, verifyToken, authorize("Admin"), upload.single("bannerImage"), updateEvent);
 eventRouter.delete("/:id", guestAuth, verifyToken, authorize("Admin"), deleteEvent);
 
 eventRouter.post("/:id/rsvp", guestAuth, verifyToken, rsvpToEvent);
