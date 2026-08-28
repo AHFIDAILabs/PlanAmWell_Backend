@@ -133,26 +133,44 @@ export const initiatePayment = asyncHandler(
     }
 
  /** ------------------ 5. Idempotency check ------------------ */
-// Only a still-pending payment should short-circuit here — a failed one
-// left behind (very reachable now via the simulated "Simulate Failed
-// Payment" button, previously only ever a rare real-processor outcome)
-// must not permanently block ever retrying this order.
+// A still-pending payment is only safe to hand back as-is if it (a) was
+// started under the SAME mode this request would use right now, and (b) is
+// recent enough that its checkout session is plausibly still alive. Neither
+// held before this fix: flipping ORDER_PAYMENT_ENABLED (or just deploying
+// this simulation feature for the first time) left old "pending" real-
+// Paystack payment records in the DB from before the flag existed, and the
+// unfiltered reuse below handed their now-dead checkoutUrl straight back
+// out — Paystack's own "could not start this transaction" error is exactly
+// what a browser sees opening an expired/already-resolved checkout link.
+const RESUMABLE_PAYMENT_WINDOW_MS = 30 * 60 * 1000; // 30 min
+const currentProvider = orderPaymentEnabled() ? "partner" : "simulation";
+
 const existingPayment = await Payment.findOne({
   orderId: order.id,
   status: "pending",
 });
 
 if (existingPayment) {
-  return res.status(200).json({
-    success: true,
-    message: "Payment already initiated",
-    data: {
-      checkoutUrl: existingPayment.checkoutUrl,
-      paymentReference: existingPayment.paymentReference,
-      transactionId: existingPayment.transactionId,
-      status: existingPayment.status,
-    },
-  });
+  const isFresh = Date.now() - (existingPayment.createdAt?.getTime() ?? 0) < RESUMABLE_PAYMENT_WINDOW_MS;
+  const isSameMode = (existingPayment.provider ?? "partner") === currentProvider;
+
+  if (isFresh && isSameMode) {
+    return res.status(200).json({
+      success: true,
+      message: "Payment already initiated",
+      data: {
+        checkoutUrl: existingPayment.checkoutUrl,
+        paymentReference: existingPayment.paymentReference,
+        transactionId: existingPayment.transactionId,
+        status: existingPayment.status,
+      },
+    });
+  }
+
+  // Stale or mode-mismatched — release it so a fresh one can be created for
+  // this order (the "one pending payment per order" unique index would
+  // otherwise reject the new Payment.create below).
+  await Payment.updateOne({ _id: existingPayment._id }, { status: "failed" });
 }
 
     /** ------------------ 6. Derive secure server-side values ------------------ */
