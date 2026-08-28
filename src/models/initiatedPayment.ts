@@ -11,6 +11,11 @@ export interface IPayment extends Document {
   amount: number;
   status: "pending" | "success" | "failed";
   provider?: string;
+  // Where the payer should land after completing this specific payment —
+  // resolved once at initiate time (see checkoutController.resolveRedirectUrl)
+  // so a web-initiated payment lands back on the web app, not a mobile deep
+  // link, and vice versa. Read back by the simulated-checkout result page.
+  redirectUrl?: string;
   rawResponse?: any;
   createdAt?: Date;
   updatedAt?: Date;
@@ -32,6 +37,7 @@ const PaymentSchema = new Schema<IPayment>(
       default: "pending",
     },
     provider: { type: String, default: "partner" },
+    redirectUrl: { type: String },
     rawResponse: { type: Schema.Types.Mixed },
   },
   { timestamps: true }

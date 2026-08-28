@@ -24,7 +24,11 @@ const ALLOWED_REDIRECT_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
   : [];
 
-function resolveRedirectUrl(orderId: string, requestedRedirectUrl?: unknown): string {
+// Exported so paymentController's initiatePayment (resuming payment on an
+// already-confirmed order) can apply the exact same web-vs-mobile redirect
+// resolution as a fresh checkout, instead of always defaulting to the
+// mobile-only deep link it used to hardcode.
+export function resolveRedirectUrl(orderId: string, requestedRedirectUrl?: unknown): string {
   const fallback = `${process.env.APP_URL}/api/v1/payment/redirect?orderId=${orderId}`;
   if (typeof requestedRedirectUrl !== "string" || !requestedRedirectUrl) return fallback;
 

@@ -21,6 +21,10 @@ export const getPlatformSettingsHandler = asyncHandler(async (_req: Request, res
       consultationFeeKobo: settings.consultationFeeKobo,
       currency: settings.currency,
       paymentEnabled: process.env.PAYMENT_ENABLED === "true",
+      // Separate flag for order/pharmacy payments (see paymentController's
+      // initiatePayment) — independently toggleable from consultation
+      // payments since they integrate with a different processor.
+      orderPaymentEnabled: process.env.ORDER_PAYMENT_ENABLED === "true",
     },
   });
 });
