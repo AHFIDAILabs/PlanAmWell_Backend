@@ -6,7 +6,18 @@ export interface IEventRsvp extends Document {
   chosenName: string;
   reminderOptIn: boolean;
   reminderSent: boolean;
-  status: "going" | "cancelled";
+  // pending_payment only ever occurs for a ticketed event (Event.ticketPriceKobo
+  // set) — a free event's RSVP goes straight to "going", same as before this
+  // field existed. Deliberately not counted in withRsvpCounts' "going"
+  // aggregate or capacity checks until payment actually completes.
+  status: "going" | "cancelled" | "pending_payment";
+  paymentReference?: string;
+  checkoutUrl?: string;
+  transactionId?: string;
+  amountKobo?: number;
+  provider?: "simulation" | "partner";
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const EventRsvpSchema = new Schema<IEventRsvp>(
@@ -16,7 +27,12 @@ const EventRsvpSchema = new Schema<IEventRsvp>(
     chosenName: { type: String, required: true, trim: true },
     reminderOptIn: { type: Boolean, default: false },
     reminderSent: { type: Boolean, default: false },
-    status: { type: String, enum: ["going", "cancelled"], default: "going" },
+    status: { type: String, enum: ["going", "cancelled", "pending_payment"], default: "going" },
+    paymentReference: { type: String },
+    checkoutUrl: { type: String },
+    transactionId: { type: String },
+    amountKobo: { type: Number },
+    provider: { type: String, enum: ["simulation", "partner"] },
   },
   { timestamps: true }
 );

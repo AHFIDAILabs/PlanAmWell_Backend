@@ -11,6 +11,10 @@ import {
   rsvpToEvent,
   cancelRsvp,
   getMyRsvps,
+  initiateEventTicketPayment,
+  renderSimulatedEventCheckout,
+  completeSimulatedEventPayment,
+  verifyEventTicketPayment,
 } from "../controllers/eventController";
 
 const upload = multer({
@@ -29,6 +33,11 @@ eventRouter.get("/mine/rsvps", guestAuth, verifyToken, getMyRsvps);
 // Must come before "/:id" — Express would otherwise match "admin" as an
 // :id param (same reason "/mine/rsvps" above is ordered ahead of it too).
 eventRouter.get("/admin/all", guestAuth, verifyToken, authorize("Admin"), getAllEventsAdmin);
+// Same reasoning — literal segments must come before "/:id" or Express
+// matches them as the :id param instead.
+eventRouter.get("/rsvp-payment/simulate/:reference", renderSimulatedEventCheckout);
+eventRouter.post("/rsvp-payment/simulate/:reference/complete", completeSimulatedEventPayment);
+eventRouter.post("/rsvp-payment/verify", guestAuth, verifyToken, verifyEventTicketPayment);
 eventRouter.get("/:id", guestAuth, getEventById);
 
 eventRouter.post("/", guestAuth, verifyToken, authorize("Admin"), upload.single("bannerImage"), createEvent);
@@ -37,5 +46,6 @@ eventRouter.delete("/:id", guestAuth, verifyToken, authorize("Admin"), deleteEve
 
 eventRouter.post("/:id/rsvp", guestAuth, verifyToken, rsvpToEvent);
 eventRouter.delete("/:id/rsvp", guestAuth, verifyToken, cancelRsvp);
+eventRouter.post("/:id/rsvp/pay", guestAuth, verifyToken, initiateEventTicketPayment);
 
 export default eventRouter;
