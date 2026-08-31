@@ -38,8 +38,13 @@ async function withRsvpCounts<T extends { _id: any }>(events: T[]): Promise<(T &
 
 export const getEvents = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const events = await Event.find({ isActive: true, startsAt: { $gte: new Date() } })
-      .sort({ startsAt: 1 })
+    // ?all=true (landing page's "every event ever created" showcase) still
+    // respects isActive — an admin-deactivated event stays unlisted — it
+    // just drops the upcoming-only date filter so past events are included.
+    const includePast = req.query.all === "true";
+    const query = includePast ? { isActive: true } : { isActive: true, startsAt: { $gte: new Date() } };
+    const events = await Event.find(query)
+      .sort({ startsAt: includePast ? -1 : 1 })
       .lean();
     return res.json({ success: true, data: await withRsvpCounts(events) });
   } catch (err: any) {
