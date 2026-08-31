@@ -16,6 +16,11 @@ export interface IEventRsvp extends Document {
   transactionId?: string;
   amountKobo?: number;
   provider?: "simulation" | "partner";
+  // Caller-supplied web origin (see checkoutController.resolveRedirectUrl),
+  // used to send the payer back to the right platform after checkout — a
+  // web-initiated payment resolves this to the web app, not the mobile deep
+  // link. Missing on RSVPs created before this field existed.
+  redirectUrl?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -33,6 +38,7 @@ const EventRsvpSchema = new Schema<IEventRsvp>(
     transactionId: { type: String },
     amountKobo: { type: Number },
     provider: { type: String, enum: ["simulation", "partner"] },
+    redirectUrl: { type: String },
   },
   { timestamps: true }
 );

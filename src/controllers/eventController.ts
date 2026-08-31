@@ -354,6 +354,7 @@ export const initiateEventTicketPayment = async (req: Request, res: Response): P
       rsvp.checkoutUrl = checkoutUrl;
       rsvp.amountKobo = event.ticketPriceKobo;
       rsvp.provider = "simulation";
+      rsvp.redirectUrl = resolvedRedirectUrl;
       await rsvp.save();
 
       return res.status(201).json({
@@ -381,6 +382,7 @@ export const initiateEventTicketPayment = async (req: Request, res: Response): P
       rsvp.checkoutUrl = result.authorizationUrl;
       rsvp.amountKobo = event.ticketPriceKobo;
       rsvp.provider = "partner";
+      rsvp.redirectUrl = resolvedRedirectUrl;
       await rsvp.save();
 
       return res.status(201).json({
@@ -413,7 +415,8 @@ export const renderSimulatedEventCheckout = async (req: Request, res: Response):
   }
 
   if (rsvp.status !== "pending_payment") {
-    res.send(renderEventSimulationResult(rsvp.status === "going", (rsvp.eventId as any)._id));
+    const eventId = (rsvp.eventId as any)._id;
+    res.send(renderEventSimulationResult(rsvp.status === "going", eventRedirectUrl(eventId, rsvp.redirectUrl)));
     return;
   }
 
@@ -472,10 +475,18 @@ export const completeSimulatedEventPayment = async (req: Request, res: Response)
     }
   }
 
-  res.send(renderEventSimulationResult(rsvp.status === "going", eventId));
+  res.send(renderEventSimulationResult(rsvp.status === "going", eventRedirectUrl(eventId, rsvp.redirectUrl)));
 };
 
-function renderEventSimulationResult(success: boolean, eventId: string): string {
+// Mirrors paymentController.paymentRedirectUrl — a payment initiated before
+// this field existed, or with no caller-supplied redirectUrl at all (e.g.
+// hit directly rather than through web's/mobile's checkout flow), falls
+// back to the mobile deep link.
+function eventRedirectUrl(eventId: string, redirectUrl?: string): string {
+  return redirectUrl || `planamwell://event-complete?eventId=${eventId}`;
+}
+
+function renderEventSimulationResult(success: boolean, redirectUrl: string): string {
   return `
     <!DOCTYPE html>
     <html>
@@ -493,7 +504,7 @@ function renderEventSimulationResult(success: boolean, eventId: string): string 
       <body>
         <h2>${success ? "Ticket Confirmed! (Simulated)" : "Payment Failed (Simulated)"}</h2>
         <p>Tap below to continue.</p>
-        <a href="planamwell://event-complete?eventId=${eventId}">Return to PlanAmWell</a>
+        <a href="${redirectUrl}">Return to PlanAmWell</a>
       </body>
     </html>
   `;
