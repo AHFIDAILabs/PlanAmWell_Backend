@@ -696,6 +696,7 @@ export const confirmOrder = asyncHandler(async (req: Request, res: Response) => 
           checkoutUrl,
           amount: order.total,
           status: "pending",
+          redirectUrl: mobileRedirectUrl,
         });
         console.log("[ConfirmOrder] Payment record saved ✅");
       } catch (saveErr: any) {
