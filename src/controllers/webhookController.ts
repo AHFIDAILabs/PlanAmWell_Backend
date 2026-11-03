@@ -59,7 +59,10 @@ function verifyWebhookSecret(req: Request): boolean {
 export const handlePaymentWebhook = asyncHandler(
   async (req: Request, res: Response) => {
      console.log("[Webhook] Payment webhook received:", JSON.stringify(req.body, null, 2));
-    console.log("[Webhook] Headers:", JSON.stringify(req.headers, null, 2));
+    // Never log req.headers here — the partner's shared secret is sent as a
+    // plain header value (x-api-key/x-webhook-secret), and verifyWebhookSecret
+    // hasn't run yet at this point, so logging headers would write the secret
+    // itself into the logs on every webhook call, verified or not.
 
     if (!verifyWebhookSecret(req)) {
       return res.status(401).json({ success: false, message: "Unauthorized" });

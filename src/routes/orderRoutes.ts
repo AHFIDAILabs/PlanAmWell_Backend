@@ -8,15 +8,20 @@ import {
   deleteOrder,
   refreshDeliveryStatus
 } from "../controllers/orderController";
-import { verifyToken, authorize } from "../middleware/auth";
+import { verifyToken, authorize, guestAuth } from "../middleware/auth";
 import { User } from "../models/user";
 
 const orderRouter = Router();
 
 /**
- * PUBLIC - anyone can create an order (guest or registered user)
+ * PUBLIC - anyone can create an order (guest or registered user). guestAuth
+ * populates req.auth when a guest/user token is actually presented (fixing
+ * an attribution bug where orders were never tied to anyone — nothing
+ * populated req.user, which this route used to read) without requiring one,
+ * preserving true guest checkout. Pricing itself is never trusted from the
+ * client — see createOrder, which recomputes subtotal/total server-side.
  */
-orderRouter.post("/", createOrder);
+orderRouter.post("/", guestAuth, createOrder);
 orderRouter.get("/:id/delivery-status", refreshDeliveryStatus);
 
 /**
@@ -38,9 +43,12 @@ orderRouter.get("/", verifyToken, authorize("Admin"), getOrders);
 orderRouter.get("/:id", verifyToken, authorize("Admin", "User"), getOrder);
 
 /**
- * USER/SESSION OWNER - update their own order if not paid
+ * USER/SESSION OWNER - update their own order if not paid. guestAuth (not
+ * verifyToken) so a guest's anonymous session can still pass req.auth —
+ * updateOrder's ownership check itself still rejects anyone who isn't the
+ * order's userId/sessionId owner or an Admin.
  */
-orderRouter.put("/:id",  updateOrder);
+orderRouter.put("/:id", guestAuth, updateOrder);
 
 /**
  * ADMIN ONLY - delete order

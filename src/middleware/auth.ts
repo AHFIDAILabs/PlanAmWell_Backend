@@ -258,10 +258,21 @@ export const verifyToken = (
   }
 
   const token = authHeader.split(" ")[1];
-  
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
-    
+
+    // A validly-signed anonymous/guest token (or one missing an id entirely)
+    // decodes successfully here but isn't "full auth" — without this check
+    // it fell through to req.auth.id/role being undefined and next() being
+    // called anyway, letting a guest session reach routes that assume a
+    // real account (then crash dereferencing req.user, e.g. commentController).
+    if (!decoded.id || decoded.isAnonymous) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized - Account login required" });
+    }
+
     // console.log("✅ [verifyToken] Token decoded successfully:", {
     //   id: decoded.id,
     //   role: decoded.role,
@@ -271,7 +282,7 @@ export const verifyToken = (
       id: decoded.id,
       role: decoded.role,
       name: decoded.name,
-      isAnonymous: decoded.isAnonymous || false,
+      isAnonymous: false,
     };
 
     // console.log("✅ [verifyToken] req.auth set:", req.auth);

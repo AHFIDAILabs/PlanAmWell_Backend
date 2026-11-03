@@ -12,7 +12,7 @@ import {
   updateCommentStatus,
   getCommentStats,
 } from "../controllers/commentController";
-import { verifyToken, authorize, guestAuth } from "../middleware/auth";
+import { verifyToken, authorize, guestAuth, hydrateUser } from "../middleware/auth";
 
 const commentRouter = express.Router();
 
@@ -29,17 +29,24 @@ commentRouter.get("/comments/:commentId/replies", getCommentReplies);
 // Add a comment (requires authentication)
 commentRouter.post("/:articleId/comments", guestAuth, addComment);
 
-// Edit a comment (requires authentication)
-commentRouter.put("/comments/:commentId", guestAuth, verifyToken, editComment);
+// Edit a comment (requires authentication). hydrateUser populates req.user
+// (the controller's ownership check reads req.user, not req.auth) — without
+// it every call crashed with a raw 500 (`user._id` on undefined) regardless
+// of whether the caller was actually authenticated.
+commentRouter.put("/comments/:commentId", guestAuth, verifyToken, hydrateUser, editComment);
 
-// Delete a comment (requires authentication)
-commentRouter.delete("/comments/:commentId", guestAuth, verifyToken, deleteComment);
+// Delete a comment (requires authentication) — same req.user fix as above.
+commentRouter.delete("/comments/:commentId", guestAuth, verifyToken, hydrateUser, deleteComment);
 
-// Like/Unlike a comment (requires authentication)
-commentRouter.post("/comments/:commentId/like", guestAuth, verifyToken, toggleCommentLike);
+// Like/Unlike a comment (requires authentication) — same req.user fix;
+// previously always hit the controller's own "Authentication required" 401
+// even for valid logged-in callers, since req.user was never populated.
+commentRouter.post("/comments/:commentId/like", guestAuth, verifyToken, hydrateUser, toggleCommentLike);
 
-// Flag a comment
-commentRouter.post("/comments/:commentId/flag", flagComment);
+// Flag a comment — the controller already requires req.user and rejects
+// with 401 otherwise, but nothing here ever decoded a token to populate it,
+// so every flag attempt failed. Gate it the same way the routes above do.
+commentRouter.post("/comments/:commentId/flag", guestAuth, verifyToken, hydrateUser, flagComment);
 
 // =====================================================
 // ADMIN ROUTES

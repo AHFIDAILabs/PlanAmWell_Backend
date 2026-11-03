@@ -302,6 +302,15 @@ export const getAdminOrders = asyncHandler(async (_req: Request, res: Response) 
   res.status(200).json({ success: true, data: orders });
 });
 
+// ------------------- Get One Order (Admin) -------------------
+export const getAdminOrderById = asyncHandler(async (req: Request, res: Response) => {
+  const order = await Order.findById(req.params.orderId).lean();
+  if (!order) {
+    return res.status(404).json({ success: false, message: "Order not found" });
+  }
+  res.status(200).json({ success: true, data: order });
+});
+
 // ------------------- Refresh Delivery Status from Partner (Admin) -------------------
 export const getAdminOrderDelivery = asyncHandler(async (req: Request, res: Response) => {
   const { orderId } = req.params;

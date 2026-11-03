@@ -257,9 +257,12 @@ export const deleteComment = asyncHandler(async (req: Request, res: Response) =>
     });
   }
 
-  // Check ownership or admin role
+  // Check ownership or admin role. req.auth.role (set by verifyToken/
+  // guestAuth from the JWT itself) is the reliable signal here — the Admin
+  // model has no `.roles` array the way User/Doctor do, so `user.roles`
+  // was always undefined for a real admin and this check never passed.
   const isOwner = comment.userId?.toString() === user._id.toString();
-  const isAdmin = user.roles?.includes("Admin");
+  const isAdmin = (req as any).auth?.role === "Admin";
 
   if (!isOwner && !isAdmin) {
     return res.status(403).json({

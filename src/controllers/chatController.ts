@@ -565,6 +565,15 @@ export const markAsRead = asyncHandler(
         .json({ success: false, message: "Conversation not found" });
     }
 
+    // Verify access — same check sendMessage/getMessages already do;
+    // without it, anyone who knows a conversationId could reset its unread
+    // count and flip other people's messages to "read".
+    const doctorId = String(conversation.participants.doctorId);
+    const patientId = String(conversation.participants.userId);
+    if (userId !== doctorId && userId !== patientId) {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
     const unreadField = role === "Doctor" ? "doctor" : "user";
     conversation.unreadCount[unreadField] = 0;
 
@@ -598,6 +607,7 @@ export const updateTyping = asyncHandler(
   async (req: Request, res: Response) => {
     const { conversationId } = req.params;
     const { isTyping } = req.body;
+    const userId = req.auth?.id;
     const role = req.auth?.role;
 
     const conversation = await Conversation.findById(conversationId);
@@ -606,6 +616,15 @@ export const updateTyping = asyncHandler(
       return res
         .status(404)
         .json({ success: false, message: "Conversation not found" });
+    }
+
+    // Verify access — same check sendMessage/getMessages already do;
+    // without it, anyone who knows a conversationId could emit fake typing
+    // events into someone else's chat.
+    const doctorId = String(conversation.participants.doctorId);
+    const patientId = String(conversation.participants.userId);
+    if (userId !== doctorId && userId !== patientId) {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
     const recipientId =

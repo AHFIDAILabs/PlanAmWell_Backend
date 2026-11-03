@@ -108,6 +108,21 @@ export const initiatePayment = asyncHandler(
       });
     }
 
+    // Ownership check — without this, any caller who knows/guesses an
+    // orderId could start (and even complete) a payment flow against
+    // someone else's order, same pattern as orderController.getOrder.
+    const authSessionId = req.auth?.sessionId;
+    const authUserId = req.auth?.id;
+    const isOwner =
+      (authUserId && order.userId?.toString() === authUserId.toString()) ||
+      (authSessionId && order.sessionId === authSessionId);
+    if (!isOwner && req.auth?.role !== "Admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden - Not your order",
+      });
+    }
+
     /** ------------------ 3. Validate order state ------------------ */
     if (order.paymentStatus !== "pending") {
       return res.status(422).json({
@@ -563,9 +578,21 @@ export const getPaymentByOrder = asyncHandler(async (req: Request, res: Response
 
   console.log("[getPaymentByOrder] Looking up orderId:", orderId, "| type:", typeof orderId);
 
-  // Debug: show ALL payments to confirm record exists
-  // const allPayments = await Payment.find({}).select("orderId paymentReference status").lean();
-  // console.log("[getPaymentByOrder] All payments in DB:", JSON.stringify(allPayments, null, 2));
+  // Ownership check — without this, anyone who knows/guesses an orderId
+  // could read another user's payment metadata (amount, checkoutUrl,
+  // transactionId), same pattern as orderController.getOrder.
+  const order = await Order.findById(orderId);
+  if (!order) {
+    return res.status(404).json({ success: false, message: "Order not found" });
+  }
+  const authSessionId = req.auth?.sessionId;
+  const authUserId = req.auth?.id;
+  const isOwner =
+    (authUserId && order.userId?.toString() === authUserId.toString()) ||
+    (authSessionId && order.sessionId === authSessionId);
+  if (!isOwner && req.auth?.role !== "Admin") {
+    return res.status(403).json({ success: false, message: "Forbidden - Not your order" });
+  }
 
   // Sorted — an order can now have more than one Payment record (a failed
   // attempt no longer blocks retrying, see initiatePayment's idempotency

@@ -70,17 +70,62 @@ export const getOrder = asyncHandler(async (req: Request, res: Response) => {
 export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   const {
     items,
-    subtotal,
-    shippingFee = 0,
-    total,
+    shippingFee,
     discreetPackaging = false,
     shippingAddress,
   } = req.body;
 
-  const userId = req.user?.userId || undefined;
-  const sessionId = userId ? undefined : req.user?.sessionId;
+  // ✅ Use req.auth (set by guestAuth) instead of req.user, which nothing on
+  // this route ever populated — every order previously had userId/sessionId
+  // silently undefined regardless of who was actually calling.
+  const userId = req.auth?.id || undefined;
+  const sessionId = userId ? undefined : req.auth?.sessionId;
 
-  
+  if (!Array.isArray(items) || items.length === 0) {
+    res.status(400);
+    throw new Error("At least one item is required");
+  }
+
+  // Price is never trusted from the client — every item's price (and the
+  // resulting subtotal) is looked up fresh from the Product collection here.
+  // A client that submitted a fabricated subtotal/total previously got
+  // exactly that amount charged; this closes that gap the same way
+  // checkoutController.checkout already prices from the server-side cart.
+  const resolvedItems: IOrderItem[] = [];
+  const productLookups = new Map<string, any>();
+  let subtotal = 0;
+
+  for (const item of items) {
+    const qty = Math.max(1, Math.floor(Number(item?.qty) || 0));
+    if (!item?.productId || qty < 1) {
+      res.status(400);
+      throw new Error("Each item requires a valid productId and quantity");
+    }
+
+    let product = productLookups.get(item.productId);
+    if (!product) {
+      product = await Product.findById(item.productId);
+      if (!product) {
+        res.status(400);
+        throw new Error(`Product not found for id: ${item.productId}`);
+      }
+      productLookups.set(item.productId, product);
+    }
+
+    subtotal += product.price * qty;
+    resolvedItems.push({
+      productId: item.productId,
+      name: product.name,
+      sku: product.sku,
+      qty,
+      price: product.price,
+      dosage: item.dosage || "",
+      specialInstructions: item.specialInstructions || "",
+    });
+  }
+
+  const safeShippingFee = typeof shippingFee === "number" && shippingFee >= 0 ? shippingFee : 0;
+
 let partnerUserId: string | undefined;
 if (userId) {
   const user = await User.findById(userId);
@@ -95,10 +140,10 @@ if (userId) {
     orderNumber: uuidv4(),
     userId,
     sessionId,
-    items,
+    items: resolvedItems,
     subtotal,
-    shippingFee,
-    total,
+    shippingFee: safeShippingFee,
+    total: subtotal + safeShippingFee,
     discreetPackaging,
     shippingAddress,
     paymentStatus: "pending",
@@ -123,21 +168,17 @@ if (userId) {
   }
 
  
-  // --- Sync with Partner API ---
-const apiItems = await Promise.all(
-  items.map(async (item: IOrderItem) => {
-    const product = await Product.findById(item.productId);
-    if (!product) {
-      throw new Error(`Product not found for id: ${item.productId}`);
-    }
+  // --- Sync with Partner API — reuses the lookups already done above
+  // instead of re-fetching the same products again. ---
+  const apiItems = resolvedItems.map((item) => {
+    const product = productLookups.get(item.productId);
     return {
       drugId: product.partnerProductId, // ✅ Partner UUID, not Mongo ObjectId
       quantity: item.qty,
       dosage: item.dosage || "",
       special_instructions: item.specialInstructions || "",
     };
-  })
-);
+  });
 
 const apiPayload = {
   userId: partnerUserId || undefined,
@@ -189,15 +230,18 @@ export const updateOrder = asyncHandler(async (req: Request, res: Response) => {
     throw new Error("Order not found");
   }
 
-  // Only trust sessionId from the auth token — never from request body
-  const sessionId = req.user?.sessionId;
-  const userId = req.user?.userId;
+  // Only trust sessionId/userId from the auth token — never from request
+  // body. Was reading req.user, which nothing on this route ever populated
+  // (same dead pattern fixed for createOrder/getOrder), so this route
+  // rejected every caller regardless of actual ownership.
+  const sessionId = req.auth?.sessionId;
+  const userId = req.auth?.id;
 
   const isOwner =
     (userId && order.userId?.toString() === userId.toString()) ||
     (sessionId && order.sessionId === sessionId);
 
-  if (!isOwner && req.user?.role !== "Admin") {
+  if (!isOwner && req.auth?.role !== "Admin") {
     res.status(403);
     throw new Error("Forbidden");
   }
