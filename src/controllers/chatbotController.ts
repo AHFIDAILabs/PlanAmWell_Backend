@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import OpenAI from 'openai';
+import axios from 'axios';
 
 import { Product } from '../models/product';
 import { ChatConversation, IMessage } from '../models/ChatConversation';
@@ -46,6 +47,94 @@ const FOLLOW_UP_PROMPTS: Record<ChatbotLanguage, string> = {
     pcm: 'You wan know more?',
 };
 
+// --- TRUSTED MEDICAL SEARCH ---
+// Groq's own built-in "browser_search" tool (powered by Exa) has no domain
+// filtering at all — it searches the open web, which is unacceptable for a
+// medical chatbot since general health content online is frequently wrong or
+// outdated. This calls Exa's API directly instead, specifically so we can
+// pass includeDomains and keep the model grounded in sources we trust,
+// rather than whatever ranks highest in open web search.
+const EXA_API_KEY = process.env.EXA_API_KEY || '';
+
+const TRUSTED_MEDICAL_DOMAINS = [
+    'who.int',
+    'cdc.gov',
+    'nih.gov',
+    'ncbi.nlm.nih.gov',
+    'medlineplus.gov',
+    'mayoclinic.org',
+    'clevelandclinic.org',
+    'thelancet.com',
+    'acog.org',
+    'nhs.uk',
+    'merckmanuals.com',
+    'msdmanuals.com',
+];
+
+// Only ever pass a short, general informational query here — never the raw
+// user message, a user's name, or any account/appointment/order detail. Exa
+// is explicitly NOT a HIPAA-covered service on our (non-Enterprise) plan, so
+// nothing identifiable or patient-specific may be sent to it.
+const searchTrustedMedicalSources = async (query: string): Promise<string> => {
+    if (!EXA_API_KEY) {
+        return 'Search is currently unavailable (not configured). Answer from your own knowledge, and if you are unsure, say so and recommend the user confirm with a doctor or check an authoritative source themselves.';
+    }
+
+    try {
+        const response = await axios.post(
+            'https://api.exa.ai/search',
+            {
+                query,
+                type: 'auto',
+                numResults: 5,
+                includeDomains: TRUSTED_MEDICAL_DOMAINS,
+                contents: { text: { maxCharacters: 600 }, highlights: true },
+            },
+            {
+                headers: { 'x-api-key': EXA_API_KEY, 'Content-Type': 'application/json' },
+                timeout: 8000,
+            }
+        );
+
+        const results = response.data?.results || [];
+        if (results.length === 0) {
+            return 'No results found on trusted medical sources for this query. Answer from your own knowledge with appropriate caution, or recommend the user see a doctor.';
+        }
+
+        return results
+            .map((r: any, i: number) => {
+                const snippet = r.text || (Array.isArray(r.highlights) ? r.highlights.join(' ') : '') || '';
+                return `${i + 1}. ${r.title || 'Untitled'} (${r.url})\n${snippet}`;
+            })
+            .join('\n\n');
+    } catch (err: any) {
+        console.error('[searchTrustedMedicalSources] Exa search failed:', err.response?.data || err.message);
+        return 'Search failed due to a technical error. Answer from your own knowledge with appropriate caution, or recommend the user see a doctor or check an authoritative source themselves.';
+    }
+};
+
+const CHATBOT_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
+    {
+        type: 'function',
+        function: {
+            name: 'search_trusted_medical_sources',
+            description:
+                'Search a curated set of authoritative medical sources (WHO, CDC, NIH, PubMed, MedlinePlus, Mayo Clinic, Cleveland Clinic, The Lancet, ACOG, NHS, Merck/MSD Manuals) for current medical information. Use this when you are unsure about a medical fact, a term/condition you do not recognize, or a guideline that may have changed or been updated after your training — especially before telling a user that something "is not a recognized condition". Do not use it for greetings, product questions, or anything unrelated to medical facts.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: {
+                        type: 'string',
+                        description:
+                            'A short, general search query (e.g. a condition or term name). Never include the user\'s name or any personal/account details.',
+                    },
+                },
+                required: ['query'],
+            },
+        },
+    },
+];
+
 export const getGPTResponse = async (
     userPrompt: string,
     history: any[] = [],
@@ -77,7 +166,17 @@ SCOPE:
 - Suggest relevant PlanAmWell products for product questions.
 - Guide users to book a doctor consultation on the app for appointment needs.
 - Medical emergency: tell them to call emergency services or go to a hospital immediately.
-- Never provide diagnoses — always recommend seeing a doctor.`
+- Never provide diagnoses — always recommend seeing a doctor.
+
+KNOWN TERMINOLOGY UPDATE (treat as established fact, not a mix-up):
+- In May 2026, a global consensus process published in The Lancet (Teede et al.) formally renamed PCOS (Polycystic Ovary Syndrome) to PMOS (Polyendocrine Metabolic Ovarian Syndrome), updating the 2023 International Evidence-Based Guideline. Both names refer to the same condition and "PCOS" is still in common use during a multi-year transition — if a user mentions PMOS, recognize it as the current name for PCOS rather than saying it's unrecognized.
+
+HUMILITY ON TERMINOLOGY:
+- Medical terminology and guidelines change over time, and your own knowledge has a cutoff. If a user mentions a term you don't recognize as a reproductive/sexual health condition, don't flatly declare it doesn't exist — use the search_trusted_medical_sources tool to check before answering, rather than confidently dismissing it as a mistake.
+
+TOOL USE:
+- You have a search_trusted_medical_sources tool that searches authoritative medical sources. Use it whenever you're unsure about a medical fact, a term/condition you don't recognize, or whether a guideline has changed — not for every message, only when your own knowledge is genuinely uncertain.
+- After searching, base your answer on what the search returned, and keep it in your own words, short and in the required reply language — don't just paste the search results.`
     };
 
     const formattedHistory: OpenAI.Chat.ChatCompletionMessageParam[] = history.slice(-6).map(msg => ({
@@ -96,9 +195,45 @@ SCOPE:
         messages,
         temperature: 0.7,
         max_tokens: 500,
+        tools: CHATBOT_TOOLS,
+        tool_choice: 'auto',
     });
 
-    return completion.choices[0].message?.content || 'I am having trouble connecting right now. Please try again.';
+    const responseMessage = completion.choices[0].message;
+    const toolCalls = responseMessage?.tool_calls;
+
+    if (!toolCalls || toolCalls.length === 0) {
+        return responseMessage?.content || 'I am having trouble connecting right now. Please try again.';
+    }
+
+    // Only function-type tool calls exist here (CHATBOT_TOOLS defines just
+    // one), but each is still resolved defensively rather than assumed.
+    const toolResultMessages: OpenAI.Chat.ChatCompletionMessageParam[] = await Promise.all(
+        toolCalls.map(async (call): Promise<OpenAI.Chat.ChatCompletionMessageParam> => {
+            let resultText = 'This tool is not available.';
+            if (call.type === 'function' && call.function.name === 'search_trusted_medical_sources') {
+                try {
+                    const args = JSON.parse(call.function.arguments || '{}');
+                    resultText = await searchTrustedMedicalSources(String(args.query || userPrompt));
+                } catch (err) {
+                    resultText = 'Could not parse the search request. Answer from your own knowledge with appropriate caution.';
+                }
+            }
+            return { role: 'tool' as const, tool_call_id: call.id, content: resultText };
+        })
+    );
+
+    // Second, tool-free pass — forces a final natural-language answer
+    // instead of letting the model chain further tool calls, which would add
+    // unbounded latency/cost for a chat reply that needs to feel instant.
+    const followUp = await groq.chat.completions.create({
+        model: 'openai/gpt-oss-120b',
+        messages: [...messages, responseMessage, ...toolResultMessages],
+        temperature: 0.7,
+        max_tokens: 500,
+    });
+
+    return followUp.choices[0].message?.content || 'I am having trouble connecting right now. Please try again.';
 };
 
 export const transcribeAudio = [
