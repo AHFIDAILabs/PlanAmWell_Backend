@@ -22,7 +22,14 @@ const orderRouter = Router();
  * client — see createOrder, which recomputes subtotal/total server-side.
  */
 orderRouter.post("/", guestAuth, createOrder);
-orderRouter.get("/:id/delivery-status", refreshDeliveryStatus);
+/**
+ * USER/SESSION OWNER - actively re-check delivery status with the partner.
+ * Had no auth middleware at all before — req.auth was always undefined, so
+ * refreshDeliveryStatus's ownership check always failed closed for every
+ * caller including the real owner. guestAuth lets both guest sessions and
+ * logged-in users populate req.auth without forcing a login.
+ */
+orderRouter.get("/:id/delivery-status", guestAuth, refreshDeliveryStatus);
 
 /**
  * USER - list their own orders. Must be registered before "/:id" —

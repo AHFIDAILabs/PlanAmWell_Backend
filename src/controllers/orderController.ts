@@ -349,6 +349,20 @@ export const refreshDeliveryStatus = asyncHandler(
       return res.status(404).json({ message: "Order not found" });
     }
 
+    // Ownership check — this route had none at all (not even guestAuth was
+    // applied), so anyone who knew/guessed an orderId could pull another
+    // user's delivery status and address-adjacent partner response data,
+    // and could trigger a live partner lookup that overwrites deliveryStatus
+    // in the DB. Same pattern as the getOrder/payment ownership checks.
+    const authSessionId = req.auth?.sessionId;
+    const authUserId = req.auth?.id;
+    const isOwner =
+      (authUserId && order.userId?.toString() === authUserId.toString()) ||
+      (authSessionId && order.sessionId === authSessionId);
+    if (!isOwner && req.auth?.role !== "Admin") {
+      return res.status(403).json({ message: "Forbidden - Not your order" });
+    }
+
  const code = order.partnerOrderCode || order.partnerOrderId;
 
 if (!code) {
